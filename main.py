@@ -27,6 +27,7 @@ def create_visualization(env: Environment):
     )
 
     # Enable mouse controls for rotation, zoom, and pan
+    scene.up = vector(0, 0, 1)
     scene.userspin = True  # Right-click drag to rotate
     scene.userzoom = True  # Scroll wheel to zoom
     scene.userpan = True  # Shift + drag to pan
@@ -36,6 +37,14 @@ def create_visualization(env: Environment):
         pos=vector(0, 0, 0),
         size=vector(env.cube_size, env.cube_size, env.cube_size),
         color=color.white,
+        opacity=0.1,
+    )
+
+    # Create a translucent XY plane at z=-5
+    xy_plane = box(
+        pos=vector(0, 0, -5),
+        size=vector(env.cube_size, env.cube_size, 0.01),
+        color=color.blue,
         opacity=0.1,
     )
 
@@ -55,7 +64,7 @@ def main():
     # Create the environment with default settings
     env = Environment(
         cube_size=10.0,
-        camera_position=np.array([8.0, 0.0, 0.0]),
+        camera_position=np.array([10.0, 0.0, 0.0]),
         camera_rotation=np.eye(3),
         focal_length=(800.0, 800.0),
         principal_point=(200.0, 200.0),

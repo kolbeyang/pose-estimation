@@ -64,18 +64,3 @@ class Environment:
             dtype=np.float64,
         )
         return corners
-
-    def snap_a_photo(self, points: np.ndarray) -> np.ndarray:
-        height, width = self.image_size
-        image = np.zeros((height, width), dtype=np.uint8)
-
-        image_points = self.world_to_image(points)
-
-        # Round to nearest pixel and filter points within image bounds
-        pixel_coords = np.round(image_points).astype(int)
-
-        for x, y in pixel_coords:
-            if 0 <= x < width and 0 <= y < height:
-                image[y, x] = 255
-
-        return image

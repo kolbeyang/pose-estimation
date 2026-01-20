@@ -5,7 +5,14 @@
       "WebSearch",
       "WebFetch(domain:www.glowscript.org)",
       "WebFetch(domain:vpython.org)",
-      "WebFetch(domain:guigui.developpez.com)"
+      "WebFetch(domain:guigui.developpez.com)",
+      "Bash(timeout 5 uv run:*)",
+      "Bash(pkill:*)",
+      "Bash(git mv:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(test:*)",
+      "Bash(python:*)"
     ]
   }
 }
