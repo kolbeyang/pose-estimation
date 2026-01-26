@@ -12,7 +12,12 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(test:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:mmhuman3d.readthedocs.io)",
+      "WebFetch(domain:pypi.org)",
+      "Bash(uv run:*)"
     ]
   }
 }

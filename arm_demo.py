@@ -1,24 +1,9 @@
 import numpy as np
-from vpython import (
-    canvas,
-    box,
-    sphere,
-    curve,
-    vector,
-    color,
-    rate,
-    wtext,
-    winput,
-    slider,
-    scene,
-)
+from vpython import box, sphere, curve, vector, color, rate, wtext, winput, slider, scene
 
-from arm import Arm
-
-
-def numpy_to_vpython(arr: np.ndarray) -> vector:
-    """Convert a numpy array to a VPython vector."""
-    return vector(float(arr[0]), float(arr[1]), float(arr[2]))
+from model.arm import Arm
+from model.environment import Environment
+from visualize import numpy_to_vpython, Visualizer
 
 
 # Global variables for the arm visualization objects
@@ -33,9 +18,9 @@ input_y = 0.0
 input_z = 0.0
 input_ab_azimuth = -np.pi / 6
 input_ab_elevation = np.pi / 4
+input_ab_roll = 0.0
 input_ab_length = 2.0
-input_bc_azimuth = np.pi / 2
-input_bc_elevation = np.pi / 3
+input_bc_theta = 0.0  # theta=0 -> perpendicular (90° bend)
 input_bc_length = 2.0
 
 
@@ -46,9 +31,9 @@ def update_arm():
     arm = Arm(
         a_pos=np.array([input_x, input_y, input_z]),
         a_b_length=input_ab_length,
-        a_b_polar=(input_ab_azimuth, input_ab_elevation),
+        a_b_polar=(input_ab_azimuth, input_ab_elevation, input_ab_roll),
         b_c_length=input_bc_length,
-        b_c_polar=(input_bc_azimuth, input_bc_elevation),
+        b_c_theta=input_bc_theta,
     )
 
     coords = arm.get_coordinates()
@@ -107,6 +92,12 @@ def on_ab_elevation_change(evt):
     update_arm()
 
 
+def on_ab_roll_change(evt):
+    global input_ab_roll
+    input_ab_roll = evt.value
+    update_arm()
+
+
 def on_ab_length_change(evt):
     global input_ab_length
     try:
@@ -116,15 +107,9 @@ def on_ab_length_change(evt):
         pass
 
 
-def on_bc_azimuth_change(evt):
-    global input_bc_azimuth
-    input_bc_azimuth = evt.value
-    update_arm()
-
-
-def on_bc_elevation_change(evt):
-    global input_bc_elevation
-    input_bc_elevation = evt.value
+def on_bc_theta_change(evt):
+    global input_bc_theta
+    input_bc_theta = evt.value
     update_arm()
 
 
@@ -153,11 +138,11 @@ def main():
     scene.userzoom = True
     scene.userpan = True
 
-    # Create the environment cube
-    cube_size = 10.0
+    # Create the environment
+    env = Environment(cube_size=10.0)
     box(
         pos=vector(0, 0, 0),
-        size=vector(cube_size, cube_size, cube_size),
+        size=vector(env.cube_size, env.cube_size, env.cube_size),
         color=color.white,
         opacity=0.1,
     )
@@ -165,7 +150,7 @@ def main():
     # Create a translucent XY plane at z=-5
     box(
         pos=vector(0, 0, -5),
-        size=vector(cube_size, cube_size, 0.01),
+        size=vector(env.cube_size, env.cube_size, 0.01),
         color=color.blue,
         opacity=0.1,
     )
@@ -178,9 +163,9 @@ def main():
     arm = Arm(
         a_pos=np.array([input_x, input_y, input_z]),
         a_b_length=input_ab_length,
-        a_b_polar=(input_ab_azimuth, input_ab_elevation),
+        a_b_polar=(input_ab_azimuth, input_ab_elevation, input_ab_roll),
         b_c_length=input_bc_length,
-        b_c_polar=(input_bc_azimuth, input_bc_elevation),
+        b_c_theta=input_bc_theta,
     )
 
     coords = arm.get_coordinates()
@@ -216,6 +201,9 @@ def main():
     wtext(text="Elevation: ")
     slider(bind=on_ab_elevation_change, min=-np.pi/2, max=np.pi/2, value=input_ab_elevation, length=200)
     scene.append_to_caption("\n")
+    wtext(text="Roll: ")
+    slider(bind=on_ab_roll_change, min=-np.pi, max=np.pi, value=input_ab_roll, length=200)
+    scene.append_to_caption("\n")
     wtext(text="Length: ")
     winput(bind=on_ab_length_change, text=str(input_ab_length), width=80)
 
@@ -223,18 +211,15 @@ def main():
 
     # BC segment inputs
     scene.append_to_caption("Segment B→C:\n")
-    wtext(text="Azimuth: ")
-    slider(bind=on_bc_azimuth_change, min=-np.pi, max=np.pi, value=input_bc_azimuth, length=200)
-    scene.append_to_caption("\n")
-    wtext(text="Elevation: ")
-    slider(bind=on_bc_elevation_change, min=-np.pi/2, max=np.pi/2, value=input_bc_elevation, length=200)
-    scene.append_to_caption("\n")
+    wtext(text="Theta (bend): ")
+    slider(bind=on_bc_theta_change, min=-np.pi/2, max=np.pi/2, value=input_bc_theta, length=200)
+    scene.append_to_caption("  (0=90° bend, π/2=straight)\n")
     wtext(text="Length: ")
     winput(bind=on_bc_length_change, text=str(input_bc_length), width=80)
 
     # Keep the visualization running
     while True:
-        rate(30)
+        rate(Visualizer.FPS)
 
 
 if __name__ == "__main__":
