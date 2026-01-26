@@ -4,8 +4,14 @@ GlowScript 3.2 VPython
 scene.background = color.gray(0.2)
 scene.up = vec(0, 0, 1)
 scene.forward = vec(-1, -0.5, -1)
-scene.range = 5
-scene.center = vec(-1, 0, 0)
+scene.range = 12
+scene.center = vec(0, 0, 0)
+
+# Environment cube (size 10, white, transparent)
+box(pos=vec(0, 0, 0), size=vec(10, 10, 10), color=color.white, opacity=0.1)
+
+# Camera position (red sphere)
+sphere(pos=vec(8, 0, 0), radius=0.3, color=color.red, opacity=0.2)
 
 # Frame data: ground truth (green) and predicted (red)
 gt_frames = [
@@ -54,42 +60,52 @@ pred_frames = [
     {"a": vec(0.589, 0.878, 0.781), "b": vec(2.143, 1.060, -0.464), "c": vec(0.608, 0.890, -1.734)},
 ]
 
-# Create ground truth arm (green)
-gt_a = sphere(pos=gt_frames[0]["a"], radius=0.15, color=color.green)
-gt_b = sphere(pos=gt_frames[0]["b"], radius=0.12, color=color.green)
-gt_c = sphere(pos=gt_frames[0]["c"], radius=0.09, color=color.green)
-gt_curve = curve(pos=[gt_frames[0]["a"], gt_frames[0]["b"], gt_frames[0]["c"]], radius=0.03, color=color.green)
+# Create ground truth arm (green) - sphere sizes: 0.4, 0.3, 0.2
+gt_a = sphere(pos=gt_frames[0]["a"], radius=0.4, color=color.green)
+gt_b = sphere(pos=gt_frames[0]["b"], radius=0.3, color=color.green)
+gt_c = sphere(pos=gt_frames[0]["c"], radius=0.2, color=color.green)
+gt_curve = curve(color=color.green, radius=0.05)
+gt_curve.append(gt_frames[0]["a"])
+gt_curve.append(gt_frames[0]["b"])
+gt_curve.append(gt_frames[0]["c"])
 
-# Create predicted arm (red)
-pred_a = sphere(pos=pred_frames[0]["a"], radius=0.15, color=color.red)
-pred_b = sphere(pos=pred_frames[0]["b"], radius=0.12, color=color.red)
-pred_c = sphere(pos=pred_frames[0]["c"], radius=0.09, color=color.red)
-pred_curve = curve(pos=[pred_frames[0]["a"], pred_frames[0]["b"], pred_frames[0]["c"]], radius=0.03, color=color.red)
+# Create predicted arm (red) - sphere sizes: 0.4, 0.3, 0.2
+pred_a = sphere(pos=pred_frames[0]["a"], radius=0.4, color=color.red)
+pred_b = sphere(pos=pred_frames[0]["b"], radius=0.3, color=color.red)
+pred_c = sphere(pos=pred_frames[0]["c"], radius=0.2, color=color.red)
+pred_curve = curve(color=color.red, radius=0.05)
+pred_curve.append(pred_frames[0]["a"])
+pred_curve.append(pred_frames[0]["b"])
+pred_curve.append(pred_frames[0]["c"])
 
 # Legend
 scene.append_to_caption("\n\nGreen = Ground Truth\nRed = Predicted\n")
 
 # Animation loop
-frame = 0
+frame_idx = 0
+num_frames = 20
+
 while True:
     rate(6)
 
-    # Update ground truth
-    gt_a.pos = gt_frames[frame]["a"]
-    gt_b.pos = gt_frames[frame]["b"]
-    gt_c.pos = gt_frames[frame]["c"]
-    gt_curve.clear()
-    gt_curve.append(gt_frames[frame]["a"])
-    gt_curve.append(gt_frames[frame]["b"])
-    gt_curve.append(gt_frames[frame]["c"])
+    # Update ground truth positions
+    gt_a.pos = gt_frames[frame_idx]["a"]
+    gt_b.pos = gt_frames[frame_idx]["b"]
+    gt_c.pos = gt_frames[frame_idx]["c"]
 
-    # Update predicted
-    pred_a.pos = pred_frames[frame]["a"]
-    pred_b.pos = pred_frames[frame]["b"]
-    pred_c.pos = pred_frames[frame]["c"]
-    pred_curve.clear()
-    pred_curve.append(pred_frames[frame]["a"])
-    pred_curve.append(pred_frames[frame]["b"])
-    pred_curve.append(pred_frames[frame]["c"])
+    # Update ground truth curve
+    gt_curve.modify(0, pos=gt_frames[frame_idx]["a"])
+    gt_curve.modify(1, pos=gt_frames[frame_idx]["b"])
+    gt_curve.modify(2, pos=gt_frames[frame_idx]["c"])
 
-    frame = (frame + 1) % 20
+    # Update predicted positions
+    pred_a.pos = pred_frames[frame_idx]["a"]
+    pred_b.pos = pred_frames[frame_idx]["b"]
+    pred_c.pos = pred_frames[frame_idx]["c"]
+
+    # Update predicted curve
+    pred_curve.modify(0, pos=pred_frames[frame_idx]["a"])
+    pred_curve.modify(1, pos=pred_frames[frame_idx]["b"])
+    pred_curve.modify(2, pos=pred_frames[frame_idx]["c"])
+
+    frame_idx = (frame_idx + 1) % num_frames
