@@ -8,6 +8,13 @@ from model.environment import Environment
 from video import Video
 from visualize import Visualizer
 
+IMAGE_WIDTH = 200
+IMAGE_HEIGHT = 200
+
+# Camera intrinsics
+FOCAL_LENGTH = (50.0, 50.0)
+PRINCIPAL_POINT = (IMAGE_WIDTH // 2, IMAGE_HEIGHT // 2)
+
 # Position velocity constants
 POS_VEL_MIN = -0.20
 POS_VEL_MAX = 0.20
@@ -43,7 +50,9 @@ def wrap(value: float, min_val: float, max_val: float) -> float:
 def main():
     parser = argparse.ArgumentParser(description="Arm motion simulation")
     parser.add_argument("-r", "--record", action="store_true", help="Record frames")
-    parser.add_argument("-n", "--max-frames", type=int, default=None, help="Max frames to record")
+    parser.add_argument(
+        "-n", "--max-frames", type=int, default=None, help="Max frames to record"
+    )
     args = parser.parse_args()
 
     # Initialize arm state
@@ -85,18 +94,22 @@ def main():
         b_c_length=b_c_length,
         b_c_theta=b_c_theta,
     )
-    coords = arm.get_coordinates()
+    coords = arm.get_coordinates_numpy()
 
     # Create video (always, for visualization camera marker)
-    video = Video(
-        camera_position=camera_position,
-        camera_rotation=camera_rotation,
-        focal_length=(50.0, 50.0),
-        principal_point=(50.0, 50.0),
-        image_size=(100, 100),
-        a_b_length=a_b_length,
-        b_c_length=b_c_length,
-    ) if args.record else None
+    video = (
+        Video(
+            camera_position=camera_position,
+            camera_rotation=camera_rotation,
+            focal_length=FOCAL_LENGTH,
+            principal_point=PRINCIPAL_POINT,
+            image_size=(IMAGE_WIDTH, IMAGE_HEIGHT),
+            a_b_length=a_b_length,
+            b_c_length=b_c_length,
+        )
+        if args.record
+        else None
+    )
 
     visualizer = Visualizer(env, [coords], camera=video)
 
@@ -167,7 +180,7 @@ def main():
             b_c_length=b_c_length,
             b_c_theta=b_c_theta,
         )
-        coords = arm.get_coordinates()
+        coords = arm.get_coordinates_numpy()
 
         visualizer.update([coords])
 

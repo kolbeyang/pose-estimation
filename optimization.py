@@ -4,9 +4,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from model.arm import Arm
 from model.environment import Environment
 from video import Video
-from visualize import Visualizer
 
 # Optimization hyperparameters
 NUM_STEPS = 50
@@ -58,63 +58,6 @@ def sample_heatmap(
     return sampled.squeeze()
 
 
-def compute_arm_coordinates(
-    a_pos: torch.Tensor,
-    a_b_polar: torch.Tensor,
-    b_c_theta: torch.Tensor,
-    a_b_length: float,
-    b_c_length: float,
-) -> dict[str, torch.Tensor]:
-    """Compute A, B, C coordinates from arm parameters (differentiable)."""
-    azimuth, elevation, roll = a_b_polar[0], a_b_polar[1], a_b_polar[2]
-
-    # B = A + AB_offset
-    ab_offset = torch.stack(
-        [
-            a_b_length * torch.cos(elevation) * torch.cos(azimuth),
-            a_b_length * torch.cos(elevation) * torch.sin(azimuth),
-            a_b_length * torch.sin(elevation),
-        ]
-    )
-    b_pos = a_pos + ab_offset
-
-    # Build local frame for BC direction (same logic as Arm class)
-    forward = torch.stack(
-        [
-            torch.cos(elevation) * torch.cos(azimuth),
-            torch.cos(elevation) * torch.sin(azimuth),
-            torch.sin(elevation),
-        ]
-    )
-
-    # Reference up (handle gimbal lock when AB is near vertical)
-    # Use a smooth approximation instead of hard threshold
-    world_up_z = torch.tensor([0.0, 0.0, 1.0])
-    world_up_y = torch.tensor([0.0, 1.0, 0.0])
-
-    # Blend between up vectors based on elevation
-    vertical_threshold = torch.tensor(np.pi / 2 - 0.01)
-    blend = torch.clamp(
-        (torch.abs(elevation) - vertical_threshold + 0.1) / 0.1, 0.0, 1.0
-    )
-    world_up = (1 - blend) * world_up_z + blend * world_up_y
-
-    # Build orthonormal frame
-    right = torch.linalg.cross(forward, world_up)
-    right = right / torch.norm(right)
-    up = torch.linalg.cross(right, forward)
-
-    # Apply roll rotation around forward axis
-    cos_r, sin_r = torch.cos(roll), torch.sin(roll)
-    up_rolled = cos_r * up + sin_r * right
-
-    # BC direction using theta
-    bc_direction = torch.sin(b_c_theta) * forward + torch.cos(b_c_theta) * up_rolled
-    c_pos = b_pos + b_c_length * bc_direction
-
-    return {"a": a_pos, "b": b_pos, "c": c_pos}
-
-
 def project_point_torch(
     point: torch.Tensor,
     camera_position: torch.Tensor,
@@ -144,9 +87,8 @@ def score(
     intrinsic_matrix: torch.Tensor,
 ) -> torch.Tensor:
     """Compute differentiable score (higher is better)."""
-    coords = compute_arm_coordinates(
-        a_pos, a_b_polar, b_c_theta, a_b_length, b_c_length
-    )
+    arm = Arm(a_pos, a_b_length, a_b_polar, b_c_length, b_c_theta)
+    coords = arm.get_coordinates()
 
     total = torch.tensor(0.0)
     for name in ["a", "b", "c"]:
@@ -162,43 +104,21 @@ def score(
     return total
 
 
-def compute_gt_score(
-    log_heatmaps: dict[str, torch.Tensor],
-    gt_arm,
-    camera_position: torch.Tensor,
-    camera_rotation: torch.Tensor,
-    intrinsic_matrix: torch.Tensor,
-) -> float:
-    """Compute score using ground truth arm parameters."""
-    a_pos = torch.tensor(gt_arm.a_pos, dtype=torch.float32)
-    a_b_polar = torch.tensor(list(gt_arm.a_b_polar), dtype=torch.float32)
-    b_c_theta = torch.tensor(gt_arm.b_c_theta, dtype=torch.float32)
-
-    with torch.no_grad():
-        s = score(
-            log_heatmaps,
-            a_pos,
-            a_b_polar,
-            b_c_theta,
-            gt_arm.a_b_length,
-            gt_arm.b_c_length,
-            camera_position,
-            camera_rotation,
-            intrinsic_matrix,
-        )
-    return s.item()
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Optimize arm parameters to fit heatmaps using PyTorch"
     )
     parser.add_argument("folder_path", help="Path to saved video folder")
     parser.add_argument(
-        "-v", "--visualize", action="store_true", help="Visualize results after optimization"
+        "-v",
+        "--visualize",
+        action="store_true",
+        help="Visualize results after optimization",
     )
     parser.add_argument(
-        "--graph", action="store_true", help="Show matplotlib graph of scores over frames"
+        "--graph",
+        action="store_true",
+        help="Show matplotlib graph of scores over frames",
     )
     args = parser.parse_args()
 
@@ -260,10 +180,14 @@ def main():
                 current_a_pos.detach().numpy(), dtype=torch.float32, requires_grad=True
             )
             a_b_polar = torch.tensor(
-                current_a_b_polar.detach().numpy(), dtype=torch.float32, requires_grad=True
+                current_a_b_polar.detach().numpy(),
+                dtype=torch.float32,
+                requires_grad=True,
             )
             b_c_theta = torch.tensor(
-                current_b_c_theta.detach().item(), dtype=torch.float32, requires_grad=True
+                current_b_c_theta.detach().item(),
+                dtype=torch.float32,
+                requires_grad=True,
             )
 
         # Optimizer for this frame
@@ -294,19 +218,27 @@ def main():
         current_a_b_polar = a_b_polar
         current_b_c_theta = b_c_theta
 
-        # Get final predicted coordinates
+        # Get final predicted coordinates and compute scores
         with torch.no_grad():
-            pred_coords = compute_arm_coordinates(
-                a_pos, a_b_polar, b_c_theta, a_b_length, b_c_length
-            )
-            pred_coords_np = {k: v.numpy() for k, v in pred_coords.items()}
-        all_pred_coords.append(pred_coords_np)
+            pred_arm = Arm(a_pos, a_b_length, a_b_polar, b_c_length, b_c_theta)
+            pred_coords_np = pred_arm.get_coordinates_numpy()
 
-        # Compute scores
-        gt_score = compute_gt_score(
-            log_heatmaps, gt_arm, camera_position, camera_rotation, intrinsic_matrix
-        )
-        with torch.no_grad():
+            gt_a_pos = torch.tensor(gt_arm.a_pos, dtype=torch.float32)
+            gt_a_b_polar = torch.tensor(list(gt_arm.a_b_polar), dtype=torch.float32)
+            gt_b_c_theta = torch.tensor(gt_arm.b_c_theta, dtype=torch.float32)
+
+            gt_score = score(
+                log_heatmaps,
+                gt_a_pos,
+                gt_a_b_polar,
+                gt_b_c_theta,
+                a_b_length,
+                b_c_length,
+                camera_position,
+                camera_rotation,
+                intrinsic_matrix,
+            ).item()
+
             pred_score = score(
                 log_heatmaps,
                 a_pos,
@@ -318,12 +250,18 @@ def main():
                 camera_rotation,
                 intrinsic_matrix,
             ).item()
+
+        all_pred_coords.append(pred_coords_np)
         all_gt_scores.append(gt_score)
         all_pred_scores.append(pred_score)
 
         # Print results
-        print(f"  Ground truth coords:  A={gt_coords['a']} B={gt_coords['b']} C={gt_coords['c']}")
-        print(f"  Predicted coords:     A={pred_coords_np['a']} B={pred_coords_np['b']} C={pred_coords_np['c']}")
+        print(
+            f"  Ground truth coords:  A={gt_coords['a']} B={gt_coords['b']} C={gt_coords['c']}"
+        )
+        print(
+            f"  Predicted coords:     A={pred_coords_np['a']} B={pred_coords_np['b']} C={pred_coords_np['c']}"
+        )
         print(f"  Ground truth score:   {gt_score:.4f}")
         print(f"  Predicted score:      {pred_score:.4f}")
 
@@ -348,17 +286,25 @@ def main():
     # Visualization with -v flag
     if args.visualize:
         from vpython import rate
+        from visualize import Visualizer
 
         env = Environment(cube_size=10.0)
-        visualizer = Visualizer(env, [all_gt_coords[0], all_pred_coords[0]], camera=video, fps=6)
+        visualizer = Visualizer(
+            env, [all_gt_coords[0], all_pred_coords[0]], camera=video, fps=6
+        )
         print("\nVisualization: green=ground truth, red=predicted")
         print("Animating through all frames...")
 
         # Animation loop
-        while True:
-            for i in range(num_frames):
-                rate(visualizer.fps)
-                visualizer.update([all_gt_coords[i], all_pred_coords[i]])
+        try:
+            while True:
+                for i in range(num_frames):
+                    rate(visualizer.fps)
+                    visualizer.update([all_gt_coords[i], all_pred_coords[i]])
+        except KeyboardInterrupt:
+            import os
+
+            os._exit(0)
 
 
 if __name__ == "__main__":

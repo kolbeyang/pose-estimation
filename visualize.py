@@ -3,13 +3,17 @@ import json
 import sys
 
 import numpy as np
+import torch
 from vpython import canvas, box, sphere, curve, vector, color, rate
 
 from model.arm import Arm
 from model.environment import Environment
 
 
-def numpy_to_vpython(arr: np.ndarray) -> vector:
+def to_vpython(arr: np.ndarray | torch.Tensor) -> vector:
+    """Convert numpy array or torch tensor to vpython vector."""
+    if isinstance(arr, torch.Tensor):
+        arr = arr.detach().numpy()
     return vector(float(arr[0]), float(arr[1]), float(arr[2]))
 
 
@@ -24,6 +28,8 @@ ARM_COLORS = [
 
 
 class Visualizer:
+    FPS = 12  # Default frames per second
+
     def __init__(self, env: Environment, coords_list: list[dict], camera=None, fps: int = 12):
         """
         Args:
@@ -54,7 +60,7 @@ class Visualizer:
 
         # Camera position (optional)
         if camera is not None:
-            camera_pos = numpy_to_vpython(camera.camera_position)
+            camera_pos = to_vpython(camera.camera_position)
             sphere(pos=camera_pos, radius=0.3, color=color.red, opacity=0.2)
 
         # Create visualization objects for each arm
@@ -64,19 +70,19 @@ class Visualizer:
             arm_color = ARM_COLORS[i % len(ARM_COLORS)]
 
             sphere_a = sphere(
-                pos=numpy_to_vpython(coords["a"]), radius=0.4, color=arm_color
+                pos=to_vpython(coords["a"]), radius=0.4, color=arm_color
             )
             sphere_b = sphere(
-                pos=numpy_to_vpython(coords["b"]), radius=0.3, color=arm_color
+                pos=to_vpython(coords["b"]), radius=0.3, color=arm_color
             )
             sphere_c = sphere(
-                pos=numpy_to_vpython(coords["c"]), radius=0.2, color=arm_color
+                pos=to_vpython(coords["c"]), radius=0.2, color=arm_color
             )
             arm_curve = curve(
                 pos=[
-                    numpy_to_vpython(coords["a"]),
-                    numpy_to_vpython(coords["b"]),
-                    numpy_to_vpython(coords["c"]),
+                    to_vpython(coords["a"]),
+                    to_vpython(coords["b"]),
+                    to_vpython(coords["c"]),
                 ],
                 radius=0.05,
                 color=arm_color,
@@ -90,17 +96,21 @@ class Visualizer:
                 break  # Skip if more coords than initialized arms
 
             sphere_a, sphere_b, sphere_c, arm_curve = self.arms[i]
-            sphere_a.pos = numpy_to_vpython(coords["a"])
-            sphere_b.pos = numpy_to_vpython(coords["b"])
-            sphere_c.pos = numpy_to_vpython(coords["c"])
+            sphere_a.pos = to_vpython(coords["a"])
+            sphere_b.pos = to_vpython(coords["b"])
+            sphere_c.pos = to_vpython(coords["c"])
             arm_curve.clear()
-            arm_curve.append(numpy_to_vpython(coords["a"]))
-            arm_curve.append(numpy_to_vpython(coords["b"]))
-            arm_curve.append(numpy_to_vpython(coords["c"]))
+            arm_curve.append(to_vpython(coords["a"]))
+            arm_curve.append(to_vpython(coords["b"]))
+            arm_curve.append(to_vpython(coords["c"]))
 
     def run(self):
-        while True:
-            rate(self.fps)
+        try:
+            while True:
+                rate(self.fps)
+        except KeyboardInterrupt:
+            import os
+            os._exit(0)
 
 
 def load_arm_from_json(filepath: str) -> Arm:

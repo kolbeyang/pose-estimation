@@ -3,7 +3,7 @@ from vpython import box, sphere, curve, vector, color, rate, wtext, winput, slid
 
 from model.arm import Arm
 from model.environment import Environment
-from visualize import numpy_to_vpython, Visualizer
+from visualize import to_vpython, Visualizer
 
 
 # Global variables for the arm visualization objects
@@ -36,10 +36,10 @@ def update_arm():
         b_c_theta=input_bc_theta,
     )
 
-    coords = arm.get_coordinates()
-    a_pos = numpy_to_vpython(coords["a"])
-    b_pos = numpy_to_vpython(coords["b"])
-    c_pos = numpy_to_vpython(coords["c"])
+    coords = arm.get_coordinates_numpy()
+    a_pos = to_vpython(coords["a"])
+    b_pos = to_vpython(coords["b"])
+    c_pos = to_vpython(coords["c"])
 
     # Update sphere positions
     arm_sphere_a.pos = a_pos
@@ -168,10 +168,10 @@ def main():
         b_c_theta=input_bc_theta,
     )
 
-    coords = arm.get_coordinates()
-    a_pos = numpy_to_vpython(coords["a"])
-    b_pos = numpy_to_vpython(coords["b"])
-    c_pos = numpy_to_vpython(coords["c"])
+    coords = arm.get_coordinates_numpy()
+    a_pos = to_vpython(coords["a"])
+    b_pos = to_vpython(coords["b"])
+    c_pos = to_vpython(coords["c"])
 
     # Create visualization objects
     arm_sphere_a = sphere(pos=a_pos, radius=0.4, color=color.green)

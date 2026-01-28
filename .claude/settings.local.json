@@ -17,7 +17,11 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:mmhuman3d.readthedocs.io)",
       "WebFetch(domain:pypi.org)",
-      "Bash(uv run:*)"
+      "Bash(uv run:*)",
+      "Bash(gh repo create:*)",
+      "Bash(cat:*)",
+      "Bash(git push)",
+      "Bash(ls:*)"
     ]
   }
 }

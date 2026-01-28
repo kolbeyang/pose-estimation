@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 
 import numpy as np
+import torch
 from PIL import Image
 
 from model.arm import Arm
@@ -138,7 +139,10 @@ class Video:
             b_c_theta=data["b_c_theta"],
         )
 
-    def world_to_image(self, point: np.ndarray) -> np.ndarray:
+    def world_to_image(self, point: np.ndarray | torch.Tensor) -> np.ndarray:
+        # Convert tensor to numpy if needed
+        if isinstance(point, torch.Tensor):
+            point = point.detach().numpy()
         point = np.asarray(point, dtype=np.float64)
         single_point = point.ndim == 1
 
