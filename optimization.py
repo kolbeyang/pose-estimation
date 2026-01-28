@@ -9,7 +9,7 @@ from model.environment import Environment
 from video import Video
 
 # Optimization hyperparameters
-NUM_STEPS = 50
+NUM_STEPS = 100
 LEARNING_RATE = 0.01
 EPSILON = 1e-10  # For log stability
 
@@ -197,7 +197,7 @@ def main():
         for step in range(NUM_STEPS):
             optimizer.zero_grad()
 
-            s = score(
+            log_likelihood = score(
                 log_heatmaps,
                 a_pos,
                 a_b_polar,
@@ -209,7 +209,7 @@ def main():
                 intrinsic_matrix,
             )
 
-            loss = -s
+            loss = -log_likelihood
             loss.backward()
             optimizer.step()
 

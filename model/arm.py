@@ -70,42 +70,25 @@ class Arm:
         """
         Build orthonormal local coordinate frame for AB segment.
 
-        Uses smooth blending for gimbal lock handling when AB is near vertical.
+        Computes columns of rotation matrix R = Rz(azimuth) @ Ry(elevation) @ Rx(roll).
+        Returns what local (x, y, z) axes map to in world coordinates.
 
         Returns:
-            forward: Unit vector along AB direction
-            up: Unit vector perpendicular to AB (after roll)
-            right: Unit vector perpendicular to both (after roll)
+            local_x: Unit vector along AB direction
+            local_y: Unit vector perpendicular to AB (after roll)
+            local_z: Unit vector perpendicular to both (after roll)
         """
-        # Compute AB direction (forward)
-        forward = torch.stack([
-            torch.cos(elevation) * torch.cos(azimuth),
-            torch.cos(elevation) * torch.sin(azimuth),
-            torch.sin(elevation)
-        ])
+        # Compute local axes using polar_to_offset with unit length
+        local_x = self._polar_to_offset(1.0, azimuth, elevation)
+        local_y_no_roll = self._polar_to_offset(1.0, azimuth + torch.pi / 2, elevation * 0)
+        local_z_no_roll = self._polar_to_offset(1.0, azimuth + torch.pi, torch.pi / 2 - elevation)
 
-        # Reference up vectors
-        world_up_z = torch.tensor([0.0, 0.0, 1.0], dtype=self._dtype)
-        world_up_y = torch.tensor([0.0, 1.0, 0.0], dtype=self._dtype)
-
-        # Smooth blend between up vectors based on elevation (avoids gimbal lock)
-        vertical_threshold = torch.tensor(np.pi / 2 - 0.01, dtype=self._dtype)
-        blend = torch.clamp(
-            (torch.abs(elevation) - vertical_threshold + 0.1) / 0.1, 0.0, 1.0
-        )
-        world_up = (1 - blend) * world_up_z + blend * world_up_y
-
-        # Build orthonormal frame
-        right = torch.linalg.cross(forward, world_up)
-        right = right / torch.norm(right)
-        up = torch.linalg.cross(right, forward)
-
-        # Apply roll rotation around forward axis
+        # Apply roll rotation around local_x axis
         cos_r, sin_r = torch.cos(roll), torch.sin(roll)
-        up_rolled = cos_r * up + sin_r * right
-        right_rolled = cos_r * right - sin_r * up
+        local_y = cos_r * local_y_no_roll + sin_r * local_z_no_roll
+        local_z = cos_r * local_z_no_roll - sin_r * local_y_no_roll
 
-        return forward, up_rolled, right_rolled
+        return local_x, local_y, local_z
 
     def get_coordinates(self) -> dict[str, torch.Tensor]:
         """Return coordinates as torch tensors."""
@@ -117,10 +100,10 @@ class Arm:
         b_pos = a_pos + a_b_offset
 
         # Calculate C position using local frame
-        # theta=0 -> BC perpendicular to AB (up direction)
-        # theta=π/2 -> BC aligned with AB (forward direction)
-        forward, up, right = self._build_local_frame(azimuth, elevation, roll)
-        bc_direction = torch.sin(self.b_c_theta) * forward + torch.cos(self.b_c_theta) * up
+        # theta=0 -> BC perpendicular to AB (local_y direction)
+        # theta=π/2 -> BC aligned with AB (local_x direction)
+        local_x, local_y, local_z = self._build_local_frame(azimuth, elevation, roll)
+        bc_direction = torch.sin(self.b_c_theta) * local_x + torch.cos(self.b_c_theta) * local_y
         c_pos = b_pos + self.b_c_length * bc_direction
 
         return {"a": a_pos, "b": b_pos, "c": c_pos}
