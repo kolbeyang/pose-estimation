@@ -96,7 +96,7 @@ def main():
     )
     coords = arm.get_coordinates_numpy()
 
-    # Create video (always, for visualization camera marker)
+    # Create video for recording (only when -r flag is set)
     video = (
         Video(
             camera_position=camera_position,
@@ -111,7 +111,8 @@ def main():
         else None
     )
 
-    visualizer = Visualizer(env, [coords], camera=video)
+    camera = video.camera if video else None
+    visualizer = Visualizer(env, [coords], camera=camera)
 
     if video:
         print(f"Recording to: {video.video_dir}")

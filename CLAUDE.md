@@ -29,11 +29,13 @@ arm_demo.py           # Interactive arm parameter demo
 Two-segment arm defined by:
 - `a_pos`: np.ndarray (x, y, z) - position of point A
 - `a_b_length`, `b_c_length`: segment lengths
-- `a_b_polar`, `b_c_polar`: tuple (azimuth, elevation) in radians
+- `a_b_polar`: tuple (azimuth, elevation, roll) in radians
+- `b_c_theta`: forearm bend angle in radians
 
 Polar coordinate convention:
 - Azimuth: rotation in XY plane, range [-π, π]
 - Elevation: angle from XY plane, range [-π/2, π/2]
+- Roll: rotation around the segment axis, range [-π, π]
 
 `get_coordinates()` returns dict with keys "a", "b", "c" as np.ndarray positions.
 

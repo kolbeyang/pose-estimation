@@ -4,9 +4,10 @@ import sys
 
 import numpy as np
 import torch
-from vpython import canvas, box, sphere, curve, vector, color, rate
+from vpython import canvas, box, sphere, curve, vector, color, rate, checkbox
 
 from model.arm import Arm
+from model.camera import Camera
 from model.environment import Environment
 
 
@@ -17,25 +18,36 @@ def to_vpython(arr: np.ndarray | torch.Tensor) -> vector:
     return vector(float(arr[0]), float(arr[1]), float(arr[2]))
 
 
-# Color palette for multiple arms (5 colors)
+# Color palette for multiple arms (6 colors)
 ARM_COLORS = [
-    color.green,  # Arm 0
-    color.red,  # Arm 1
-    color.blue,  # Arm 2
-    color.orange,  # Arm 3
-    color.purple,  # Arm 4
+    color.green,   # Arm 0 - Ground truth
+    color.yellow,  # Arm 1 - Initialization
+    color.red,     # Arm 2 - Predicted
+    color.blue,    # Arm 3
+    color.orange,  # Arm 4
+    color.purple,  # Arm 5
+]
+
+# Labels for arms (used in toggle checkboxes)
+ARM_LABELS = [
+    "Ground Truth",
+    "Initialization",
+    "Predicted",
+    "Arm 3",
+    "Arm 4",
+    "Arm 5",
 ]
 
 
 class Visualizer:
     FPS = 12  # Default frames per second
 
-    def __init__(self, env: Environment, coords_list: list[dict], camera=None, fps: int = 12):
+    def __init__(self, env: Environment, coords_list: list[dict], camera: Camera | None = None, fps: int = 12):
         """
         Args:
             env: Environment object defining the scene bounds
             coords_list: List of coordinate dicts, each with keys "a", "b", "c"
-            camera: Optional camera object for visualization
+            camera: Optional Camera object for visualization
             fps: Frames per second for animation (default: 12)
         """
         self.fps = fps
@@ -60,11 +72,12 @@ class Visualizer:
 
         # Camera position (optional)
         if camera is not None:
-            camera_pos = to_vpython(camera.camera_position)
+            camera_pos = to_vpython(camera.position)
             sphere(pos=camera_pos, radius=0.3, color=color.red, opacity=0.2)
 
         # Create visualization objects for each arm
         self.arms = []  # List of (sphere_a, sphere_b, sphere_c, curve) tuples
+        self.arm_visible = []  # Track visibility state for each arm
 
         for i, coords in enumerate(coords_list):
             arm_color = ARM_COLORS[i % len(ARM_COLORS)]
@@ -88,12 +101,41 @@ class Visualizer:
                 color=arm_color,
             )
             self.arms.append((sphere_a, sphere_b, sphere_c, arm_curve))
+            self.arm_visible.append(True)
+
+        # Create toggle checkboxes for each arm
+        self.scene.append_to_caption("\n\nToggle Arms:\n")
+        for i in range(len(coords_list)):
+            arm_label = ARM_LABELS[i] if i < len(ARM_LABELS) else f"Arm {i}"
+            checkbox(bind=self._make_toggle_handler(i), text=arm_label, checked=True)
+            self.scene.append_to_caption("  ")
+
+    def _make_toggle_handler(self, arm_index: int):
+        """Create a toggle handler for a specific arm index."""
+        def handler(evt):
+            self._set_arm_visible(arm_index, evt.checked)
+        return handler
+
+    def _set_arm_visible(self, arm_index: int, visible: bool):
+        """Set visibility for a specific arm."""
+        if arm_index >= len(self.arms):
+            return
+        self.arm_visible[arm_index] = visible
+        sphere_a, sphere_b, sphere_c, arm_curve = self.arms[arm_index]
+        sphere_a.visible = visible
+        sphere_b.visible = visible
+        sphere_c.visible = visible
+        arm_curve.visible = visible
 
     def update(self, coords_list: list[dict]):
-        """Update positions for all arms."""
+        """Update positions for all arms (only updates visible arms)."""
         for i, coords in enumerate(coords_list):
             if i >= len(self.arms):
                 break  # Skip if more coords than initialized arms
+
+            # Skip update if arm is hidden (optimization)
+            if not self.arm_visible[i]:
+                continue
 
             sphere_a, sphere_b, sphere_c, arm_curve = self.arms[i]
             sphere_a.pos = to_vpython(coords["a"])

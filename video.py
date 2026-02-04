@@ -8,6 +8,7 @@ import torch
 from PIL import Image
 
 from model.arm import Arm
+from model.camera import Camera
 
 # Heatmap constants
 HEATMAP_POINT_STD = 3.0  # pixels (standard deviation for Gaussian blobs)
@@ -26,20 +27,16 @@ class Video:
         b_c_length: float,
         output_dir: str = "images",
     ):
-        self.camera_position = camera_position.astype(np.float64)
-        self.camera_rotation = camera_rotation.astype(np.float64)
-        self.focal_length = focal_length
-        self.principal_point = principal_point
-        self.image_size = image_size
+        # Create Camera object
+        self._camera = Camera(
+            position=camera_position,
+            rotation=camera_rotation,
+            focal_length=focal_length,
+            principal_point=principal_point,
+            image_size=image_size,
+        )
         self.a_b_length = a_b_length
         self.b_c_length = b_c_length
-
-        # Build intrinsic matrix
-        fx, fy = focal_length
-        cx, cy = principal_point
-        self.K = np.array(
-            [[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float64
-        )
 
         self.frame_count = 0
 
@@ -57,20 +54,49 @@ class Video:
         os.makedirs(self.frames_c_dir, exist_ok=True)
         os.makedirs(self.frames_data_dir, exist_ok=True)
 
-        # Save simulation configuration
-        config = {
-            "camera_position": self.camera_position.tolist(),
-            "camera_rotation": self.camera_rotation.tolist(),
-            "focal_length": list(self.focal_length),
-            "principal_point": list(self.principal_point),
-            "image_size": list(self.image_size),
-            "a_b_length": a_b_length,
-            "b_c_length": b_c_length,
-        }
+        # Save simulation configuration (using Camera.to_dict for camera params)
+        config = self._camera.to_dict()
+        config["a_b_length"] = a_b_length
+        config["b_c_length"] = b_c_length
         with open(
             os.path.join(self.video_dir, "simulation-configuration.json"), "w"
         ) as f:
             json.dump(config, f, indent=2)
+
+    @property
+    def camera(self) -> Camera:
+        """Return the Camera object."""
+        return self._camera
+
+    @property
+    def camera_position(self) -> np.ndarray:
+        """Backward-compatible access to camera position."""
+        return self._camera.position
+
+    @property
+    def camera_rotation(self) -> np.ndarray:
+        """Backward-compatible access to camera rotation."""
+        return self._camera.rotation
+
+    @property
+    def focal_length(self) -> tuple[float, float]:
+        """Backward-compatible access to focal length."""
+        return self._camera.focal_length
+
+    @property
+    def principal_point(self) -> tuple[float, float]:
+        """Backward-compatible access to principal point."""
+        return self._camera.principal_point
+
+    @property
+    def image_size(self) -> tuple[int, int]:
+        """Backward-compatible access to image size."""
+        return self._camera.image_size
+
+    @property
+    def K(self) -> np.ndarray:
+        """Backward-compatible access to intrinsic matrix."""
+        return self._camera.K
 
     @classmethod
     def load(cls, folder_path: str) -> "Video":
@@ -83,21 +109,10 @@ class Video:
         # Create a new instance without initializing directories
         video = object.__new__(cls)
 
-        # Set attributes from config
-        video.camera_position = np.array(config["camera_position"], dtype=np.float64)
-        video.camera_rotation = np.array(config["camera_rotation"], dtype=np.float64)
-        video.focal_length = tuple(config.get("focal_length", (50.0, 50.0)))
-        video.principal_point = tuple(config.get("principal_point", (50.0, 50.0)))
-        video.image_size = tuple(config.get("image_size", (100, 100)))
+        # Create Camera from config
+        video._camera = Camera.from_dict(config)
         video.a_b_length = config["a_b_length"]
         video.b_c_length = config["b_c_length"]
-
-        # Build intrinsic matrix
-        fx, fy = video.focal_length
-        cx, cy = video.principal_point
-        video.K = np.array(
-            [[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float64
-        )
 
         # Set directory paths
         video.video_dir = folder_path
@@ -140,23 +155,8 @@ class Video:
         )
 
     def world_to_image(self, point: np.ndarray | torch.Tensor) -> np.ndarray:
-        # Convert tensor to numpy if needed
-        if isinstance(point, torch.Tensor):
-            point = point.detach().numpy()
-        point = np.asarray(point, dtype=np.float64)
-        single_point = point.ndim == 1
-
-        if single_point:
-            point = point.reshape(1, 3)
-
-        points_camera = (self.camera_rotation @ (point - self.camera_position).T).T
-
-        points_homogeneous = (self.K @ points_camera.T).T
-        image_points = points_homogeneous[:, :2] / points_homogeneous[:, 2:3]
-
-        if single_point:
-            return image_points[0]
-        return image_points
+        """Delegate to Camera.world_to_image."""
+        return self._camera.world_to_image(point)
 
     def _generate_heatmap(
         self, x: float, y: float, height: int, width: int

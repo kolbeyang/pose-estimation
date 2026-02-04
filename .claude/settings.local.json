@@ -21,7 +21,12 @@
       "Bash(gh repo create:*)",
       "Bash(cat:*)",
       "Bash(git push)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(open \"http://vision.imar.ro/human3.6m/\")",
+      "Bash(open \"https://vcai.mpi-inf.mpg.de/3dhp-dataset/\")",
+      "Bash(open \"https://virtualhumans.mpi-inf.mpg.de/3DPW/\")",
+      "Bash(open \"https://google.github.io/aistplusplus_dataset/\")",
+      "Bash(open \"https://arxiv.org/abs/2112.13715\")"
     ]
   }
 }
