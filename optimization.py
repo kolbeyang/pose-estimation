@@ -158,47 +158,22 @@ def score_bc_rotation_change(arm0: Arm, arm1: Arm) -> torch.Tensor:
     return torch.sqrt(torch.sum(diff**2) + EPSILON)
 
 
-def compute_score_components(
-    all_log_heatmaps: list[dict[str, torch.Tensor]],
-    arms: list[Arm],
-    camera: Camera,
-) -> dict[str, float]:
-    """Compute individual score components for debugging (no gradients)."""
-    with torch.no_grad():
-        heatmap_total = 0.0
-        for i, arm in enumerate(arms):
-            heatmap_total += score_pose_against_heatmap(
-                all_log_heatmaps[i], arm, camera
-            ).item()
-
-        position_penalty = 0.0
-        ab_rotation_penalty = 0.0
-        bc_rotation_penalty = 0.0
-
-        for i in range(len(arms) - 1):
-            position_penalty += score_position_change(arms[i], arms[i + 1]).item()
-            ab_rotation_penalty += score_ab_rotation_change(arms[i], arms[i + 1]).item()
-            bc_rotation_penalty += score_bc_rotation_change(arms[i], arms[i + 1]).item()
-
-    return {
-        "heatmap": heatmap_total,
-        "position": position_penalty,
-        "ab_rotation": ab_rotation_penalty,
-        "bc_rotation": bc_rotation_penalty,
-    }
-
-
 def score(
     all_log_heatmaps: list[dict[str, torch.Tensor]],
     arms: list[Arm],
     camera: Camera,
     config: OptimizationConfig,
-) -> torch.Tensor:
+    return_components: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, dict[str, float]]:
     """
     Compute total score across all frames (higher is better).
 
+    Args:
+        return_components: If True, also return individual score components for logging.
+
     Returns:
-        Combined score: heatmap_score - motion_penalty
+        If return_components is False: Combined score tensor
+        If return_components is True: Tuple of (score tensor, components dict)
         (Use loss = -score for optimization)
     """
     assert len(all_log_heatmaps) == len(
@@ -231,7 +206,19 @@ def score(
         + config.bc_rotation_penalty_weight * bc_rotation_penalty
     )
 
-    return heatmap_total - motion_penalty
+    total_score = heatmap_total - motion_penalty
+
+    if return_components:
+        components = {
+            "heatmap": heatmap_total.item(),
+            "position": position_penalty.item(),
+            "ab_rotation": ab_rotation_penalty.item(),
+            "bc_rotation": bc_rotation_penalty.item(),
+            "weighted_motion": motion_penalty.item(),
+        }
+        return total_score, components
+
+    return total_score
 
 
 @dataclass
@@ -332,18 +319,19 @@ def run_optimization(
             for i in range(num_frames)
         ]
 
-        total_score = score(all_log_heatmaps, arms, camera, config)
+        should_log = (step + 1) % 20 == 0
+        result = score(all_log_heatmaps, arms, camera, config, return_components=should_log)
+
+        if should_log:
+            total_score, components = result
+        else:
+            total_score = result
+
         loss = -total_score
         loss.backward()
         optimizer.step()
 
-        if (step + 1) % 20 == 0:
-            components = compute_score_components(all_log_heatmaps, arms, camera)
-            weighted_motion = (
-                config.position_penalty_weight * components["position"]
-                + config.ab_rotation_penalty_weight * components["ab_rotation"]
-                + config.bc_rotation_penalty_weight * components["bc_rotation"]
-            )
+        if should_log:
             logger.info(
                 "Step %d: score=%.2f (heatmap=%.2f, pos=%.3f, ab=%.3f, bc=%.3f, weighted_motion=%.2f)",
                 step + 1,
@@ -352,7 +340,7 @@ def run_optimization(
                 components["position"],
                 components["ab_rotation"],
                 components["bc_rotation"],
-                weighted_motion,
+                components["weighted_motion"],
             )
 
     logger.info("Optimization complete.")
@@ -388,6 +376,8 @@ class EvaluationResult:
     pred_total_score: float
     gt_per_frame_scores: list[float]
     pred_per_frame_scores: list[float]
+    mpjpe: float  # Mean Per Joint Position Error
+    mpjpe_per_frame: list[float]  # MPJPE for each frame
 
 
 def evaluate_results(
@@ -415,6 +405,7 @@ def evaluate_results(
 
     gt_per_frame = []
     pred_per_frame = []
+    mpjpe_per_frame = []
 
     with torch.no_grad():
         for i in range(num_frames):
@@ -427,16 +418,29 @@ def evaluate_results(
             gt_per_frame.append(gt_score)
             pred_per_frame.append(pred_score)
 
+            # Compute per-frame MPJPE
+            gt_coords = opt_result.gt_arms[i].get_coordinates()
+            pred_coords = opt_result.pred_arms[i].get_coordinates()
+            frame_mpjpe = sum(
+                torch.norm(pred_coords[j] - gt_coords[j]).item()
+                for j in ["a", "b", "c"]
+            ) / 3
+            mpjpe_per_frame.append(frame_mpjpe)
+
         gt_total = score(all_log_heatmaps, opt_result.gt_arms, camera, config).item()
         pred_total = score(
             all_log_heatmaps, opt_result.pred_arms, camera, config
         ).item()
+
+    mpjpe = sum(mpjpe_per_frame) / len(mpjpe_per_frame)
 
     return EvaluationResult(
         gt_total_score=gt_total,
         pred_total_score=pred_total,
         gt_per_frame_scores=gt_per_frame,
         pred_per_frame_scores=pred_per_frame,
+        mpjpe=mpjpe,
+        mpjpe_per_frame=mpjpe_per_frame,
     )
 
 
@@ -484,32 +488,51 @@ def main():
     logger.info("Final results:")
     logger.info("Ground Truth score: %.4f", eval_result.gt_total_score)
     logger.info("Predicted score:    %.4f", eval_result.pred_total_score)
+    logger.info("MPJPE:              %.4f", eval_result.mpjpe)
 
     # Graph with --graph flag
     if args.graph:
         import matplotlib.pyplot as plt
 
         frames = list(range(video.get_frame_count()))
-        plt.figure(figsize=(10, 6))
-        plt.plot(
+        _fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+        # Left: Heatmap scores
+        ax1.plot(
             frames,
             eval_result.gt_per_frame_scores,
             color="green",
-            label="Ground truth",
+            label="Ground Truth",
             marker="o",
         )
-        plt.plot(
+        ax1.plot(
             frames,
             eval_result.pred_per_frame_scores,
             color="red",
             label="Predicted",
             marker="o",
         )
-        plt.xlabel("Frame")
-        plt.ylabel("Score")
-        plt.title("Ground Truth vs Predicted Scores")
-        plt.legend()
-        plt.grid(True, alpha=0.3)
+        ax1.set_xlabel("Frame")
+        ax1.set_ylabel("Heatmap Score")
+        ax1.set_title("Heatmap Scores per Frame")
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+        # Right: MPJPE
+        ax2.plot(
+            frames,
+            eval_result.mpjpe_per_frame,
+            color="red",
+            label="MPJPE",
+            marker="o",
+        )
+        ax2.set_xlabel("Frame")
+        ax2.set_ylabel("MPJPE (distance)")
+        ax2.set_title("MPJPE per Frame")
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+
+        plt.tight_layout()
         plt.show()
 
     # Visualization with -v flag
@@ -525,7 +548,7 @@ def main():
             env,
             [result.gt_coords[0], result.init_coords[0], result.pred_coords[0]],
             camera=video.camera,
-            fps=6,
+            fps=2,
         )
         logger.info(
             "Visualization: green=ground truth, yellow=initialization, red=predicted"
