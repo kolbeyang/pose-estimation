@@ -10,4 +10,5 @@ dependencies = [
     "opencv-python",
     "matplotlib>=3.10.8",
     "torch",
+    "tqdm>=4.67.3",
 ]

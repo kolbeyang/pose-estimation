@@ -26,7 +26,15 @@
       "Bash(open \"https://vcai.mpi-inf.mpg.de/3dhp-dataset/\")",
       "Bash(open \"https://virtualhumans.mpi-inf.mpg.de/3DPW/\")",
       "Bash(open \"https://google.github.io/aistplusplus_dataset/\")",
-      "Bash(open \"https://arxiv.org/abs/2112.13715\")"
+      "Bash(open \"https://arxiv.org/abs/2112.13715\")",
+      "WebFetch(domain:www.aihero.dev)",
+      "WebFetch(domain:alexop.dev)",
+      "Bash(chmod:*)",
+      "Bash(bash:*)",
+      "Bash(jq:*)",
+      "Bash(brew install:*)",
+      "Bash(/Users/kolbeyang/.claude/statusline.sh)",
+      "Bash(open:*)"
     ]
   }
 }

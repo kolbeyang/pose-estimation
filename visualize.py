@@ -42,14 +42,23 @@ ARM_LABELS = [
 class Visualizer:
     FPS = 12  # Default frames per second
 
-    def __init__(self, env: Environment, coords_list: list[dict], camera: Camera | None = None, fps: int = 12):
+    def __init__(self, env: Environment, coords_list: list[dict], camera: Camera | None = None, fps: int = 12,
+                 opacities: list[float] | None = None, labels: list[str] | None = None):
         """
         Args:
             env: Environment object defining the scene bounds
             coords_list: List of coordinate dicts, each with keys "a", "b", "c"
             camera: Optional Camera object for visualization
             fps: Frames per second for animation (default: 12)
+            opacities: Per-arm opacity values (default: all 1.0)
+            labels: Per-arm labels for toggle checkboxes (default: ARM_LABELS)
         """
+        if opacities is not None:
+            assert len(opacities) == len(coords_list), \
+                f"opacities length ({len(opacities)}) must match coords_list length ({len(coords_list)})"
+        if labels is not None:
+            assert len(labels) == len(coords_list), \
+                f"labels length ({len(labels)}) must match coords_list length ({len(coords_list)})"
         self.fps = fps
         self.scene = canvas(
             title="Arm Visualization",
@@ -81,15 +90,16 @@ class Visualizer:
 
         for i, coords in enumerate(coords_list):
             arm_color = ARM_COLORS[i % len(ARM_COLORS)]
+            op = opacities[i] if opacities is not None else 1.0
 
             sphere_a = sphere(
-                pos=to_vpython(coords["a"]), radius=0.4, color=arm_color
+                pos=to_vpython(coords["a"]), radius=0.4, color=arm_color, opacity=op
             )
             sphere_b = sphere(
-                pos=to_vpython(coords["b"]), radius=0.3, color=arm_color
+                pos=to_vpython(coords["b"]), radius=0.3, color=arm_color, opacity=op
             )
             sphere_c = sphere(
-                pos=to_vpython(coords["c"]), radius=0.2, color=arm_color
+                pos=to_vpython(coords["c"]), radius=0.2, color=arm_color, opacity=op
             )
             arm_curve = curve(
                 pos=[
@@ -106,7 +116,12 @@ class Visualizer:
         # Create toggle checkboxes for each arm
         self.scene.append_to_caption("\n\nToggle Arms:\n")
         for i in range(len(coords_list)):
-            arm_label = ARM_LABELS[i] if i < len(ARM_LABELS) else f"Arm {i}"
+            if labels is not None:
+                arm_label = labels[i]
+            elif i < len(ARM_LABELS):
+                arm_label = ARM_LABELS[i]
+            else:
+                arm_label = f"Arm {i}"
             checkbox(bind=self._make_toggle_handler(i), text=arm_label, checked=True)
             self.scene.append_to_caption("  ")
 

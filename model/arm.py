@@ -6,9 +6,9 @@ class Arm:
     def __init__(
         self,
         a_pos: np.ndarray | torch.Tensor,
-        a_b_length: float,
+        a_b_length: float | torch.Tensor,
         a_b_polar: tuple[float, float, float] | torch.Tensor,
-        b_c_length: float,
+        b_c_length: float | torch.Tensor,
         b_c_theta: float | torch.Tensor,
     ):
         """
@@ -40,8 +40,15 @@ class Arm:
         else:
             self.a_pos = torch.tensor(a_pos, dtype=dtype)
 
-        self.a_b_length = float(a_b_length)
-        self.b_c_length = float(b_c_length)
+        if isinstance(a_b_length, torch.Tensor):
+            self.a_b_length = a_b_length
+        else:
+            self.a_b_length = float(a_b_length)
+
+        if isinstance(b_c_length, torch.Tensor):
+            self.b_c_length = b_c_length
+        else:
+            self.b_c_length = float(b_c_length)
         self._dtype = dtype
 
         # Store a_b_polar as tensor (supports gradients for optimization)
@@ -57,7 +64,7 @@ class Arm:
             self.b_c_theta = torch.tensor(b_c_theta, dtype=dtype)
 
     def _polar_to_offset(
-        self, length: float, azimuth: torch.Tensor, elevation: torch.Tensor
+        self, length: float | torch.Tensor, azimuth: torch.Tensor, elevation: torch.Tensor
     ) -> torch.Tensor:
         x = length * torch.cos(elevation) * torch.cos(azimuth)
         y = length * torch.cos(elevation) * torch.sin(azimuth)
