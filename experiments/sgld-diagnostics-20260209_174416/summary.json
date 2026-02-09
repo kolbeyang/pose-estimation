@@ -1,0 +1,174 @@
+{
+  "gradient_basin_radius_px": 15.0,
+  "heatmap_std": 3.0,
+  "experiments": [
+    {
+      "name": "tiny_noise",
+      "noise_temperature": 1e-06,
+      "config": {
+        "num_steps": 100,
+        "learning_rate": 0.5,
+        "lr_min": 1e-05,
+        "noise_temperature": 1e-06,
+        "num_runs": 1,
+        "position_init_noise": 0.5,
+        "angle_init_noise": 0.1,
+        "length_init_noise": 0.1,
+        "position_penalty_weight": 0.2,
+        "ab_rotation_penalty_weight": 0.5,
+        "bc_rotation_penalty_weight": 0.3,
+        "track_diagnostics": true,
+        "diagnostic_interval": 10
+      },
+      "mpjpe": 0.20972502326799763,
+      "score": -13.736974716186523,
+      "gradient_norms": [
+        454.3594409450869,
+        79.95512641673578,
+        82.65407437646022,
+        69.50050135486222,
+        53.008582129843816,
+        41.25823107347546,
+        25.672183580455222,
+        19.46091072294,
+        8.878783818971835,
+        9.531594808923144
+      ],
+      "heatmap_scores": [
+        -204.11807376146317,
+        -26.26825925707817,
+        -19.827216520905495,
+        -15.082811631262302,
+        -11.204413935542107,
+        -8.409145466983318,
+        -6.602919012308121,
+        -5.483093898743391,
+        -4.708785697817802,
+        -4.456530831754208
+      ],
+      "pixel_displacements": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "no_noise",
+      "noise_temperature": 0.0,
+      "config": {
+        "num_steps": 100,
+        "learning_rate": 0.5,
+        "lr_min": 1e-05,
+        "noise_temperature": 0.0,
+        "num_runs": 1,
+        "position_init_noise": 0.5,
+        "angle_init_noise": 0.1,
+        "length_init_noise": 0.1,
+        "position_penalty_weight": 0.2,
+        "ab_rotation_penalty_weight": 0.5,
+        "bc_rotation_penalty_weight": 0.3,
+        "track_diagnostics": true,
+        "diagnostic_interval": 10
+      },
+      "mpjpe": 0.2832180418074131,
+      "score": -13.856302261352539,
+      "gradient_norms": [
+        323.6706594574165,
+        84.27181312603152,
+        80.11706960726735,
+        69.20439544548853,
+        57.41749719639872,
+        44.64378902546844,
+        32.51954728318727,
+        16.07695544201226,
+        12.392657438810476,
+        9.889176818271046
+      ],
+      "heatmap_scores": [
+        -192.3438915014267,
+        -29.885991245508194,
+        -21.0171030908823,
+        -15.787954151630402,
+        -11.736006453633308,
+        -8.627301849424839,
+        -6.560723260045052,
+        -5.2813184186816216,
+        -4.722744502127171,
+        -4.3815962970256805
+      ],
+      "pixel_displacements": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "problematic_noise",
+      "noise_temperature": 0.01,
+      "config": {
+        "num_steps": 100,
+        "learning_rate": 0.5,
+        "lr_min": 1e-05,
+        "noise_temperature": 0.01,
+        "num_runs": 1,
+        "position_init_noise": 0.5,
+        "angle_init_noise": 0.1,
+        "length_init_noise": 0.1,
+        "position_penalty_weight": 0.2,
+        "ab_rotation_penalty_weight": 0.5,
+        "bc_rotation_penalty_weight": 0.3,
+        "track_diagnostics": true,
+        "diagnostic_interval": 10
+      },
+      "mpjpe": 1.118619792163372,
+      "score": -80.7266616821289,
+      "gradient_norms": [
+        135.109838908318,
+        694.8192636951471,
+        73.80317667092315,
+        68.90024696227911,
+        62.72796217394334,
+        52.94356164943817,
+        46.08756827945855,
+        60.00063447711487,
+        60.615909150574645,
+        50.930471194821166
+      ],
+      "heatmap_scores": [
+        -186.81265848875046,
+        -322.1451663970947,
+        -189.95145589113235,
+        -134.18642485141754,
+        -97.92333388328552,
+        -74.29001179337502,
+        -49.07161349058151,
+        -52.09557110071182,
+        -53.21466878056526,
+        -48.44329261779785
+      ],
+      "pixel_displacements": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ]
+}

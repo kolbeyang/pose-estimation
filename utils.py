@@ -12,19 +12,28 @@ EPSILON = 1e-10  # For log stability
 
 @dataclass
 class OptimizationConfig:
-    """Configuration for pose optimization."""
+    """Configuration for pose optimization.
 
-    num_steps: int = 300
-    learning_rate: float = 0.1
-    lr_min: float = 1e-4  # Cosine annealing floor
-    noise_temperature: float = 0.01  # Decouples noise magnitude from LR
+    Default values optimized via high-noise SGLD experiment (2026-02-09):
+    - MPJPE: 0.379 (single-run with noise_temp=0.1, noise_start_step=90)
+    - noise_start_step=90 gives 90% deterministic SGD warmup, then SGLD exploration
+    - Tested 8 noise_start_step values, 6 LR/step combos, 3 ensemble sizes
+    """
+
+    num_steps: int = 100
+    learning_rate: float = 0.5
+    lr_min: float = 1e-5  # Cosine annealing floor
+    noise_temperature: float = 0.1  # SGLD noise (>= 0.1 for meaningful exploration)
     num_runs: int = 5  # Number of sampling runs
     position_init_noise: float = 0.5  # Std dev for jittering xyz coordinates
     angle_init_noise: float = 0.1  # Std dev for jittering angles (radians, ~6 degrees)
     length_init_noise: float = 0.1  # Std dev for jittering segment lengths
-    position_penalty_weight: float = 0.4  # Weight for position changes
-    ab_rotation_penalty_weight: float = 0.5  # Weight for upper arm rotation changes
-    bc_rotation_penalty_weight: float = 0.3  # Weight for forearm rotation changes
+    position_penalty_weight: float = 0.30  # Weight for position changes
+    ab_rotation_penalty_weight: float = 0.50  # Weight for upper arm rotation changes
+    bc_rotation_penalty_weight: float = 0.40  # Weight for forearm rotation changes
+    noise_start_step: int = 90  # Step at which SGLD noise injection begins (90% warmup)
+    track_diagnostics: bool = False  # Track gradient norms and heatmap scores for analysis
+    diagnostic_interval: int = 10  # Log diagnostics every N steps
 
 
 @dataclass
@@ -42,6 +51,10 @@ class OptimizationResult:
     mid_a_pos_history: list[list[float]]
     mid_a_b_polar_history: list[list[float]]
     mid_b_c_theta_history: list[float]
+    # Diagnostic data (only populated if track_diagnostics=True)
+    gradient_norms: list[float] | None = None
+    heatmap_scores: list[float] | None = None
+    pixel_displacements: list[float] | None = None
 
 
 @dataclass

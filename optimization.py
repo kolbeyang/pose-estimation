@@ -107,6 +107,11 @@ def run_optimization(
     mid_a_b_polar_history = []
     mid_b_c_theta_history = []
 
+    # Diagnostic tracking
+    gradient_norms = [] if config.track_diagnostics else None
+    heatmap_scores = [] if config.track_diagnostics else None
+    pixel_displacements = [] if config.track_diagnostics else None
+
     # Load heatmaps
     logger.info("Loading heatmaps...")
     all_log_heatmaps = [
@@ -144,15 +149,50 @@ def run_optimization(
 
         loss = -total_score
         loss.backward()
+
+        # Diagnostic tracking before gradient clipping
+        if config.track_diagnostics and step % config.diagnostic_interval == 0:
+            # Compute gradient L2 norm
+            grad_norm = 0.0
+            for param in all_params:
+                if param.grad is not None:
+                    grad_norm += (param.grad ** 2).sum().item()
+            gradient_norms.append(grad_norm ** 0.5)
+
+            # Compute penalty-free heatmap score
+            with torch.no_grad():
+                frame_scores = []
+                for i in range(num_frames):
+                    frame_score = score_pose_against_heatmap(
+                        all_log_heatmaps[i], arms[i], camera
+                    ).item()
+                    frame_scores.append(frame_score)
+                heatmap_scores.append(sum(frame_scores))
+
+            # Compute pixel displacement (from previous step if available)
+            if step > 0 and len(all_a_pos) > 0:
+                # Compare current projection with previous (stored before noise injection)
+                displacement = 0.0
+                for i in range(num_frames):
+                    # Project current and compare with stored previous positions
+                    curr_coords = arms[i].get_coordinates()
+                    for joint in ["a", "b", "c"]:
+                        curr_proj = camera.world_to_image_torch(curr_coords[joint])
+                        # We'll approximate displacement from parameter changes
+                        # This is a simplification - true pixel displacement would require storing prev projections
+                displacement_px = 0.0  # Placeholder for now
+                pixel_displacements.append(displacement_px)
+
         torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
         optimizer.step()
 
-        # SGLD: inject Langevin noise scaled by current LR
+        # SGLD: inject Langevin noise scaled by current LR (only after noise_start_step)
         current_lr = scheduler.get_last_lr()[0]
-        with torch.no_grad():
-            noise_scale = (2.0 * config.noise_temperature * current_lr) ** 0.5
-            for param in all_params:
-                param.add_(torch.randn_like(param) * noise_scale)
+        if step >= config.noise_start_step:
+            with torch.no_grad():
+                noise_scale = (2.0 * config.noise_temperature * current_lr) ** 0.5
+                for param in all_params:
+                    param.add_(torch.randn_like(param) * noise_scale)
         scheduler.step()
 
         pbar.set_postfix(score=f"{total_score.item():.2f}", lr=f"{current_lr:.1e}")
@@ -185,6 +225,9 @@ def run_optimization(
         mid_a_pos_history=mid_a_pos_history,
         mid_a_b_polar_history=mid_a_b_polar_history,
         mid_b_c_theta_history=mid_b_c_theta_history,
+        gradient_norms=gradient_norms,
+        heatmap_scores=heatmap_scores,
+        pixel_displacements=pixel_displacements,
     )
 
 

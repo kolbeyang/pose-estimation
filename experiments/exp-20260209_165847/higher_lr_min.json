@@ -1,0 +1,20 @@
+{
+  "name": "higher_lr_min",
+  "description": "SGLD with higher lr_min=0.01",
+  "config": {
+    "num_steps": 1000,
+    "learning_rate": 0.1,
+    "lr_min": 0.01,
+    "noise_temperature": 0.01,
+    "num_runs": 1,
+    "position_init_noise": 0.5,
+    "angle_init_noise": 0.1,
+    "length_init_noise": 0.1,
+    "position_penalty_weight": 0.4,
+    "ab_rotation_penalty_weight": 0.5,
+    "bc_rotation_penalty_weight": 0.3
+  },
+  "score": -67.46485900878906,
+  "mpjpe": 0.9478160869744089,
+  "gt_score": -23.58820152282715
+}

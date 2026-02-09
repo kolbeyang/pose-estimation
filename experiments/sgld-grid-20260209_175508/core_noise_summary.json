@@ -1,0 +1,149 @@
+[
+  {
+    "name": "noise_1e-04",
+    "config": {
+      "num_steps": 100,
+      "learning_rate": 0.5,
+      "lr_min": 1e-05,
+      "noise_temperature": 0.0001,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.2,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3,
+      "track_diagnostics": false,
+      "diagnostic_interval": 10
+    },
+    "mpjpe": 0.24285253761336206,
+    "score": -14.388932228088379,
+    "gt_score": -19.372657775878906
+  },
+  {
+    "name": "noise_1e-06",
+    "config": {
+      "num_steps": 100,
+      "learning_rate": 0.5,
+      "lr_min": 1e-05,
+      "noise_temperature": 1e-06,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.2,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3,
+      "track_diagnostics": false,
+      "diagnostic_interval": 10
+    },
+    "mpjpe": 0.2717913870803184,
+    "score": -14.31536865234375,
+    "gt_score": -19.372657775878906
+  },
+  {
+    "name": "noise_5e-06",
+    "config": {
+      "num_steps": 100,
+      "learning_rate": 0.5,
+      "lr_min": 1e-05,
+      "noise_temperature": 5e-06,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.2,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3,
+      "track_diagnostics": false,
+      "diagnostic_interval": 10
+    },
+    "mpjpe": 0.272298942754666,
+    "score": -14.428945541381836,
+    "gt_score": -19.372657775878906
+  },
+  {
+    "name": "noise_5e-05",
+    "config": {
+      "num_steps": 100,
+      "learning_rate": 0.5,
+      "lr_min": 1e-05,
+      "noise_temperature": 5e-05,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.2,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3,
+      "track_diagnostics": false,
+      "diagnostic_interval": 10
+    },
+    "mpjpe": 0.2908619092570411,
+    "score": -14.266986846923828,
+    "gt_score": -19.372657775878906
+  },
+  {
+    "name": "noise_1e-07",
+    "config": {
+      "num_steps": 100,
+      "learning_rate": 0.5,
+      "lr_min": 1e-05,
+      "noise_temperature": 1e-07,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.2,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3,
+      "track_diagnostics": false,
+      "diagnostic_interval": 10
+    },
+    "mpjpe": 0.31438365723523826,
+    "score": -13.802223205566406,
+    "gt_score": -19.372657775878906
+  },
+  {
+    "name": "noise_1e-05",
+    "config": {
+      "num_steps": 100,
+      "learning_rate": 0.5,
+      "lr_min": 1e-05,
+      "noise_temperature": 1e-05,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.2,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3,
+      "track_diagnostics": false,
+      "diagnostic_interval": 10
+    },
+    "mpjpe": 0.3304397472076946,
+    "score": -14.394855499267578,
+    "gt_score": -19.372657775878906
+  },
+  {
+    "name": "noise_5e-07",
+    "config": {
+      "num_steps": 100,
+      "learning_rate": 0.5,
+      "lr_min": 1e-05,
+      "noise_temperature": 5e-07,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.2,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3,
+      "track_diagnostics": false,
+      "diagnostic_interval": 10
+    },
+    "mpjpe": 0.37978982333507805,
+    "score": -15.1272554397583,
+    "gt_score": -19.372657775878906
+  }
+]

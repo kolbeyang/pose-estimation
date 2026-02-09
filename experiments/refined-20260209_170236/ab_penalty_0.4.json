@@ -1,0 +1,20 @@
+{
+  "name": "ab_penalty_0.4",
+  "description": "Lower AB rotation penalty",
+  "config": {
+    "num_steps": 1000,
+    "learning_rate": 0.1,
+    "lr_min": 1e-05,
+    "noise_temperature": 0.0,
+    "num_runs": 1,
+    "position_init_noise": 0.5,
+    "angle_init_noise": 0.1,
+    "length_init_noise": 0.1,
+    "position_penalty_weight": 0.4,
+    "ab_rotation_penalty_weight": 0.4,
+    "bc_rotation_penalty_weight": 0.3
+  },
+  "score": -15.141590118408203,
+  "mpjpe": 0.43339137981335324,
+  "gt_score": -23.32764434814453
+}

@@ -1,0 +1,56 @@
+{
+  "name": "tiny_noise",
+  "noise_temperature": 1e-06,
+  "config": {
+    "num_steps": 100,
+    "learning_rate": 0.5,
+    "lr_min": 1e-05,
+    "noise_temperature": 1e-06,
+    "num_runs": 1,
+    "position_init_noise": 0.5,
+    "angle_init_noise": 0.1,
+    "length_init_noise": 0.1,
+    "position_penalty_weight": 0.2,
+    "ab_rotation_penalty_weight": 0.5,
+    "bc_rotation_penalty_weight": 0.3,
+    "track_diagnostics": true,
+    "diagnostic_interval": 10
+  },
+  "mpjpe": 0.20972502326799763,
+  "score": -13.736974716186523,
+  "gradient_norms": [
+    454.3594409450869,
+    79.95512641673578,
+    82.65407437646022,
+    69.50050135486222,
+    53.008582129843816,
+    41.25823107347546,
+    25.672183580455222,
+    19.46091072294,
+    8.878783818971835,
+    9.531594808923144
+  ],
+  "heatmap_scores": [
+    -204.11807376146317,
+    -26.26825925707817,
+    -19.827216520905495,
+    -15.082811631262302,
+    -11.204413935542107,
+    -8.409145466983318,
+    -6.602919012308121,
+    -5.483093898743391,
+    -4.708785697817802,
+    -4.456530831754208
+  ],
+  "pixel_displacements": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ]
+}

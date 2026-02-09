@@ -1,0 +1,21 @@
+{
+  "name": "noise_1e-07_pos_0.15_ab_0.40_bc_0.30",
+  "config": {
+    "num_steps": 100,
+    "learning_rate": 0.5,
+    "lr_min": 1e-05,
+    "noise_temperature": 1e-07,
+    "num_runs": 1,
+    "position_init_noise": 0.5,
+    "angle_init_noise": 0.1,
+    "length_init_noise": 0.1,
+    "position_penalty_weight": 0.15,
+    "ab_rotation_penalty_weight": 0.4,
+    "bc_rotation_penalty_weight": 0.3,
+    "track_diagnostics": false,
+    "diagnostic_interval": 10
+  },
+  "mpjpe": 0.38047935249697834,
+  "score": -12.638113975524902,
+  "gt_score": -18.058216094970703
+}

@@ -1,0 +1,20 @@
+{
+  "name": "steps_2000",
+  "description": "Even more training steps",
+  "config": {
+    "num_steps": 2000,
+    "learning_rate": 0.1,
+    "lr_min": 1e-05,
+    "noise_temperature": 0.0,
+    "num_runs": 1,
+    "position_init_noise": 0.5,
+    "angle_init_noise": 0.1,
+    "length_init_noise": 0.1,
+    "position_penalty_weight": 0.4,
+    "ab_rotation_penalty_weight": 0.5,
+    "bc_rotation_penalty_weight": 0.3
+  },
+  "score": -13.836137771606445,
+  "mpjpe": 1.003975166256229,
+  "gt_score": -23.58820152282715
+}

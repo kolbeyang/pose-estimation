@@ -1,0 +1,23 @@
+{
+  "name": "lr0.3_steps100_start90",
+  "description": "lr=0.3, steps=100, noise_start_step=90",
+  "config": {
+    "num_steps": 100,
+    "learning_rate": 0.3,
+    "lr_min": 1e-05,
+    "noise_temperature": 0.1,
+    "num_runs": 1,
+    "position_init_noise": 0.5,
+    "angle_init_noise": 0.1,
+    "length_init_noise": 0.1,
+    "position_penalty_weight": 0.3,
+    "ab_rotation_penalty_weight": 0.5,
+    "bc_rotation_penalty_weight": 0.4,
+    "noise_start_step": 90,
+    "track_diagnostics": false,
+    "diagnostic_interval": 10
+  },
+  "score": -41.19751739501953,
+  "mpjpe": 0.4326667736801836,
+  "gt_score": -21.93683624267578
+}

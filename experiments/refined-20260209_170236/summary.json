@@ -1,0 +1,202 @@
+[
+  {
+    "name": "pos_penalty_0.2",
+    "description": "Even lower position penalty",
+    "config": {
+      "num_steps": 1000,
+      "learning_rate": 0.1,
+      "lr_min": 1e-05,
+      "noise_temperature": 0.0,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.2,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3
+    },
+    "score": -11.045722007751465,
+    "mpjpe": 0.40125753606359166,
+    "gt_score": -19.372657775878906
+  },
+  {
+    "name": "combo_low_penalties_1500",
+    "description": "Combined: lower penalties + 1500 steps",
+    "config": {
+      "num_steps": 1500,
+      "learning_rate": 0.1,
+      "lr_min": 1e-05,
+      "noise_temperature": 0.0,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.3,
+      "ab_rotation_penalty_weight": 0.4,
+      "bc_rotation_penalty_weight": 0.2
+    },
+    "score": -12.020986557006836,
+    "mpjpe": 0.5709907024270958,
+    "gt_score": -20.76346778869629
+  },
+  {
+    "name": "pos_penalty_0.3",
+    "description": "Lower position penalty",
+    "config": {
+      "num_steps": 1000,
+      "learning_rate": 0.1,
+      "lr_min": 1e-05,
+      "noise_temperature": 0.0,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.3,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3
+    },
+    "score": -13.188157081604004,
+    "mpjpe": 0.4121079060352511,
+    "gt_score": -21.480430603027344
+  },
+  {
+    "name": "steps_2000",
+    "description": "Even more training steps",
+    "config": {
+      "num_steps": 2000,
+      "learning_rate": 0.1,
+      "lr_min": 1e-05,
+      "noise_temperature": 0.0,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.4,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3
+    },
+    "score": -13.836137771606445,
+    "mpjpe": 1.003975166256229,
+    "gt_score": -23.58820152282715
+  },
+  {
+    "name": "steps_1500",
+    "description": "More training steps",
+    "config": {
+      "num_steps": 1500,
+      "learning_rate": 0.1,
+      "lr_min": 1e-05,
+      "noise_temperature": 0.0,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.4,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3
+    },
+    "score": -14.4478759765625,
+    "mpjpe": 0.7222058071858353,
+    "gt_score": -23.58820152282715
+  },
+  {
+    "name": "bc_penalty_0.2",
+    "description": "Lower BC rotation penalty",
+    "config": {
+      "num_steps": 1000,
+      "learning_rate": 0.1,
+      "lr_min": 1e-05,
+      "noise_temperature": 0.0,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.4,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.2
+    },
+    "score": -14.594390869140625,
+    "mpjpe": 0.552985879820254,
+    "gt_score": -23.131797790527344
+  },
+  {
+    "name": "tiny_noise_1e6",
+    "description": "Extremely tiny SGLD noise",
+    "config": {
+      "num_steps": 1000,
+      "learning_rate": 0.1,
+      "lr_min": 1e-05,
+      "noise_temperature": 1e-06,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.4,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3
+    },
+    "score": -15.085310935974121,
+    "mpjpe": 0.5381155040942961,
+    "gt_score": -23.58820152282715
+  },
+  {
+    "name": "best_baseline",
+    "description": "Current best: SGD + cosine annealing + no noise + pos_penalty=0.4",
+    "config": {
+      "num_steps": 1000,
+      "learning_rate": 0.1,
+      "lr_min": 1e-05,
+      "noise_temperature": 0.0,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.4,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3
+    },
+    "score": -15.141474723815918,
+    "mpjpe": 0.5179051153361798,
+    "gt_score": -23.58820152282715
+  },
+  {
+    "name": "ab_penalty_0.4",
+    "description": "Lower AB rotation penalty",
+    "config": {
+      "num_steps": 1000,
+      "learning_rate": 0.1,
+      "lr_min": 1e-05,
+      "noise_temperature": 0.0,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.4,
+      "ab_rotation_penalty_weight": 0.4,
+      "bc_rotation_penalty_weight": 0.3
+    },
+    "score": -15.141590118408203,
+    "mpjpe": 0.43339137981335324,
+    "gt_score": -23.32764434814453
+  },
+  {
+    "name": "pos_penalty_0.5",
+    "description": "Higher position penalty",
+    "config": {
+      "num_steps": 1000,
+      "learning_rate": 0.1,
+      "lr_min": 1e-05,
+      "noise_temperature": 0.0,
+      "num_runs": 1,
+      "position_init_noise": 0.5,
+      "angle_init_noise": 0.1,
+      "length_init_noise": 0.1,
+      "position_penalty_weight": 0.5,
+      "ab_rotation_penalty_weight": 0.5,
+      "bc_rotation_penalty_weight": 0.3
+    },
+    "score": -16.8736572265625,
+    "mpjpe": 0.6111494002656804,
+    "gt_score": -25.695974349975586
+  }
+]
