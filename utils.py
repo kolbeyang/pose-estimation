@@ -32,8 +32,6 @@ class OptimizationConfig:
     ab_rotation_penalty_weight: float = 0.50  # Weight for upper arm rotation changes
     bc_rotation_penalty_weight: float = 0.40  # Weight for forearm rotation changes
     noise_start_step: int = 90  # Step at which SGLD noise injection begins (90% warmup)
-    track_diagnostics: bool = False  # Track gradient norms and heatmap scores for analysis
-    diagnostic_interval: int = 10  # Log diagnostics every N steps
 
 
 @dataclass
@@ -51,10 +49,6 @@ class OptimizationResult:
     mid_a_pos_history: list[list[float]]
     mid_a_b_polar_history: list[list[float]]
     mid_b_c_theta_history: list[float]
-    # Diagnostic data (only populated if track_diagnostics=True)
-    gradient_norms: list[float] | None = None
-    heatmap_scores: list[float] | None = None
-    pixel_displacements: list[float] | None = None
 
 
 @dataclass
