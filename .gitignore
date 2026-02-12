@@ -32,3 +32,6 @@ PLAN.md
 images/
 
 training_runs/
+
+# BVH motion capture data
+test_cmu_visualization/*.bvh
