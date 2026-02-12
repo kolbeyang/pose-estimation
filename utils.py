@@ -31,9 +31,7 @@ class OptimizationConfig:
     position_penalty_weight: float = 0.5  # Weight for position changes
     ab_rotation_penalty_weight: float = 0.3  # Weight for upper arm rotation changes
     bc_rotation_penalty_weight: float = 0.4  # Weight for forearm rotation changes
-    noise_start_step: int = (
-        100  # Step at which SGLD noise injection begins (90% warmup)
-    )
+    noise_start_step: int = 80  # Step at which SGLD noise injection begins (90% warmup)
 
 
 @dataclass
