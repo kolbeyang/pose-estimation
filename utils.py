@@ -27,11 +27,13 @@ class OptimizationConfig:
     num_runs: int = 5  # Number of sampling runs
     position_init_noise: float = 0.5  # Std dev for jittering xyz coordinates
     angle_init_noise: float = 0.1  # Std dev for jittering angles (radians, ~6 degrees)
-    length_init_noise: float = 0.1  # Std dev for jittering segment lengths
-    position_penalty_weight: float = 0.30  # Weight for position changes
-    ab_rotation_penalty_weight: float = 0.50  # Weight for upper arm rotation changes
-    bc_rotation_penalty_weight: float = 0.40  # Weight for forearm rotation changes
-    noise_start_step: int = 90  # Step at which SGLD noise injection begins (90% warmup)
+    length_init_noise: float = 0  # Std dev for jittering segment lengths
+    position_penalty_weight: float = 0.5  # Weight for position changes
+    ab_rotation_penalty_weight: float = 0.3  # Weight for upper arm rotation changes
+    bc_rotation_penalty_weight: float = 0.4  # Weight for forearm rotation changes
+    noise_start_step: int = (
+        100  # Step at which SGLD noise injection begins (90% warmup)
+    )
 
 
 @dataclass

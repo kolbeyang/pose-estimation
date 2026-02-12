@@ -34,7 +34,8 @@
       "Bash(jq:*)",
       "Bash(brew install:*)",
       "Bash(/Users/kolbeyang/.claude/statusline.sh)",
-      "Bash(open:*)"
+      "Bash(open:*)",
+      "WebFetch(domain:vision.imar.ro)"
     ]
   }
 }

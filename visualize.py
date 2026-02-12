@@ -4,7 +4,7 @@ import sys
 
 import numpy as np
 import torch
-from vpython import canvas, box, sphere, curve, vector, color, rate, checkbox
+from vpython import canvas, box, sphere, cylinder, vector, color, rate, checkbox
 
 from model.arm import Arm
 from model.camera import Camera
@@ -85,32 +85,35 @@ class Visualizer:
             sphere(pos=camera_pos, radius=0.3, color=color.red, opacity=0.2)
 
         # Create visualization objects for each arm
-        self.arms = []  # List of (sphere_a, sphere_b, sphere_c, curve) tuples
+        self.arms = []  # List of (sphere_a, sphere_b, sphere_c, cyl_ab, cyl_bc) tuples
         self.arm_visible = []  # Track visibility state for each arm
 
         for i, coords in enumerate(coords_list):
             arm_color = ARM_COLORS[i % len(ARM_COLORS)]
             op = opacities[i] if opacities is not None else 1.0
 
+            a_pos = to_vpython(coords["a"])
+            b_pos = to_vpython(coords["b"])
+            c_pos = to_vpython(coords["c"])
+
             sphere_a = sphere(
-                pos=to_vpython(coords["a"]), radius=0.4, color=arm_color, opacity=op
+                pos=a_pos, radius=0.4, color=arm_color, opacity=op
             )
             sphere_b = sphere(
-                pos=to_vpython(coords["b"]), radius=0.3, color=arm_color, opacity=op
+                pos=b_pos, radius=0.3, color=arm_color, opacity=op
             )
             sphere_c = sphere(
-                pos=to_vpython(coords["c"]), radius=0.2, color=arm_color, opacity=op
+                pos=c_pos, radius=0.2, color=arm_color, opacity=op
             )
-            arm_curve = curve(
-                pos=[
-                    to_vpython(coords["a"]),
-                    to_vpython(coords["b"]),
-                    to_vpython(coords["c"]),
-                ],
-                radius=0.05,
-                color=arm_color,
+            cyl_ab = cylinder(
+                pos=a_pos, axis=b_pos - a_pos,
+                radius=0.05, color=arm_color, opacity=op,
             )
-            self.arms.append((sphere_a, sphere_b, sphere_c, arm_curve))
+            cyl_bc = cylinder(
+                pos=b_pos, axis=c_pos - b_pos,
+                radius=0.05, color=arm_color, opacity=op,
+            )
+            self.arms.append((sphere_a, sphere_b, sphere_c, cyl_ab, cyl_bc))
             self.arm_visible.append(True)
 
         # Create toggle checkboxes for each arm
@@ -136,11 +139,12 @@ class Visualizer:
         if arm_index >= len(self.arms):
             return
         self.arm_visible[arm_index] = visible
-        sphere_a, sphere_b, sphere_c, arm_curve = self.arms[arm_index]
+        sphere_a, sphere_b, sphere_c, cyl_ab, cyl_bc = self.arms[arm_index]
         sphere_a.visible = visible
         sphere_b.visible = visible
         sphere_c.visible = visible
-        arm_curve.visible = visible
+        cyl_ab.visible = visible
+        cyl_bc.visible = visible
 
     def update(self, coords_list: list[dict]):
         """Update positions for all arms (only updates visible arms)."""
@@ -152,14 +156,17 @@ class Visualizer:
             if not self.arm_visible[i]:
                 continue
 
-            sphere_a, sphere_b, sphere_c, arm_curve = self.arms[i]
-            sphere_a.pos = to_vpython(coords["a"])
-            sphere_b.pos = to_vpython(coords["b"])
-            sphere_c.pos = to_vpython(coords["c"])
-            arm_curve.clear()
-            arm_curve.append(to_vpython(coords["a"]))
-            arm_curve.append(to_vpython(coords["b"]))
-            arm_curve.append(to_vpython(coords["c"]))
+            sphere_a, sphere_b, sphere_c, cyl_ab, cyl_bc = self.arms[i]
+            a_pos = to_vpython(coords["a"])
+            b_pos = to_vpython(coords["b"])
+            c_pos = to_vpython(coords["c"])
+            sphere_a.pos = a_pos
+            sphere_b.pos = b_pos
+            sphere_c.pos = c_pos
+            cyl_ab.pos = a_pos
+            cyl_ab.axis = b_pos - a_pos
+            cyl_bc.pos = b_pos
+            cyl_bc.axis = c_pos - b_pos
 
     def run(self):
         try:

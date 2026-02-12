@@ -347,13 +347,29 @@ def main():
 
     # 1. Heatmap scores per frame (single-value: tab10 per run)
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(frames, eval_results[0].gt_per_frame_scores, color="green",
-            linestyle="--", alpha=0.7, label="Ground Truth", marker="o", markersize=4)
+    ax.plot(
+        frames,
+        eval_results[0].gt_per_frame_scores,
+        color="green",
+        linestyle="--",
+        alpha=0.7,
+        label="Ground Truth",
+        marker="o",
+        markersize=4,
+    )
     for ri in range(num_runs):
         c, a, lw = run_style(ri)
         label = f"Run {ri + 1}" if num_runs > 1 else "Predicted"
-        ax.plot(frames, eval_results[ri].pred_per_frame_scores, color=c,
-                alpha=a, linewidth=lw, label=label, marker="o", markersize=3)
+        ax.plot(
+            frames,
+            eval_results[ri].pred_per_frame_scores,
+            color=c,
+            alpha=a,
+            linewidth=lw,
+            label=label,
+            marker="o",
+            markersize=3,
+        )
     ax.set_xlabel("Frame")
     ax.set_ylabel("Heatmap Score")
     ax.set_title("Heatmap Scores per Frame")
@@ -367,8 +383,16 @@ def main():
     for ri in range(num_runs):
         c, a, lw = run_style(ri)
         label = f"Run {ri + 1}" if num_runs > 1 else "MPJPE"
-        ax.plot(frames, eval_results[ri].mpjpe_per_frame, color=c,
-                alpha=a, linewidth=lw, label=label, marker="o", markersize=3)
+        ax.plot(
+            frames,
+            eval_results[ri].mpjpe_per_frame,
+            color=c,
+            alpha=a,
+            linewidth=lw,
+            label=label,
+            marker="o",
+            markersize=3,
+        )
     ax.set_xlabel("Frame")
     ax.set_ylabel("MPJPE (distance)")
     ax.set_title("MPJPE per Frame")
@@ -379,16 +403,34 @@ def main():
 
     # 3. Segment lengths over training (single-value: tab10 per run)
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.axhline(y=video.a_b_length, color="blue", linestyle="--", alpha=0.5, label="GT a_b")
-    ax.axhline(y=video.b_c_length, color="orange", linestyle="--", alpha=0.5, label="GT b_c")
+    ax.axhline(
+        y=video.a_b_length, color="blue", linestyle="--", alpha=0.5, label="GT a_b"
+    )
+    ax.axhline(
+        y=video.b_c_length, color="orange", linestyle="--", alpha=0.5, label="GT b_c"
+    )
     for ri in range(num_runs):
         c, a, lw = run_style(ri)
         ab_label = f"Run {ri + 1} a_b" if num_runs > 1 else "a_b_length"
         bc_label = f"Run {ri + 1} b_c" if num_runs > 1 else "b_c_length"
-        ax.plot(steps, results[ri].a_b_length_history, color=c,
-                alpha=a, linewidth=lw, label=ab_label, linestyle="-")
-        ax.plot(steps, results[ri].b_c_length_history, color=c,
-                alpha=a, linewidth=lw, label=bc_label, linestyle=":")
+        ax.plot(
+            steps,
+            results[ri].a_b_length_history,
+            color=c,
+            alpha=a,
+            linewidth=lw,
+            label=ab_label,
+            linestyle="-",
+        )
+        ax.plot(
+            steps,
+            results[ri].b_c_length_history,
+            color=c,
+            alpha=a,
+            linewidth=lw,
+            label=bc_label,
+            linestyle=":",
+        )
     ax.set_xlabel("Training Step")
     ax.set_ylabel("Length")
     ax.set_title("Segment Lengths over Training")
@@ -400,9 +442,15 @@ def main():
     # 4. Middle frame a_pos over training (per-component: rgb, alpha per run)
     gt_a_pos = gt_mid_arm.a_pos.detach()
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.axhline(y=gt_a_pos[0].item(), color="red", linestyle="--", alpha=0.5, label="GT x")
-    ax.axhline(y=gt_a_pos[1].item(), color="green", linestyle="--", alpha=0.5, label="GT y")
-    ax.axhline(y=gt_a_pos[2].item(), color="blue", linestyle="--", alpha=0.5, label="GT z")
+    ax.axhline(
+        y=gt_a_pos[0].item(), color="red", linestyle="--", alpha=0.5, label="GT x"
+    )
+    ax.axhline(
+        y=gt_a_pos[1].item(), color="green", linestyle="--", alpha=0.5, label="GT y"
+    )
+    ax.axhline(
+        y=gt_a_pos[2].item(), color="blue", linestyle="--", alpha=0.5, label="GT z"
+    )
     for ri in range(num_runs):
         a = 1.0 if ri == best_idx else 0.5
         lw = 2.0 if ri == best_idx else 1.0
@@ -410,12 +458,30 @@ def main():
         y_data = [p[1] for p in results[ri].mid_a_pos_history]
         z_data = [p[2] for p in results[ri].mid_a_pos_history]
         # Only add legend entries from first run
-        ax.plot(steps, x_data, color="red", alpha=a, linewidth=lw,
-                label="x" if ri == 0 else None)
-        ax.plot(steps, y_data, color="green", alpha=a, linewidth=lw,
-                label="y" if ri == 0 else None)
-        ax.plot(steps, z_data, color="blue", alpha=a, linewidth=lw,
-                label="z" if ri == 0 else None)
+        ax.plot(
+            steps,
+            x_data,
+            color="red",
+            alpha=a,
+            linewidth=lw,
+            label="x" if ri == 0 else None,
+        )
+        ax.plot(
+            steps,
+            y_data,
+            color="green",
+            alpha=a,
+            linewidth=lw,
+            label="y" if ri == 0 else None,
+        )
+        ax.plot(
+            steps,
+            z_data,
+            color="blue",
+            alpha=a,
+            linewidth=lw,
+            label="z" if ri == 0 else None,
+        )
     ax.set_xlabel("Training Step")
     ax.set_ylabel("Position")
     ax.set_title(f"a_pos over Training (frame {mid})")
@@ -427,21 +493,49 @@ def main():
     # 5. Middle frame a_b_polar over training (per-component: rgb, alpha per run)
     gt_polar = gt_mid_arm.a_b_polar.detach()
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.axhline(y=gt_polar[0].item(), color="red", linestyle="--", alpha=0.5, label="GT azimuth")
-    ax.axhline(y=gt_polar[1].item(), color="green", linestyle="--", alpha=0.5, label="GT elevation")
-    ax.axhline(y=gt_polar[2].item(), color="blue", linestyle="--", alpha=0.5, label="GT roll")
+    ax.axhline(
+        y=gt_polar[0].item(), color="red", linestyle="--", alpha=0.5, label="GT azimuth"
+    )
+    ax.axhline(
+        y=gt_polar[1].item(),
+        color="green",
+        linestyle="--",
+        alpha=0.5,
+        label="GT elevation",
+    )
+    ax.axhline(
+        y=gt_polar[2].item(), color="blue", linestyle="--", alpha=0.5, label="GT roll"
+    )
     for ri in range(num_runs):
         a = 1.0 if ri == best_idx else 0.5
         lw = 2.0 if ri == best_idx else 1.0
         az_data = [p[0] for p in results[ri].mid_a_b_polar_history]
         el_data = [p[1] for p in results[ri].mid_a_b_polar_history]
         roll_data = [p[2] for p in results[ri].mid_a_b_polar_history]
-        ax.plot(steps, az_data, color="red", alpha=a, linewidth=lw,
-                label="azimuth" if ri == 0 else None)
-        ax.plot(steps, el_data, color="green", alpha=a, linewidth=lw,
-                label="elevation" if ri == 0 else None)
-        ax.plot(steps, roll_data, color="blue", alpha=a, linewidth=lw,
-                label="roll" if ri == 0 else None)
+        ax.plot(
+            steps,
+            az_data,
+            color="red",
+            alpha=a,
+            linewidth=lw,
+            label="azimuth" if ri == 0 else None,
+        )
+        ax.plot(
+            steps,
+            el_data,
+            color="green",
+            alpha=a,
+            linewidth=lw,
+            label="elevation" if ri == 0 else None,
+        )
+        ax.plot(
+            steps,
+            roll_data,
+            color="blue",
+            alpha=a,
+            linewidth=lw,
+            label="roll" if ri == 0 else None,
+        )
     ax.set_xlabel("Training Step")
     ax.set_ylabel("Angle (radians)")
     ax.set_title(f"a_b_polar over Training (frame {mid})")
@@ -453,12 +547,20 @@ def main():
     # 6. Middle frame b_c_theta over training (single-value: tab10 per run)
     gt_theta = gt_mid_arm.b_c_theta.detach().item()
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.axhline(y=gt_theta, color="blue", linestyle="--", alpha=0.5, label="GT b_c_theta")
+    ax.axhline(
+        y=gt_theta, color="blue", linestyle="--", alpha=0.5, label="GT b_c_theta"
+    )
     for ri in range(num_runs):
         c, a, lw = run_style(ri)
         label = f"Run {ri + 1}" if num_runs > 1 else "b_c_theta"
-        ax.plot(steps, results[ri].mid_b_c_theta_history, color=c,
-                alpha=a, linewidth=lw, label=label)
+        ax.plot(
+            steps,
+            results[ri].mid_b_c_theta_history,
+            color=c,
+            alpha=a,
+            linewidth=lw,
+            label=label,
+        )
     ax.set_xlabel("Training Step")
     ax.set_ylabel("Angle (radians)")
     ax.set_title(f"b_c_theta over Training (frame {mid})")
@@ -470,15 +572,35 @@ def main():
     # 7. a_pos z coordinate across frames (GT vs init (best only) vs optimized)
     gt_a_z = [results[0].gt_coords[i]["a"][2].item() for i in range(num_frames)]
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(frames, gt_a_z, color="green", label="Ground Truth", marker="o", markersize=4)
+    ax.plot(
+        frames, gt_a_z, color="green", label="Ground Truth", marker="o", markersize=4
+    )
     # Show init only for best run to avoid clutter
-    best_init_a_z = [results[best_idx].init_coords[i]["a"][2] for i in range(num_frames)]
-    ax.plot(frames, best_init_a_z, color="orange", label="Initialized (best)", marker="s", markersize=3)
+    best_init_a_z = [
+        results[best_idx].init_coords[i]["a"][2] for i in range(num_frames)
+    ]
+    ax.plot(
+        frames,
+        best_init_a_z,
+        color="orange",
+        label="Initialized (best)",
+        marker="s",
+        markersize=3,
+    )
     for ri in range(num_runs):
         c, a, lw = run_style(ri)
         label = f"Run {ri + 1}" if num_runs > 1 else "Optimized"
         pred_a_z = [results[ri].pred_coords[i]["a"][2] for i in range(num_frames)]
-        ax.plot(frames, pred_a_z, color=c, alpha=a, linewidth=lw, label=label, marker="o", markersize=3)
+        ax.plot(
+            frames,
+            pred_a_z,
+            color=c,
+            alpha=a,
+            linewidth=lw,
+            label=label,
+            marker="o",
+            markersize=3,
+        )
     ax.set_xlabel("Frame")
     ax.set_ylabel("a_pos z")
     ax.set_title("a_pos z Coordinate across Frames")
