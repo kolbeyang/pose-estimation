@@ -144,7 +144,7 @@ def run_optimization(
 
         loss = -total_score
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
+        # torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
         optimizer.step()
 
         # SGLD: inject Langevin noise scaled by current LR (only after noise_start_step)
@@ -154,7 +154,7 @@ def run_optimization(
                 noise_scale = (2.0 * config.noise_temperature * current_lr) ** 0.5
                 for param in all_params:
                     param.add_(torch.randn_like(param) * noise_scale)
-        scheduler.step()
+        # scheduler.step()
 
         pbar.set_postfix(score=f"{total_score.item():.2f}", lr=f"{current_lr:.1e}")
 
