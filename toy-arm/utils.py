@@ -12,26 +12,15 @@ EPSILON = 1e-10  # For log stability
 
 @dataclass
 class OptimizationConfig:
-    """Configuration for pose optimization.
+    """Configuration for pose optimization."""
 
-    Default values optimized via high-noise SGLD experiment (2026-02-09):
-    - MPJPE: 0.379 (single-run with noise_temp=0.1, noise_start_step=90)
-    - noise_start_step=90 gives 90% deterministic SGD warmup, then SGLD exploration
-    - Tested 8 noise_start_step values, 6 LR/step combos, 3 ensemble sizes
-    """
-
-    num_steps: int = 1000
-    learning_rate: float = 0.0001
-    lr_min: float = 1e-5  # Cosine annealing floor
-    noise_temperature: float = 1  # SGLD noise (>= 0.1 for meaningful exploration)
-    num_runs: int = 1  # Number of sampling runs
-    position_init_noise: float = 0  # Std dev for jittering xyz coordinates
-    angle_init_noise: float = 0  # Std dev for jittering angles (radians, ~6 degrees)
-    length_init_noise: float = 0  # Std dev for jittering segment lengths
-    position_penalty_weight: float = 0.5  # Weight for position changes
-    ab_rotation_penalty_weight: float = 0.3  # Weight for upper arm rotation changes
-    bc_rotation_penalty_weight: float = 0.4  # Weight for forearm rotation changes
-    noise_start_step: int = 0  # Step at which SGLD noise injection begins (90% warmup)
+    num_steps: int = 100
+    learning_rate: float = 0.1
+    position_init_noise: float = 0.5  # Std dev for jittering xyz coordinates
+    angle_init_noise: float = 0.1  # Std dev for jittering angles (radians, ~6 degrees)
+    position_penalty_weight: float = 0.4  # Weight for position changes
+    ab_rotation_penalty_weight: float = 0.5  # Weight for upper arm rotation changes
+    bc_rotation_penalty_weight: float = 0.3  # Weight for forearm rotation changes
 
 
 @dataclass
@@ -43,12 +32,6 @@ class OptimizationResult:
     init_coords: list[dict[str, np.ndarray]]
     gt_arms: list[Arm]
     gt_coords: list[dict[str, torch.Tensor]]
-    a_b_length_history: list[float]
-    b_c_length_history: list[float]
-    mid_frame_idx: int
-    mid_a_pos_history: list[list[float]]
-    mid_a_b_polar_history: list[list[float]]
-    mid_b_c_theta_history: list[float]
 
 
 @dataclass

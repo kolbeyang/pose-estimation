@@ -4,7 +4,7 @@ import sys
 
 import numpy as np
 import torch
-from vpython import canvas, box, sphere, cylinder, vector, color, rate, checkbox
+from vpython import canvas, box, sphere, curve, vector, color, rate, checkbox
 
 from model.arm import Arm
 from model.camera import Camera
@@ -42,23 +42,14 @@ ARM_LABELS = [
 class Visualizer:
     FPS = 12  # Default frames per second
 
-    def __init__(self, env: Environment, coords_list: list[dict], camera: Camera | None = None, fps: int = 12,
-                 opacities: list[float] | None = None, labels: list[str] | None = None):
+    def __init__(self, env: Environment, coords_list: list[dict], camera: Camera | None = None, fps: int = 12):
         """
         Args:
             env: Environment object defining the scene bounds
             coords_list: List of coordinate dicts, each with keys "a", "b", "c"
             camera: Optional Camera object for visualization
             fps: Frames per second for animation (default: 12)
-            opacities: Per-arm opacity values (default: all 1.0)
-            labels: Per-arm labels for toggle checkboxes (default: ARM_LABELS)
         """
-        if opacities is not None:
-            assert len(opacities) == len(coords_list), \
-                f"opacities length ({len(opacities)}) must match coords_list length ({len(coords_list)})"
-        if labels is not None:
-            assert len(labels) == len(coords_list), \
-                f"labels length ({len(labels)}) must match coords_list length ({len(coords_list)})"
         self.fps = fps
         self.scene = canvas(
             title="Arm Visualization",
@@ -85,46 +76,37 @@ class Visualizer:
             sphere(pos=camera_pos, radius=0.3, color=color.red, opacity=0.2)
 
         # Create visualization objects for each arm
-        self.arms = []  # List of (sphere_a, sphere_b, sphere_c, cyl_ab, cyl_bc) tuples
+        self.arms = []  # List of (sphere_a, sphere_b, sphere_c, curve) tuples
         self.arm_visible = []  # Track visibility state for each arm
 
         for i, coords in enumerate(coords_list):
             arm_color = ARM_COLORS[i % len(ARM_COLORS)]
-            op = opacities[i] if opacities is not None else 1.0
-
-            a_pos = to_vpython(coords["a"])
-            b_pos = to_vpython(coords["b"])
-            c_pos = to_vpython(coords["c"])
 
             sphere_a = sphere(
-                pos=a_pos, radius=0.4, color=arm_color, opacity=op
+                pos=to_vpython(coords["a"]), radius=0.4, color=arm_color
             )
             sphere_b = sphere(
-                pos=b_pos, radius=0.3, color=arm_color, opacity=op
+                pos=to_vpython(coords["b"]), radius=0.3, color=arm_color
             )
             sphere_c = sphere(
-                pos=c_pos, radius=0.2, color=arm_color, opacity=op
+                pos=to_vpython(coords["c"]), radius=0.2, color=arm_color
             )
-            cyl_ab = cylinder(
-                pos=a_pos, axis=b_pos - a_pos,
-                radius=0.05, color=arm_color, opacity=op,
+            arm_curve = curve(
+                pos=[
+                    to_vpython(coords["a"]),
+                    to_vpython(coords["b"]),
+                    to_vpython(coords["c"]),
+                ],
+                radius=0.05,
+                color=arm_color,
             )
-            cyl_bc = cylinder(
-                pos=b_pos, axis=c_pos - b_pos,
-                radius=0.05, color=arm_color, opacity=op,
-            )
-            self.arms.append((sphere_a, sphere_b, sphere_c, cyl_ab, cyl_bc))
+            self.arms.append((sphere_a, sphere_b, sphere_c, arm_curve))
             self.arm_visible.append(True)
 
         # Create toggle checkboxes for each arm
         self.scene.append_to_caption("\n\nToggle Arms:\n")
         for i in range(len(coords_list)):
-            if labels is not None:
-                arm_label = labels[i]
-            elif i < len(ARM_LABELS):
-                arm_label = ARM_LABELS[i]
-            else:
-                arm_label = f"Arm {i}"
+            arm_label = ARM_LABELS[i] if i < len(ARM_LABELS) else f"Arm {i}"
             checkbox(bind=self._make_toggle_handler(i), text=arm_label, checked=True)
             self.scene.append_to_caption("  ")
 
@@ -139,12 +121,11 @@ class Visualizer:
         if arm_index >= len(self.arms):
             return
         self.arm_visible[arm_index] = visible
-        sphere_a, sphere_b, sphere_c, cyl_ab, cyl_bc = self.arms[arm_index]
+        sphere_a, sphere_b, sphere_c, arm_curve = self.arms[arm_index]
         sphere_a.visible = visible
         sphere_b.visible = visible
         sphere_c.visible = visible
-        cyl_ab.visible = visible
-        cyl_bc.visible = visible
+        arm_curve.visible = visible
 
     def update(self, coords_list: list[dict]):
         """Update positions for all arms (only updates visible arms)."""
@@ -156,17 +137,14 @@ class Visualizer:
             if not self.arm_visible[i]:
                 continue
 
-            sphere_a, sphere_b, sphere_c, cyl_ab, cyl_bc = self.arms[i]
-            a_pos = to_vpython(coords["a"])
-            b_pos = to_vpython(coords["b"])
-            c_pos = to_vpython(coords["c"])
-            sphere_a.pos = a_pos
-            sphere_b.pos = b_pos
-            sphere_c.pos = c_pos
-            cyl_ab.pos = a_pos
-            cyl_ab.axis = b_pos - a_pos
-            cyl_bc.pos = b_pos
-            cyl_bc.axis = c_pos - b_pos
+            sphere_a, sphere_b, sphere_c, arm_curve = self.arms[i]
+            sphere_a.pos = to_vpython(coords["a"])
+            sphere_b.pos = to_vpython(coords["b"])
+            sphere_c.pos = to_vpython(coords["c"])
+            arm_curve.clear()
+            arm_curve.append(to_vpython(coords["a"]))
+            arm_curve.append(to_vpython(coords["b"]))
+            arm_curve.append(to_vpython(coords["c"]))
 
     def run(self):
         try:
