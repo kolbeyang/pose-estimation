@@ -1,6 +1,6 @@
 """Optimization loop for arm pose estimation from heatmaps."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import torch
@@ -12,28 +12,32 @@ from scoring import OptimizationConfig, prepare_heatmaps, score
 
 @dataclass
 class OptimizationResult:
-    mediapipe_arms: list[Arm]
     mediapipe_coords: list[dict[str, np.ndarray]]
-    optimized_arms: list[Arm]
     optimized_coords: list[dict[str, np.ndarray]]
+    optimized_arms: list[Arm]
+    bone_length_history: dict[str, list[float]] = field(default_factory=lambda: {"a_b": [], "b_c": []})
+    mediapipe_bone_lengths: dict[str, float] = field(default_factory=dict)
 
 
 def run_optimization(
     initial_arms: list[Arm],
     heatmaps: list[dict[str, np.ndarray]],
     cameras: list[Camera],
-    a_b_length: float,
-    b_c_length: float,
+    mp_a_b_length: float,
+    mp_b_c_length: float,
     config: OptimizationConfig,
 ) -> OptimizationResult:
     """
     Optimize arm poses against heatmaps using Adam.
 
+    Uses shared learnable bone lengths across all frames.
+
     Args:
         initial_arms: Initial arm poses from MediaPipe IK conversion
         heatmaps: Per-frame heatmaps for each joint (uint8)
         cameras: Per-frame fitted cameras
-        a_b_length, b_c_length: Fixed segment lengths
+        mp_a_b_length: MediaPipe estimated upper arm length
+        mp_b_c_length: MediaPipe estimated forearm length
         config: Optimization configuration
 
     Returns:
@@ -43,6 +47,10 @@ def run_optimization(
 
     # Save MediaPipe coords before optimization
     mp_coords = [arm.get_coordinates_numpy() for arm in initial_arms]
+
+    # Shared learnable bone lengths
+    a_b_length = torch.tensor(mp_a_b_length, dtype=torch.float32, requires_grad=True)
+    b_c_length = torch.tensor(mp_b_c_length, dtype=torch.float32, requires_grad=True)
 
     # Create optimizable parameters for each frame
     all_a_pos = []
@@ -60,18 +68,25 @@ def run_optimization(
     # Preload and log-normalize heatmaps
     all_log_heatmaps = [prepare_heatmaps(h) for h in heatmaps]
 
-    # Set up optimizer
-    params = (
-        [{"params": all_a_pos, "lr": config.learning_rate * 5}]
-        + [{"params": all_a_b_polar, "lr": config.learning_rate}]
-        + [{"params": all_b_c_theta, "lr": config.learning_rate}]
-    )
+    # Set up optimizer with 4 param groups
+    params = [
+        {"params": all_a_pos, "lr": config.learning_rate * 5},
+        {"params": all_a_b_polar, "lr": config.learning_rate},
+        {"params": all_b_c_theta, "lr": config.learning_rate},
+        {"params": [a_b_length, b_c_length], "lr": config.bone_length_lr},
+    ]
     optimizer = torch.optim.Adam(params)
+
+    bone_length_history = {"a_b": [], "b_c": []}
 
     print(f"Optimizing {n_frames} frames for {config.num_steps} steps...")
 
     for step in range(config.num_steps):
         optimizer.zero_grad()
+
+        # Record bone lengths
+        bone_length_history["a_b"].append(a_b_length.item())
+        bone_length_history["b_c"].append(b_c_length.item())
 
         # Build arms from current parameters
         arms = []
@@ -93,7 +108,8 @@ def run_optimization(
             print(
                 f"  Step {step:3d}: score={total_score.item():.2f} "
                 f"heatmap={components['heatmap']:.2f} "
-                f"motion={components['weighted_motion']:.2f}"
+                f"motion={components['weighted_motion']:.2f} "
+                f"a_b={a_b_length.item():.4f} b_c={b_c_length.item():.4f}"
             )
         else:
             total_score = score(all_log_heatmaps, arms, cameras, config)
@@ -102,7 +118,8 @@ def run_optimization(
         loss.backward()
 
         torch.nn.utils.clip_grad_norm_(
-            all_a_pos + all_a_b_polar + all_b_c_theta, max_norm=10.0
+            all_a_pos + all_a_b_polar + all_b_c_theta + [a_b_length, b_c_length],
+            max_norm=10.0,
         )
 
         optimizer.step()
@@ -113,29 +130,18 @@ def run_optimization(
     for i in range(n_frames):
         arm = Arm(
             a_pos=all_a_pos[i].detach(),
-            a_b_length=a_b_length,
+            a_b_length=a_b_length.detach(),
             a_b_polar=all_a_b_polar[i].detach(),
-            b_c_length=b_c_length,
+            b_c_length=b_c_length.detach(),
             b_c_theta=all_b_c_theta[i].detach(),
         )
         optimized_arms.append(arm)
         optimized_coords.append(arm.get_coordinates_numpy())
 
-    # Rebuild mediapipe arms (non-grad) for comparison
-    mp_arms = []
-    for arm in initial_arms:
-        mp_arm = Arm(
-            a_pos=arm.a_pos.detach(),
-            a_b_length=a_b_length,
-            a_b_polar=arm.a_b_polar.detach(),
-            b_c_length=b_c_length,
-            b_c_theta=arm.b_c_theta.detach(),
-        )
-        mp_arms.append(mp_arm)
-
     return OptimizationResult(
-        mediapipe_arms=mp_arms,
         mediapipe_coords=mp_coords,
-        optimized_arms=optimized_arms,
         optimized_coords=optimized_coords,
+        optimized_arms=optimized_arms,
+        bone_length_history=bone_length_history,
+        mediapipe_bone_lengths={"a_b": mp_a_b_length, "b_c": mp_b_c_length},
     )

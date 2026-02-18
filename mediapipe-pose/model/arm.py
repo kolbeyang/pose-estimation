@@ -40,8 +40,8 @@ class Arm:
         else:
             self.a_pos = torch.tensor(a_pos, dtype=dtype)
 
-        self.a_b_length = float(a_b_length)
-        self.b_c_length = float(b_c_length)
+        self.a_b_length = a_b_length if isinstance(a_b_length, torch.Tensor) else float(a_b_length)
+        self.b_c_length = b_c_length if isinstance(b_c_length, torch.Tensor) else float(b_c_length)
         self._dtype = dtype
 
         # Store a_b_polar as tensor (supports gradients for optimization)
