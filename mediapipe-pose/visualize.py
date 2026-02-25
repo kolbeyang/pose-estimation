@@ -18,11 +18,13 @@ def to_vpython(arr: np.ndarray | torch.Tensor) -> vector:
 ARM_COLORS = [
     color.green,   # MediaPipe
     color.red,     # Optimized
+    color.yellow,  # CMU GT
 ]
 
 ARM_LABELS = [
     "MediaPipe",
     "Optimized",
+    "CMU GT",
 ]
 
 

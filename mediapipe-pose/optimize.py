@@ -74,17 +74,20 @@ def run_optimization(
 
     # Set up optimizer with 4 param groups
     params = [
-        {"params": all_a_pos, "lr": config.learning_rate * 5},
+        {"params": all_a_pos, "lr": config.learning_rate},
         {"params": all_a_b_polar, "lr": config.learning_rate},
         {"params": all_b_c_theta, "lr": config.learning_rate},
-        {"params": [a_b_length, b_c_length], "lr": config.bone_length_lr},
+        {"params": [a_b_length, b_c_length], "lr": config.learning_rate},
     ]
     optimizer = torch.optim.Adam(params)
 
     bone_length_history = {"a_b": [], "b_c": []}
     score_history = {
-        "total": [], "heatmap": [],
-        "position": [], "ab_rotation": [], "bc_rotation": [],
+        "total": [],
+        "heatmap": [],
+        "position": [],
+        "ab_rotation": [],
+        "bc_rotation": [],
     }
     mpjpe_history = []
 

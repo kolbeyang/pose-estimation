@@ -50,12 +50,12 @@ class FrameData:
 
 def process_video(
     video_path: str, target_fps: float = 10.0
-) -> tuple[list[FrameData], list[np.ndarray], tuple[int, int]]:
+) -> tuple[list[FrameData], list[np.ndarray], tuple[int, int], int]:
     """
     Read a video file and run MediaPipe pose detection at target FPS.
 
     Returns:
-        (frames, raw_bgr_frames, image_size) where image_size is (height, width)
+        (frames, raw_bgr_frames, image_size, frame_skip)
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -122,7 +122,7 @@ def process_video(
     print(
         f"  Processed {len(frames)} frames from {video_path} ({image_size[1]}x{image_size[0]})"
     )
-    return frames, raw_bgr_frames, image_size
+    return frames, raw_bgr_frames, image_size, frame_skip
 
 
 # --- Heatmap generation ---
@@ -296,6 +296,97 @@ def mediapipe_frame_to_arm(
     )
 
 
+# --- CMU Panoptic ground truth loading ---
+
+# CMU COCO19 joint indices
+CMU_BODY_CENTER_IDX = 2  # hip midpoint, used as origin
+CMU_LSHOULDER_IDX = 3
+CMU_LELBOW_IDX = 4
+CMU_LWRIST_IDX = 5
+
+
+def load_cmu_gt(
+    gt_dir: str,
+    n_frames: int,
+    frame_skip: int = 1,
+    camera_rotation: np.ndarray | None = None,
+) -> list[dict[str, np.ndarray]]:
+    """
+    Load CMU Panoptic 3D ground truth for left arm joints.
+
+    Args:
+        gt_dir: Path to hdPose3d_stage1_coco19/ directory
+        n_frames: Number of frames to load (matched to video frame count)
+        frame_skip: Take every Nth GT file to match video subsampling
+        camera_rotation: 3x3 rotation matrix to transform from dome global
+                         coords into the viewing camera's frame (from calibration JSON)
+
+    Returns:
+        List of dicts with keys "a", "b", "c" as np.ndarray positions in meters
+    """
+    gt_files = sorted(
+        f
+        for f in os.listdir(gt_dir)
+        if f.startswith("body3DScene_") and f.endswith(".json")
+    )
+    if not gt_files:
+        raise RuntimeError(f"No body3DScene_*.json files found in {gt_dir}")
+
+    # Subsample at the same rate as the video
+    gt_files = gt_files[::frame_skip]
+
+    coords = []
+    for f in gt_files[:n_frames]:
+        with open(os.path.join(gt_dir, f)) as fh:
+            data = json.load(fh)
+
+        if not data["bodies"]:
+            if coords:
+                coords.append(coords[-1])
+            else:
+                raise RuntimeError(f"No bodies in {f} and no previous frame to copy")
+            continue
+
+        joints = data["bodies"][0]["joints19"]
+        # Extract hip center as origin, convert cm -> m
+        hip = (
+            np.array(joints[CMU_BODY_CENTER_IDX * 4 : CMU_BODY_CENTER_IDX * 4 + 3])
+            / 100.0
+        )
+        # Extract left arm joints, convert cm -> m, make hip-relative
+        shoulder = (
+            np.array(joints[CMU_LSHOULDER_IDX * 4 : CMU_LSHOULDER_IDX * 4 + 3]) / 100.0
+            - hip
+        )
+        elbow = (
+            np.array(joints[CMU_LELBOW_IDX * 4 : CMU_LELBOW_IDX * 4 + 3]) / 100.0 - hip
+        )
+        wrist = (
+            np.array(joints[CMU_LWRIST_IDX * 4 : CMU_LWRIST_IDX * 4 + 3]) / 100.0 - hip
+        )
+
+        # Rotate from dome global frame into camera frame
+        if camera_rotation is not None:
+            shoulder = camera_rotation @ shoulder
+            elbow = camera_rotation @ elbow
+            wrist = camera_rotation @ wrist
+
+        coords.append({"a": shoulder, "b": elbow, "c": wrist})
+
+    print(f"  Loaded {len(coords)} CMU GT frames from {gt_dir}")
+    return coords
+
+
+def load_cmu_camera_rotation(calib_path: str, camera_name: str = "00_00") -> np.ndarray:
+    """Load a camera's rotation matrix from CMU Panoptic calibration JSON."""
+    with open(calib_path) as f:
+        calib = json.load(f)
+    for cam in calib["cameras"]:
+        if cam["name"] == camera_name:
+            return np.array(cam["R"], dtype=np.float64)
+    raise RuntimeError(f"Camera {camera_name} not found in {calib_path}")
+
+
 # --- Evaluation graphs ---
 
 JOINT_NAMES = {"a": "Shoulder", "b": "Elbow", "c": "Wrist"}
@@ -303,12 +394,16 @@ COORD_NAMES = {0: "x", 1: "y", 2: "z"}
 
 
 def generate_evaluation_graphs(
-    result: OptimizationResult, frames: list[FrameData], output_dir: str
+    result: OptimizationResult,
+    frames: list[FrameData],
+    output_dir: str,
+    cmu_gt_coords: list[dict[str, np.ndarray]] | None = None,
 ):
     """Generate and save evaluation PNG graphs."""
     os.makedirs(output_dir, exist_ok=True)
     n_frames = len(result.mediapipe_coords)
     frame_indices = list(range(n_frames))
+    has_gt = cmu_gt_coords is not None and len(cmu_gt_coords) >= n_frames
 
     # 9 coordinate trajectory graphs
     for joint_key, joint_name in JOINT_NAMES.items():
@@ -325,6 +420,11 @@ def generate_evaluation_graphs(
             fig, ax = plt.subplots(figsize=(10, 4))
             ax.plot(frame_indices, mp_vals, "g-", label="MediaPipe", linewidth=1.5)
             ax.plot(frame_indices, opt_vals, "r-", label="Optimized", linewidth=1.5)
+            if has_gt:
+                gt_vals = [
+                    cmu_gt_coords[i][joint_key][coord_idx] for i in range(n_frames)
+                ]
+                ax.plot(frame_indices, gt_vals, "y-", label="CMU GT", linewidth=1.5)
             ax.set_xlabel("Frame")
             ax.set_ylabel(f"{coord_name} (meters)")
             ax.set_title(f"{joint_name} {coord_name.upper()} Trajectory")
@@ -336,7 +436,7 @@ def generate_evaluation_graphs(
             fig.savefig(os.path.join(output_dir, filename), dpi=100)
             plt.close(fig)
 
-    # 2 bone length curves
+    # 2 bone length curves (training)
     for bone_key, bone_label in [("a_b", "Upper Arm"), ("b_c", "Forearm")]:
         fig, ax = plt.subplots(figsize=(10, 4))
         steps = list(range(len(result.bone_length_history[bone_key])))
@@ -351,12 +451,15 @@ def generate_evaluation_graphs(
         fig.savefig(os.path.join(output_dir, filename), dpi=100)
         plt.close(fig)
 
-    # 2 MediaPipe per-frame bone length graphs (from raw landmarks)
-    bone_segments = [
-        (SHOULDER_IDX, ELBOW_IDX, "Upper Arm", "a_b"),
-        (ELBOW_IDX, WRIST_IDX, "Forearm", "b_c"),
+    # Per-frame bone length graphs
+    bone_pairs = [("a", "b", "Upper Arm", "a_b"), ("b", "c", "Forearm", "b_c")]
+    bone_mp_indices = [
+        (SHOULDER_IDX, ELBOW_IDX),
+        (ELBOW_IDX, WRIST_IDX),
     ]
-    for idx_a, idx_b, bone_label, bone_key in bone_segments:
+    for (jk_a, jk_b, bone_label, bone_key), (idx_a, idx_b) in zip(
+        bone_pairs, bone_mp_indices
+    ):
         mp_lengths = [
             np.linalg.norm(
                 frames[i].landmarks_3d[idx_b] - frames[i].landmarks_3d[idx_a]
@@ -365,9 +468,15 @@ def generate_evaluation_graphs(
         ]
         fig, ax = plt.subplots(figsize=(10, 4))
         ax.plot(frame_indices, mp_lengths, "g-", label="MediaPipe", linewidth=1.5)
+        if has_gt:
+            gt_lengths = [
+                np.linalg.norm(cmu_gt_coords[i][jk_b] - cmu_gt_coords[i][jk_a])
+                for i in range(n_frames)
+            ]
+            ax.plot(frame_indices, gt_lengths, "y-", label="CMU GT", linewidth=1.5)
         ax.set_xlabel("Frame")
         ax.set_ylabel("Length (meters)")
-        ax.set_title(f"MediaPipe {bone_label} Length per Frame")
+        ax.set_title(f"{bone_label} Length per Frame")
         ax.legend()
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
@@ -376,10 +485,12 @@ def generate_evaluation_graphs(
         fig.savefig(os.path.join(output_dir, filename), dpi=100)
         plt.close(fig)
 
-    # MPJPE over training steps
+    # MPJPE over training steps (vs MediaPipe)
     if result.mpjpe_history:
         fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(range(len(result.mpjpe_history)), result.mpjpe_history, "b-", linewidth=1.5)
+        ax.plot(
+            range(len(result.mpjpe_history)), result.mpjpe_history, "b-", linewidth=1.5
+        )
         ax.set_xlabel("Training Step")
         ax.set_ylabel("MPJPE (meters)")
         ax.set_title("MPJPE vs MediaPipe Over Training")
@@ -388,15 +499,130 @@ def generate_evaluation_graphs(
         fig.savefig(os.path.join(output_dir, "mpjpe.png"), dpi=100)
         plt.close(fig)
 
+    # Per-frame MPJPE vs GT
+    if has_gt:
+        mp_mpjpe = []
+        opt_mpjpe = []
+        for i in range(n_frames):
+            gt = cmu_gt_coords[i]
+            mp_err = np.mean(
+                [
+                    np.linalg.norm(result.mediapipe_coords[i][k] - gt[k])
+                    for k in ("a", "b", "c")
+                ]
+            )
+            opt_err = np.mean(
+                [
+                    np.linalg.norm(result.optimized_coords[i][k] - gt[k])
+                    for k in ("a", "b", "c")
+                ]
+            )
+            mp_mpjpe.append(mp_err)
+            opt_mpjpe.append(opt_err)
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(frame_indices, mp_mpjpe, "g-", label="MediaPipe vs GT", linewidth=1.5)
+        ax.plot(frame_indices, opt_mpjpe, "r-", label="Optimized vs GT", linewidth=1.5)
+        ax.set_xlabel("Frame")
+        ax.set_ylabel("MPJPE (meters)")
+        ax.set_title("Per-Frame MPJPE vs CMU Ground Truth")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        fig.savefig(os.path.join(output_dir, "mpjpe_vs_gt.png"), dpi=100)
+        plt.close(fig)
+
+        avg_mp = np.mean(mp_mpjpe)
+        avg_opt = np.mean(opt_mpjpe)
+        print(f"  MPJPE vs GT — MediaPipe: {avg_mp:.4f} m, Optimized: {avg_opt:.4f} m")
+
+        # Per-frame MPJVE (Mean Per-Joint Velocity Error) vs GT
+        # Velocity = displacement between consecutive frames per joint
+        mp_mpjve = []
+        opt_mpjve = []
+        for i in range(1, n_frames):
+            gt_vel = {
+                k: cmu_gt_coords[i][k] - cmu_gt_coords[i - 1][k]
+                for k in ("a", "b", "c")
+            }
+            mp_vel = {
+                k: result.mediapipe_coords[i][k] - result.mediapipe_coords[i - 1][k]
+                for k in ("a", "b", "c")
+            }
+            opt_vel = {
+                k: result.optimized_coords[i][k] - result.optimized_coords[i - 1][k]
+                for k in ("a", "b", "c")
+            }
+            mp_err = np.mean(
+                [np.linalg.norm(mp_vel[k] - gt_vel[k]) for k in ("a", "b", "c")]
+            )
+            opt_err = np.mean(
+                [np.linalg.norm(opt_vel[k] - gt_vel[k]) for k in ("a", "b", "c")]
+            )
+            mp_mpjve.append(mp_err)
+            opt_mpjve.append(opt_err)
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(
+            range(1, n_frames), mp_mpjve, "g-", label="MediaPipe vs GT", linewidth=1.5
+        )
+        ax.plot(
+            range(1, n_frames), opt_mpjve, "r-", label="Optimized vs GT", linewidth=1.5
+        )
+        ax.set_xlabel("Frame")
+        ax.set_ylabel("MPJVE (meters/frame)")
+        ax.set_title("Per-Frame MPJVE vs CMU Ground Truth")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        fig.savefig(os.path.join(output_dir, "mpjve_vs_gt.png"), dpi=100)
+        plt.close(fig)
+
+        avg_mp_vel = np.mean(mp_mpjve)
+        avg_opt_vel = np.mean(opt_mpjve)
+        print(
+            f"  MPJVE vs GT — MediaPipe: {avg_mp_vel:.4f} m/f, Optimized: {avg_opt_vel:.4f} m/f"
+        )
+
     # Score components over training steps
     if result.score_history:
         fig, ax = plt.subplots(figsize=(10, 4))
         steps = range(len(result.score_history["total"]))
-        ax.plot(steps, result.score_history["total"], "k-", label="Total Score", linewidth=1.5)
-        ax.plot(steps, result.score_history["heatmap"], "g-", label="Heatmap Score", linewidth=1.5)
-        ax.plot(steps, result.score_history["position"], "r-", label="Position Penalty (×400)", linewidth=1.5)
-        ax.plot(steps, result.score_history["ab_rotation"], "m-", label="AB Rotation Penalty (×50)", linewidth=1.5)
-        ax.plot(steps, result.score_history["bc_rotation"], "c-", label="BC Rotation Penalty (×30)", linewidth=1.5)
+        ax.plot(
+            steps,
+            result.score_history["total"],
+            "k-",
+            label="Total Score",
+            linewidth=1.5,
+        )
+        ax.plot(
+            steps,
+            result.score_history["heatmap"],
+            "g-",
+            label="Heatmap Score",
+            linewidth=1.5,
+        )
+        ax.plot(
+            steps,
+            result.score_history["position"],
+            "r-",
+            label="Position Penalty (×400)",
+            linewidth=1.5,
+        )
+        ax.plot(
+            steps,
+            result.score_history["ab_rotation"],
+            "m-",
+            label="AB Rotation Penalty (×50)",
+            linewidth=1.5,
+        )
+        ax.plot(
+            steps,
+            result.score_history["bc_rotation"],
+            "c-",
+            label="BC Rotation Penalty (×30)",
+            linewidth=1.5,
+        )
         ax.set_xlabel("Training Step")
         ax.set_ylabel("Score")
         ax.set_title("Score Components Over Training")
@@ -424,7 +650,9 @@ def generate_evaluation_graphs(
     print(f"  Saved evaluation graphs to {output_dir}")
 
 
-def _render_config_image(config: OptimizationConfig, height: int, width: int) -> np.ndarray:
+def _render_config_image(
+    config: OptimizationConfig, height: int, width: int
+) -> np.ndarray:
     """Render optimization config as a matplotlib image matching the given dimensions."""
     dpi = 100
     fig, ax = plt.subplots(figsize=(width / dpi, height / dpi), dpi=dpi)
@@ -434,8 +662,13 @@ def _render_config_image(config: OptimizationConfig, height: int, width: int) ->
     config_dict = asdict(config)
     text = "\n".join(f"{k}: {v}" for k, v in config_dict.items())
     ax.text(
-        0.5, 0.5, text, transform=ax.transAxes,
-        fontsize=12, verticalalignment="center", horizontalalignment="center",
+        0.5,
+        0.5,
+        text,
+        transform=ax.transAxes,
+        fontsize=12,
+        verticalalignment="center",
+        horizontalalignment="center",
         fontfamily="monospace",
     )
     plt.tight_layout()
@@ -453,9 +686,7 @@ def generate_summary_image(output_dir: str, config: OptimizationConfig):
     """Combine all evaluation PNGs in output_dir into a single summary.png."""
     # Collect all PNG files except summary.png itself
     png_files = sorted(
-        f
-        for f in os.listdir(output_dir)
-        if f.endswith(".png") and f != "summary.png"
+        f for f in os.listdir(output_dir) if f.endswith(".png") and f != "summary.png"
     )
     if not png_files:
         return
@@ -507,8 +738,9 @@ def generate_overlay_frames(
     cameras: list[Camera],
     image_size: tuple[int, int],
     heatmap_alpha: float = 0.3,
+    cmu_gt_coords: list[dict[str, np.ndarray]] | None = None,
 ) -> list[np.ndarray]:
-    """Generate overlay frames with heatmaps, MediaPipe (green) and optimized (red) skeletons."""
+    """Generate overlay frames with heatmaps, MediaPipe (green), optimized (red), and optionally GT (yellow) skeletons."""
     h, w = image_size
     overlay_frames = []
 
@@ -522,12 +754,16 @@ def generate_overlay_frames(
             combined_heatmap = np.maximum(
                 combined_heatmap, all_heatmaps[i][name].astype(np.float32)
             )
-        heatmap_color = cv2.applyColorMap(combined_heatmap.astype(np.uint8), cv2.COLORMAP_HOT)
+        heatmap_color = cv2.applyColorMap(
+            combined_heatmap.astype(np.uint8), cv2.COLORMAP_HOT
+        )
         mask = combined_heatmap > 5  # only blend where heatmap is visible
         mask_3ch = np.stack([mask] * 3, axis=-1)
         vis_frame = np.where(
             mask_3ch,
-            cv2.addWeighted(vis_frame, 1.0 - heatmap_alpha, heatmap_color, heatmap_alpha, 0),
+            cv2.addWeighted(
+                vis_frame, 1.0 - heatmap_alpha, heatmap_color, heatmap_alpha, 0
+            ),
             vis_frame,
         )
 
@@ -576,11 +812,19 @@ def save_prediction_overlay_video(
     output_path: str,
     fps: float = 10.0,
     heatmap_alpha: float = 0.3,
+    cmu_gt_coords: list[dict[str, np.ndarray]] | None = None,
 ):
-    """Save video with heatmap overlay, heatmap points (yellow), MediaPipe (green) and optimized (red) skeletons."""
+    """Save video with heatmap overlay, heatmap points (yellow), MediaPipe (green), optimized (red), and GT (yellow) skeletons."""
     h, w = image_size
     overlay_frames = generate_overlay_frames(
-        raw_frames, frames, all_heatmaps, result, cameras, image_size, heatmap_alpha
+        raw_frames,
+        frames,
+        all_heatmaps,
+        result,
+        cameras,
+        image_size,
+        heatmap_alpha,
+        cmu_gt_coords,
     )
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
@@ -599,10 +843,26 @@ def main():
     parser.add_argument(
         "--fps", type=float, default=10.0, help="Target FPS for processing"
     )
-    parser.add_argument("--steps", type=int, default=100, help="Optimization steps")
     parser.add_argument(
-        "-v", choices=["vpython", "pyvista"], default=None,
-        help="3D visualization backend: vpython or pyvista"
+        "-v",
+        choices=["vpython", "pyvista"],
+        default=None,
+        help="3D visualization backend: vpython or pyvista",
+    )
+    parser.add_argument(
+        "--cmu-gt",
+        default=None,
+        help="Path to CMU Panoptic hdPose3d_stage1_coco19/ directory for ground truth overlay",
+    )
+    parser.add_argument(
+        "--cmu-calib",
+        default=None,
+        help="Path to CMU Panoptic calibration JSON (required with --cmu-gt)",
+    )
+    parser.add_argument(
+        "--cmu-camera",
+        default="00_00",
+        help="CMU camera name to align GT coordinates (default: 00_00)",
     )
     args = parser.parse_args()
 
@@ -610,7 +870,9 @@ def main():
 
     # 1. Process video
     print("=== Processing Video ===")
-    frames, raw_bgr_frames, image_size = process_video(args.video, target_fps=args.fps)
+    frames, raw_bgr_frames, image_size, frame_skip = process_video(
+        args.video, target_fps=args.fps
+    )
     if len(frames) < 2:
         print("Need at least 2 frames. Exiting.")
         return
@@ -619,7 +881,7 @@ def main():
     print("\n=== Generating Heatmaps ===")
     all_heatmaps = []
     for frame in frames:
-        hm = generate_frame_heatmaps(frame, ARM_INDICES, image_size,sigma=50.0)
+        hm = generate_frame_heatmaps(frame, ARM_INDICES, image_size, sigma=50.0)
         all_heatmaps.append(hm)
     print(f"  Generated heatmaps for {len(all_heatmaps)} frames")
 
@@ -666,12 +928,22 @@ def main():
 
     # 7. Run optimization
     print("\n=== Optimizing ===")
-    config = OptimizationConfig(num_steps=args.steps)
+    config = OptimizationConfig()
     result = run_optimization(
         initial_arms, all_heatmaps, cameras, a_b_length, b_c_length, config
     )
 
-    # 8. Save run metadata + evaluation graphs + summary
+    # 8. Load CMU ground truth if provided
+    cmu_gt_coords = None
+    if args.cmu_gt:
+        print("\n=== Loading CMU Ground Truth ===")
+        cam_rot = None
+        if args.cmu_calib:
+            cam_rot = load_cmu_camera_rotation(args.cmu_calib, args.cmu_camera)
+            print(f"  Using camera rotation from {args.cmu_camera}")
+        cmu_gt_coords = load_cmu_gt(args.cmu_gt, len(frames), frame_skip, cam_rot)
+
+    # 9. Save run metadata + evaluation graphs + summary
     run_dir = os.path.join("training_runs", f"mediapipe-run-{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
 
@@ -682,17 +954,24 @@ def main():
         f.write(" ".join(sys.argv))
 
     print("\n=== Generating Evaluation Graphs ===")
-    generate_evaluation_graphs(result, frames, run_dir)
+    generate_evaluation_graphs(result, frames, run_dir, cmu_gt_coords)
     generate_summary_image(run_dir, config)
 
-    # 9. Save overlay video
+    # 10. Save overlay video
     print("\n=== Saving Overlay Video ===")
     save_prediction_overlay_video(
-        raw_bgr_frames, frames, all_heatmaps, result, cameras, image_size,
-        os.path.join(run_dir, "prediction_overlay.mp4"), fps=args.fps,
+        raw_bgr_frames,
+        frames,
+        all_heatmaps,
+        result,
+        cameras,
+        image_size,
+        os.path.join(run_dir, "prediction_overlay.mp4"),
+        fps=args.fps,
+        cmu_gt_coords=cmu_gt_coords,
     )
 
-    # 10. Visualization
+    # 12. Visualization
     if args.v == "vpython":
         print("\n=== VPython Visualization ===")
         from vpython import rate as vp_rate
@@ -703,6 +982,8 @@ def main():
 
         # Initial frame
         init_coords = [mp_3d_coords[0], result.optimized_coords[0]]
+        if cmu_gt_coords:
+            init_coords.append(cmu_gt_coords[0])
         vis = Visualizer(env, init_coords, camera=cameras[0], fps=10)
 
         n_frames = len(frames)
@@ -716,6 +997,8 @@ def main():
                     mp_3d_coords[current_frame],
                     result.optimized_coords[current_frame],
                 ]
+                if cmu_gt_coords and current_frame < len(cmu_gt_coords):
+                    frame_coords.append(cmu_gt_coords[current_frame])
                 vis.update(frame_coords)
                 current_frame = (current_frame + 1) % n_frames
         except KeyboardInterrupt:
@@ -728,17 +1011,23 @@ def main():
         from visualize_pyvista import PoseVisualizer
 
         overlay_frames = generate_overlay_frames(
-            raw_bgr_frames, frames, all_heatmaps, result, cameras, image_size
+            raw_bgr_frames,
+            frames,
+            all_heatmaps,
+            result,
+            cameras,
+            image_size,
+            cmu_gt_coords=cmu_gt_coords,
         )
         vis = PoseVisualizer(
             display_frames=overlay_frames,
             cameras=cameras,
             mp_coords=mp_3d_coords,
             opt_coords=result.optimized_coords,
+            cmu_gt_coords=cmu_gt_coords,
             image_size=image_size,
         )
         vis.show()
-
 
     print(f"\nSaved results to {run_dir}")
 

@@ -108,12 +108,14 @@ class PoseVisualizer:
         cameras: list[Camera],
         mp_coords: list[dict[str, np.ndarray]],
         opt_coords: list[dict[str, np.ndarray]] | None = None,
+        cmu_gt_coords: list[dict[str, np.ndarray]] | None = None,
         image_size: tuple[int, int] = (480, 640),
     ):
         self.display_frames = display_frames
         self.cameras = cameras
         self.mp_coords = mp_coords
         self.opt_coords = opt_coords
+        self.cmu_gt_coords = cmu_gt_coords
         self.image_size = image_size
         self.n_frames = len(display_frames)
         self.current_frame = 0
@@ -168,6 +170,19 @@ class PoseVisualizer:
                     pv.Sphere(radius=0.008, center=opt[key]),
                     color="red",
                     name=f"opt_joint_{key}",
+                )
+
+        # --- CMU GT arm (yellow), if available ---
+        if self.cmu_gt_coords is not None:
+            gt = self.cmu_gt_coords[0]
+            self.pl.add_mesh(
+                make_arm_line(gt), color="yellow", line_width=4, name="gt_line"
+            )
+            for key in ("a", "b", "c"):
+                self.pl.add_mesh(
+                    pv.Sphere(radius=0.008, center=gt[key]),
+                    color="yellow",
+                    name=f"gt_joint_{key}",
                 )
 
         # --- Camera frustum ---
@@ -251,6 +266,19 @@ class PoseVisualizer:
                     name=f"opt_joint_{key}",
                 )
 
+        # Update CMU GT arm
+        if self.cmu_gt_coords is not None and idx < len(self.cmu_gt_coords):
+            gt = self.cmu_gt_coords[idx]
+            self.pl.add_mesh(
+                make_arm_line(gt), color="yellow", line_width=4, name="gt_line"
+            )
+            for key in ("a", "b", "c"):
+                self.pl.add_mesh(
+                    pv.Sphere(radius=0.008, center=gt[key]),
+                    color="yellow",
+                    name=f"gt_joint_{key}",
+                )
+
         # Update camera frustum
         cam = self.cameras[idx]
         self.pl.add_mesh(
@@ -318,11 +346,26 @@ def main():
         default=None,
         help="Path to a training_runs/ directory with optimization results",
     )
+    parser.add_argument(
+        "--cmu-gt",
+        default=None,
+        help="Path to CMU Panoptic hdPose3d_stage1_coco19/ directory for ground truth overlay",
+    )
+    parser.add_argument(
+        "--cmu-calib",
+        default=None,
+        help="Path to CMU Panoptic calibration JSON (required with --cmu-gt)",
+    )
+    parser.add_argument(
+        "--cmu-camera",
+        default="00_00",
+        help="CMU camera name to align GT coordinates (default: 00_00)",
+    )
     args = parser.parse_args()
 
     # --- Process video ---
     print("=== Processing Video ===")
-    frames, raw_bgr_frames, image_size = process_video(args.video, target_fps=args.fps)
+    frames, raw_bgr_frames, image_size, frame_skip = process_video(args.video, target_fps=args.fps)
     if len(frames) < 2:
         print("Need at least 2 frames.")
         return
@@ -375,6 +418,16 @@ def main():
             raw_bgr_frames, frames, all_heatmaps, result, cameras, image_size
         )
 
+    # --- Load CMU ground truth if provided ---
+    cmu_gt_coords = None
+    if args.cmu_gt:
+        from main import load_cmu_gt, load_cmu_camera_rotation
+        print("=== Loading CMU Ground Truth ===")
+        cam_rot = None
+        if args.cmu_calib:
+            cam_rot = load_cmu_camera_rotation(args.cmu_calib, args.cmu_camera)
+        cmu_gt_coords = load_cmu_gt(args.cmu_gt, len(frames), frame_skip, cam_rot)
+
     # --- Launch visualizer ---
     print(f"=== Launching PyVista Viewer ({len(frames)} frames) ===")
     vis = PoseVisualizer(
@@ -382,6 +435,7 @@ def main():
         cameras=cameras,
         mp_coords=mp_coords,
         opt_coords=opt_coords,
+        cmu_gt_coords=cmu_gt_coords,
         image_size=image_size,
     )
     vis.show()

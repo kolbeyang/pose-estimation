@@ -19,7 +19,6 @@ class OptimizationConfig:
     position_penalty_weight: float = 40
     ab_rotation_penalty_weight: float = 5
     bc_rotation_penalty_weight: float = 3
-    bone_length_lr: float = 0.005
 
 
 def prepare_heatmaps(heatmaps: dict[str, np.ndarray]) -> dict[str, torch.Tensor]:
@@ -71,12 +70,8 @@ def score_position_change(arm0: Arm, arm1: Arm) -> torch.Tensor:
     coords0 = arm0.get_coordinates()
     coords1 = arm1.get_coordinates()
 
-    total = torch.tensor(0.0)
-    # for name in ["a", "b", "c"]:
-    for name in ["a"]:
-        diff = coords1[name] - coords0[name]
-        total = total + torch.sqrt(torch.sum(diff**2) + EPSILON)
-    return total
+    diff = coords1["a"] - coords0["a"]
+    return torch.sqrt(torch.sum(diff**2) + EPSILON)
 
 
 def score_ab_rotation_change(arm0: Arm, arm1: Arm) -> torch.Tensor:
