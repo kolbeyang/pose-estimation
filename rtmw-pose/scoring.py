@@ -15,10 +15,10 @@ EPSILON = 1e-10
 @dataclass
 class OptimizationConfig:
     num_steps: int = 200
-    learning_rate: float = 0.0005
-    position_penalty_weight: float = 40
-    ab_rotation_penalty_weight: float = 5
-    bc_rotation_penalty_weight: float = 3
+    learning_rate: float = 0.0005  # Lower than toy-arm (meters vs arbitrary units)
+    position_penalty_weight: float = 400
+    ab_rotation_penalty_weight: float = 50
+    bc_rotation_penalty_weight: float = 30
     bone_length_lr: float = 0.005
 
 

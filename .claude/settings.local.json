@@ -35,7 +35,13 @@
       "Bash(brew install:*)",
       "Bash(/Users/kolbeyang/.claude/statusline.sh)",
       "Bash(open:*)",
-      "WebFetch(domain:vision.imar.ro)"
+      "WebFetch(domain:vision.imar.ro)",
+      "WebFetch(domain:research.google)",
+      "WebFetch(domain:paperswithcode.com)",
+      "Bash(grep:*)",
+      "Bash(cd:*)",
+      "Bash(uv pip:*)",
+      "Bash(tail:*)"
     ]
   }
 }

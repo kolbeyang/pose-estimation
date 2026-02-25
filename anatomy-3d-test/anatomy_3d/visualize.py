@@ -1,4 +1,4 @@
-"""VPython visualization for human body pose with interactive slider controls."""
+"""VPython visualization for Anatomy3D-style human pose with bone direction/length sliders."""
 
 import numpy as np
 from vpython import (
@@ -6,8 +6,9 @@ from vpython import (
     slider, winput, button,
 )
 
-from human_pose import (
-    HumanPose, JOINT_NAMES, PARENTS, BODY_GROUPS, NUM_JOINTS,
+from anatomy_3d.human_pose_anatomy_3d import (
+    HumanPoseAnatomy3D, JOINT_NAMES, PARENTS, BODY_GROUPS, NUM_JOINTS,
+    NUM_BONES, BONE_INDICES, direction_to_spherical, spherical_to_direction,
 )
 
 
@@ -20,27 +21,25 @@ def to_vpython(arr: np.ndarray) -> vector:
 GROUP_COLORS = {
     "Root": color.white,
     "Spine": color.white,
-    "Left Arm": vector(0.3, 0.5, 1.0),    # blue
-    "Right Arm": vector(1.0, 0.3, 0.3),    # red
-    "Left Leg": vector(0.3, 0.8, 0.8),     # cyan
-    "Right Leg": vector(1.0, 0.6, 0.2),    # orange
+    "Left Arm": vector(0.3, 0.5, 1.0),
+    "Right Arm": vector(1.0, 0.3, 0.3),
+    "Left Leg": vector(0.3, 0.8, 0.8),
+    "Right Leg": vector(1.0, 0.6, 0.2),
 }
 
-# Map joint index to its group color
 JOINT_COLORS = {}
 for group_name, joint_indices in BODY_GROUPS.items():
     for ji in joint_indices:
         JOINT_COLORS[ji] = GROUP_COLORS[group_name]
 
 
-class HumanVisualizer:
-    def __init__(self, pose: HumanPose):
+class Anatomy3DVisualizer:
+    def __init__(self, pose: HumanPoseAnatomy3D):
         self.pose = pose
-        self._controls = {}  # param_key -> (slider, winput)
+        self._controls = {}
 
-        # Create scene
         self.scene = canvas(
-            title="Human Body Pose Visualizer",
+            title="Anatomy3D Pose Visualizer (Bone Directions + Lengths)",
             width=1000,
             height=700,
             center=vector(0, 0.85, 0),
@@ -58,10 +57,9 @@ class HumanVisualizer:
             opacity=0.5,
         )
 
-        # Compute initial positions
-        positions = self.pose.forward_kinematics()
+        positions = self.pose.compute_positions()
 
-        # Create joint spheres
+        # Joint spheres
         self.joint_spheres = []
         for i in range(NUM_JOINTS):
             c = JOINT_COLORS.get(i, color.white)
@@ -72,7 +70,7 @@ class HumanVisualizer:
             )
             self.joint_spheres.append(s)
 
-        # Create bone curves (index 0 is a placeholder)
+        # Bone curves
         self.bone_curves: list[curve | None] = [None]
         for i in range(1, NUM_JOINTS):
             parent = PARENTS[i]
@@ -84,11 +82,9 @@ class HumanVisualizer:
             )
             self.bone_curves.append(crv)
 
-        # Build slider UI
         self._build_ui()
 
     def _build_ui(self):
-        """Build all slider controls organized by body group."""
         sc = self.scene
 
         # Root position
@@ -98,46 +94,43 @@ class HumanVisualizer:
             val = self.pose.root_position[axis_i]
             self._add_slider_row(sc, f"  {axis_name}:", key, -2.0, 2.0, val, 0.01)
 
-        # Root rotation
-        sc.append_to_caption("\n<b>Root Rotation (deg)</b>\n")
-        for axis_i, axis_name in enumerate(["Rx", "Ry", "Rz"]):
-            key = f"root_rot_{axis_i}"
-            val_deg = np.degrees(self.pose.root_rotation[axis_i])
-            self._add_slider_row(sc, f"  {axis_name}:", key, -180, 180, val_deg, 1.0)
+        # Bone directions (azimuth + elevation per bone)
+        bone_groups = {
+            "Right Leg": [0, 1, 2],     # RHip, RKnee, RAnkle
+            "Left Leg": [3, 4, 5],      # LHip, LKnee, LAnkle
+            "Spine": [6, 7, 8, 9],      # Spine, Thorax, Neck, Head
+            "Left Arm": [10, 11, 12],   # LShoulder, LElbow, LWrist
+            "Right Arm": [13, 14, 15],  # RShoulder, RElbow, RWrist
+        }
 
-        # Joint rotations by body group (skip Root group for rotations)
         for group_name in ["Spine", "Left Leg", "Right Leg", "Left Arm", "Right Arm"]:
-            joint_indices = BODY_GROUPS[group_name]
-            sc.append_to_caption(f"\n<b>{group_name} Rotations (deg)</b>\n")
-            for ji in joint_indices:
-                jname = JOINT_NAMES[ji]
-                for axis_i, axis_name in enumerate(["Rx", "Ry", "Rz"]):
-                    key = f"joint_{ji}_{axis_i}"
-                    val_deg = np.degrees(self.pose.local_rotations[ji][axis_i])
-                    self._add_slider_row(
-                        sc, f"  {jname} {axis_name}:", key,
-                        -180, 180, val_deg, 1.0,
-                    )
+            bone_idxs = bone_groups[group_name]
+            sc.append_to_caption(f"\n<b>{group_name} Bone Directions (deg)</b>\n")
+            for bi in bone_idxs:
+                parent_idx, child_idx = BONE_INDICES[bi]
+                label = f"{JOINT_NAMES[parent_idx]}->{JOINT_NAMES[child_idx]}"
+                az, el = direction_to_spherical(self.pose.bone_directions[bi])
+                az_deg, el_deg = np.degrees(az), np.degrees(el)
+
+                key_az = f"bone_dir_az_{bi}"
+                key_el = f"bone_dir_el_{bi}"
+                self._add_slider_row(sc, f"  {label} Az:", key_az, -180, 180, az_deg, 1.0)
+                self._add_slider_row(sc, f"  {label} El:", key_el, -90, 90, el_deg, 1.0)
 
         # Bone lengths
         sc.append_to_caption("\n<b>Bone Lengths (m)</b>\n")
-        for ji in range(1, NUM_JOINTS):
-            jname = JOINT_NAMES[ji]
-            parent_name = JOINT_NAMES[PARENTS[ji]]
-            key = f"bone_{ji}"
-            val = self.pose.bone_lengths[ji]
-            self._add_slider_row(
-                sc, f"  {parent_name}->{jname}:", key,
-                0.01, 1.0, val, 0.01,
-            )
+        for bi in range(NUM_BONES):
+            parent_idx, child_idx = BONE_INDICES[bi]
+            label = f"{JOINT_NAMES[parent_idx]}->{JOINT_NAMES[child_idx]}"
+            key = f"bone_len_{bi}"
+            val = self.pose.bone_lengths[bi]
+            self._add_slider_row(sc, f"  {label}:", key, 0.01, 1.0, val, 0.01)
 
-        # Reset button
         sc.append_to_caption("\n\n")
         button(bind=self._on_reset, text="Reset to Default")
 
     def _add_slider_row(self, sc, label, key, min_val, max_val, default, step):
-        """Add a labeled slider + numeric input row."""
-        sc.append_to_caption(f"{label:<25s}")
+        sc.append_to_caption(f"{label:<30s}")
         sl = slider(
             min=min_val, max=max_val, value=default, step=step,
             length=250, bind=self._make_slider_handler(key),
@@ -175,25 +168,26 @@ class HumanVisualizer:
         return handler
 
     def _apply_param(self, key: str, value: float):
-        """Write a slider value back to the pose parameters."""
         if key.startswith("root_pos_"):
             axis = int(key[-1])
             self.pose.root_position[axis] = value
-        elif key.startswith("root_rot_"):
-            axis = int(key[-1])
-            self.pose.root_rotation[axis] = np.radians(value)
-        elif key.startswith("joint_"):
+        elif key.startswith("bone_dir_az_") or key.startswith("bone_dir_el_"):
             parts = key.split("_")
-            ji = int(parts[1])
-            axis = int(parts[2])
-            self.pose.local_rotations[ji][axis] = np.radians(value)
-        elif key.startswith("bone_"):
-            ji = int(key.split("_")[1])
-            self.pose.bone_lengths[ji] = value
+            bi = int(parts[-1])
+            # Get current azimuth and elevation
+            az_key = f"bone_dir_az_{bi}"
+            el_key = f"bone_dir_el_{bi}"
+            az_sl, _ = self._controls[az_key]
+            el_sl, _ = self._controls[el_key]
+            az_rad = np.radians(az_sl.value)
+            el_rad = np.radians(el_sl.value)
+            self.pose.bone_directions[bi] = spherical_to_direction(az_rad, el_rad)
+        elif key.startswith("bone_len_"):
+            bi = int(key.split("_")[-1])
+            self.pose.bone_lengths[bi] = value
 
     def _update_visuals(self):
-        """Recompute FK and update all VPython objects."""
-        positions = self.pose.forward_kinematics()
+        positions = self.pose.compute_positions()
         for i in range(NUM_JOINTS):
             self.joint_spheres[i].pos = to_vpython(positions[i])
         for i in range(1, NUM_JOINTS):
@@ -205,28 +199,26 @@ class HumanVisualizer:
             crv.append(to_vpython(positions[i]))
 
     def _on_reset(self, evt):
-        """Reset to default standing pose."""
-        default = HumanPose.default_standing()
+        default = HumanPoseAnatomy3D.default_standing()
         self.pose.root_position[:] = default.root_position
-        self.pose.root_rotation[:] = default.root_rotation
-        self.pose.local_rotations[:] = default.local_rotations
+        self.pose.bone_directions[:] = default.bone_directions
         self.pose.bone_lengths[:] = default.bone_lengths
 
-        # Update all slider/winput controls
         for key, (sl, wi) in self._controls.items():
             if key.startswith("root_pos_"):
                 axis = int(key[-1])
                 val = self.pose.root_position[axis]
-            elif key.startswith("root_rot_"):
-                axis = int(key[-1])
-                val = np.degrees(self.pose.root_rotation[axis])
-            elif key.startswith("joint_"):
-                parts = key.split("_")
-                ji, axis = int(parts[1]), int(parts[2])
-                val = np.degrees(self.pose.local_rotations[ji][axis])
-            elif key.startswith("bone_"):
-                ji = int(key.split("_")[1])
-                val = self.pose.bone_lengths[ji]
+            elif key.startswith("bone_dir_az_"):
+                bi = int(key.split("_")[-1])
+                az, _ = direction_to_spherical(self.pose.bone_directions[bi])
+                val = np.degrees(az)
+            elif key.startswith("bone_dir_el_"):
+                bi = int(key.split("_")[-1])
+                _, el = direction_to_spherical(self.pose.bone_directions[bi])
+                val = np.degrees(el)
+            elif key.startswith("bone_len_"):
+                bi = int(key.split("_")[-1])
+                val = self.pose.bone_lengths[bi]
             else:
                 continue
             sl.value = val

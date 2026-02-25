@@ -19,8 +19,6 @@ class OptimizationResult:
         default_factory=lambda: {"a_b": [], "b_c": []}
     )
     mediapipe_bone_lengths: dict[str, float] = field(default_factory=dict)
-    score_history: dict[str, list[float]] = field(default_factory=dict)
-    mpjpe_history: list[float] = field(default_factory=list)
 
 
 def run_optimization(
@@ -82,11 +80,6 @@ def run_optimization(
     optimizer = torch.optim.Adam(params)
 
     bone_length_history = {"a_b": [], "b_c": []}
-    score_history = {
-        "total": [], "heatmap": [],
-        "position": [], "ab_rotation": [], "bc_rotation": [],
-    }
-    mpjpe_history = []
 
     print(f"Optimizing {n_frames} frames for {config.num_steps} steps...")
 
@@ -109,40 +102,19 @@ def run_optimization(
             )
             arms.append(arm)
 
-        # Compute score with components every step
-        total_score, components = score(
-            all_log_heatmaps, arms, cameras, config, return_components=True
-        )
-
-        score_history["total"].append(total_score.item())
-        score_history["heatmap"].append(components["heatmap"])
-        score_history["position"].append(
-            components["position"] * config.position_penalty_weight
-        )
-        score_history["ab_rotation"].append(
-            components["ab_rotation"] * config.ab_rotation_penalty_weight
-        )
-        score_history["bc_rotation"].append(
-            components["bc_rotation"] * config.bc_rotation_penalty_weight
-        )
-
-        # Compute MPJPE against MediaPipe coords
-        with torch.no_grad():
-            total_err = 0.0
-            for i in range(n_frames):
-                arm_coords = arms[i].get_coordinates_numpy()
-                for name in ["a", "b", "c"]:
-                    total_err += np.linalg.norm(arm_coords[name] - mp_coords[i][name])
-            mpjpe_history.append(total_err / (n_frames * 3))
-
+        # Compute score
         if step % 20 == 0:
+            total_score, components = score(
+                all_log_heatmaps, arms, cameras, config, return_components=True
+            )
             print(
                 f"  Step {step:3d}: score={total_score.item():.2f} "
                 f"heatmap={components['heatmap']:.2f} "
                 f"motion={components['weighted_motion']:.2f} "
-                f"mpjpe={mpjpe_history[-1]:.4f} "
                 f"a_b={a_b_length.item():.4f} b_c={b_c_length.item():.4f}"
             )
+        else:
+            total_score = score(all_log_heatmaps, arms, cameras, config)
 
         loss = -total_score
         loss.backward()
@@ -174,6 +146,4 @@ def run_optimization(
         optimized_arms=optimized_arms,
         bone_length_history=bone_length_history,
         mediapipe_bone_lengths={"a_b": mp_a_b_length, "b_c": mp_b_c_length},
-        score_history=score_history,
-        mpjpe_history=mpjpe_history,
     )

@@ -1,0 +1,6 @@
+external/
+checkpoints/
+images/
+training_runs/
+.venv/
+__pycache__/
