@@ -1,21 +1,16 @@
 [project]
 name = "motionbert-pose"
-version = "0.1.0"
-description = "MotionBERT + Stacked Hourglass pose estimation with heatmap optimization"
+version = "0.2.0"
+description = "Full-body FK pose optimisation with MediaPipe on CMU Panoptic"
 requires-python = ">=3.12"
 dependencies = [
     "opencv-python",
     "torch",
-    "torchvision",
     "numpy",
     "matplotlib",
-    "vpython",
-    "setuptools<81",
-    "ultralytics",
-    "tqdm",
-    "easydict",
+    "mediapipe",
     "scipy",
-    "pytorch-stacked-hourglass",
+    "tqdm",
 ]
 
 [tool.setuptools]

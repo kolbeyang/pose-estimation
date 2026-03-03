@@ -1,7 +1,8 @@
-"""Optimization loop for arm pose estimation from heatmaps.
+"""Full-body FK optimization loop.
 
-Uses 3-phase coarse-to-fine: heavily blurred heatmaps → medium blur → sharp.
-Each phase narrows the basin of attraction for better convergence.
+Uses 3-phase coarse-to-fine Gaussian sigma schedule.
+Optimises FK parameters (root position, root rotation, local rotations,
+and shared bone lengths) against 2D MediaPipe detections.
 """
 
 from dataclasses import dataclass, field
@@ -9,182 +10,199 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 
-from model.arm import Arm
+from fk import forward_kinematics, positions_to_fk_params
+from scoring import compute_total_score
+from skeleton import NUM_JOINTS, PARENTS
 from model.camera import Camera
-from scoring import OptimizationConfig, prepare_heatmaps, score
-
-
-# Coarse-to-fine blur schedule: (fraction_of_steps, blur_sigma)
-# Phase 1: root position only with heavy blur (wide basin)
-# Phase 2: all params with medium blur
-# Phase 3: all params with no blur (precise matching)
-BLUR_PHASES = [
-    (0.33, 15.0),   # first 33%: sigma=15
-    (0.66, 5.0),    # next 33%: sigma=5
-    (1.00, 0.0),    # final 33%: no blur
-]
+import config as cfg
 
 
 @dataclass
 class OptimizationResult:
-    mediapipe_coords: list[dict[str, np.ndarray]]
-    optimized_coords: list[dict[str, np.ndarray]]
-    optimized_arms: list[Arm]
-    bone_length_history: dict[str, list[float]] = field(default_factory=lambda: {"a_b": [], "b_c": []})
-    mediapipe_bone_lengths: dict[str, float] = field(default_factory=dict)
+    """Stores initial (MediaPipe) and optimised 3D predictions."""
+    mediapipe_3d: list[np.ndarray]       # Per-frame (17, 3) initial camera-space
+    optimized_3d: list[np.ndarray]       # Per-frame (17, 3) optimised camera-space
+    bone_lengths_final: np.ndarray       # (17,) final bone lengths
     loss_history: list[float] = field(default_factory=list)
+    score_details_history: list[dict] = field(default_factory=list)
+
+
+def _get_sigma(step: int, num_steps: int) -> float:
+    """Get Gaussian sigma for the current step based on blur schedule."""
+    frac = step / max(num_steps - 1, 1)
+    for phase_frac, sigma in cfg.BLUR_PHASES:
+        if frac <= phase_frac:
+            return sigma
+    return cfg.BLUR_PHASES[-1][1]
 
 
 def run_optimization(
-    initial_arms: list[Arm],
-    heatmaps: list[dict[str, np.ndarray]],
-    cameras: list[Camera],
-    mp_a_b_length: float,
-    mp_b_c_length: float,
-    config: OptimizationConfig,
+    initial_positions_cam: list[np.ndarray],
+    target_2d: list[np.ndarray],
+    visibility: list[np.ndarray],
+    camera: Camera,
+    num_steps: int = None,
 ) -> OptimizationResult:
+    """Run full-body FK optimisation.
+
+    Args:
+        initial_positions_cam: Per-frame (17, 3) camera-space positions from MediaPipe.
+        target_2d: Per-frame (17, 2) pixel target positions.
+        visibility: Per-frame (17,) visibility weights.
+        camera: Camera for 3D→2D projection.
+        num_steps: Override for cfg.NUM_STEPS.
+
+    Returns:
+        OptimizationResult with initial and optimised 3D predictions.
     """
-    Optimize arm poses against heatmaps using Adam with coarse-to-fine.
+    if num_steps is None:
+        num_steps = cfg.NUM_STEPS
 
-    3 phases with decreasing heatmap blur (15 → 5 → 0 pixels sigma).
-    Phase 1 optimizes only shoulder position; phases 2-3 optimize all params.
-    """
-    n_frames = len(initial_arms)
+    n_frames = len(initial_positions_cam)
 
-    # Save initial coords before optimization
-    mp_coords = [arm.get_coordinates_numpy() for arm in initial_arms]
+    # Save initial positions for comparison
+    mediapipe_3d = [pos.copy() for pos in initial_positions_cam]
 
-    # Shared learnable bone lengths
-    a_b_length = torch.tensor(mp_a_b_length, dtype=torch.float32, requires_grad=True)
-    b_c_length = torch.tensor(mp_b_c_length, dtype=torch.float32, requires_grad=True)
+    # Convert initial positions to FK parameters
+    all_root_pos = []
+    all_root_rot = []
+    all_local_rots = []
+    all_bone_lengths = []
 
-    # Create optimizable parameters for each frame
-    all_a_pos = []
-    all_a_b_polar = []
-    all_b_c_theta = []
+    for positions in initial_positions_cam:
+        root_pos, root_rot, local_rots, bone_lengths = positions_to_fk_params(positions)
+        all_root_pos.append(root_pos)
+        all_root_rot.append(root_rot)
+        all_local_rots.append(local_rots)
+        all_bone_lengths.append(bone_lengths)
 
-    for arm in initial_arms:
-        a_pos = arm.a_pos.clone().detach().requires_grad_(True)
-        a_b_polar = arm.a_b_polar.clone().detach().requires_grad_(True)
-        b_c_theta = arm.b_c_theta.clone().detach().requires_grad_(True)
-        all_a_pos.append(a_pos)
-        all_a_b_polar.append(a_b_polar)
-        all_b_c_theta.append(b_c_theta)
+    # Create learnable parameters
+    # Per-frame: root position, root rotation, local rotations
+    param_root_pos = [
+        torch.tensor(rp, dtype=torch.float32, requires_grad=True)
+        for rp in all_root_pos
+    ]
+    param_root_rot = [
+        torch.tensor(rr, dtype=torch.float32, requires_grad=True)
+        for rr in all_root_rot
+    ]
+    param_local_rots = [
+        torch.tensor(lr, dtype=torch.float32, requires_grad=True)
+        for lr in all_local_rots
+    ]
 
-    # Precompute blurred heatmap versions for each phase
-    phase_heatmaps = {}
-    for _, sigma in BLUR_PHASES:
-        if sigma not in phase_heatmaps:
-            phase_heatmaps[sigma] = [prepare_heatmaps(h, blur_sigma=sigma) for h in heatmaps]
-            print(f"  Prepared heatmaps with blur sigma={sigma:.0f}")
+    # Shared bone lengths: median across frames
+    median_bone_lengths = np.median(np.array(all_bone_lengths), axis=0)
+    initial_bone_lengths = torch.tensor(
+        median_bone_lengths, dtype=torch.float32,
+    )
+    param_bone_lengths = torch.tensor(
+        median_bone_lengths, dtype=torch.float32, requires_grad=True,
+    )
 
-    bone_length_history = {"a_b": [], "b_c": []}
+    # Target tensors (not learnable)
+    target_2d_t = [
+        torch.tensor(t, dtype=torch.float32) for t in target_2d
+    ]
+    visibility_t = [
+        torch.tensor(v, dtype=torch.float32) for v in visibility
+    ]
+
+    # Optimiser
+    all_params = (
+        param_root_pos + param_root_rot + param_local_rots + [param_bone_lengths]
+    )
+    optimizer = torch.optim.Adam([
+        {"params": param_root_pos, "lr": cfg.LEARNING_RATE},
+        {"params": param_root_rot, "lr": cfg.LEARNING_RATE},
+        {"params": param_local_rots, "lr": cfg.LEARNING_RATE},
+        {"params": [param_bone_lengths], "lr": cfg.BONE_LENGTH_LR},
+    ])
+
     loss_history = []
+    score_details_history = []
 
-    # Set up optimizer — phase 1 freezes angles by using lr=0
-    # We'll rebuild the optimizer at each phase transition
-    current_phase = -1
+    print(f"  Optimising {n_frames} frames for {num_steps} steps...")
 
-    print(f"Optimizing {n_frames} frames for {config.num_steps} steps (3-phase coarse-to-fine)...")
-
-    for step in range(config.num_steps):
-        # Determine current phase
-        frac = step / config.num_steps
-        new_phase = 0
-        current_sigma = BLUR_PHASES[0][1]
-        for phase_idx, (end_frac, sigma) in enumerate(BLUR_PHASES):
-            if frac < end_frac:
-                new_phase = phase_idx
-                current_sigma = sigma
-                break
-
-        # Rebuild optimizer on phase change
-        if new_phase != current_phase:
-            current_phase = new_phase
-            if current_phase == 0:
-                # Phase 1: only optimize position (freeze angles)
-                params = [
-                    {"params": all_a_pos, "lr": config.learning_rate * 5},
-                    {"params": all_a_b_polar, "lr": 0.0},
-                    {"params": all_b_c_theta, "lr": 0.0},
-                    {"params": [a_b_length, b_c_length], "lr": 0.0},
-                ]
-            else:
-                # Phases 2-3: optimize everything
-                params = [
-                    {"params": all_a_pos, "lr": config.learning_rate * 5},
-                    {"params": all_a_b_polar, "lr": config.learning_rate},
-                    {"params": all_b_c_theta, "lr": config.learning_rate},
-                    {"params": [a_b_length, b_c_length], "lr": config.bone_length_lr},
-                ]
-            optimizer = torch.optim.Adam(params)
-            print(f"  Phase {current_phase + 1} (step {step}): sigma={current_sigma:.0f}, "
-                  f"params={'position only' if current_phase == 0 else 'all'}")
-
-        all_log_heatmaps = phase_heatmaps[current_sigma]
-
+    for step in range(num_steps):
         optimizer.zero_grad()
 
-        # Record bone lengths
-        bone_length_history["a_b"].append(a_b_length.item())
-        bone_length_history["b_c"].append(b_c_length.item())
+        sigma = _get_sigma(step, num_steps)
 
-        # Build arms from current parameters
-        arms = []
+        # Forward pass: FK → 3D positions → project to 2D
+        all_positions = []
+        all_projected_2d = []
+        all_local_rots_current = []
+
         for i in range(n_frames):
-            arm = Arm(
-                a_pos=all_a_pos[i],
-                a_b_length=a_b_length,
-                a_b_polar=all_a_b_polar[i],
-                b_c_length=b_c_length,
-                b_c_theta=all_b_c_theta[i],
+            positions_3d = forward_kinematics(
+                param_root_pos[i],
+                param_root_rot[i],
+                param_local_rots[i],
+                param_bone_lengths,
             )
-            arms.append(arm)
+            projected_2d = camera.world_to_image_torch(positions_3d)
+
+            all_positions.append(positions_3d)
+            all_projected_2d.append(projected_2d)
+            all_local_rots_current.append(param_local_rots[i])
 
         # Compute score
-        if step % 20 == 0:
-            total_score, components = score(
-                all_log_heatmaps, arms, cameras, config, return_components=True
-            )
-            print(
-                f"  Step {step:3d}: score={total_score.item():.2f} "
-                f"heatmap={components['heatmap']:.2f} "
-                f"motion={components['weighted_motion']:.2f} "
-                f"a_b={a_b_length.item():.4f} b_c={b_c_length.item():.4f}"
-            )
-        else:
-            total_score = score(all_log_heatmaps, arms, cameras, config)
+        total_score, details = compute_total_score(
+            all_positions,
+            all_projected_2d,
+            all_local_rots_current,
+            target_2d_t,
+            visibility_t,
+            sigma,
+            cfg.POSITION_PENALTY_WEIGHT,
+            cfg.ROTATION_PENALTY_WEIGHT,
+        )
+
+        # Bone length regularisation: keep close to initial estimate
+        bl_reg = ((param_bone_lengths - initial_bone_lengths) ** 2).sum()
+        total_score = total_score - cfg.BONE_LENGTH_REG_WEIGHT * bl_reg
+        details["bl_reg"] = float(bl_reg.item())
 
         loss = -total_score
-        loss_history.append(loss.item())
         loss.backward()
 
-        torch.nn.utils.clip_grad_norm_(
-            all_a_pos + all_a_b_polar + all_b_c_theta + [a_b_length, b_c_length],
-            max_norm=10.0,
-        )
-
+        torch.nn.utils.clip_grad_norm_(all_params, cfg.GRAD_CLIP_NORM)
         optimizer.step()
 
-    # Build final optimized arms
-    optimized_arms = []
-    optimized_coords = []
-    for i in range(n_frames):
-        arm = Arm(
-            a_pos=all_a_pos[i].detach(),
-            a_b_length=a_b_length.detach(),
-            a_b_polar=all_a_b_polar[i].detach(),
-            b_c_length=b_c_length.detach(),
-            b_c_theta=all_b_c_theta[i].detach(),
-        )
-        optimized_arms.append(arm)
-        optimized_coords.append(arm.get_coordinates_numpy())
+        # Clamp bone lengths to positive
+        with torch.no_grad():
+            param_bone_lengths.clamp_(min=0.01)
+
+        loss_history.append(float(loss.item()))
+        score_details_history.append(details)
+
+        if step % 50 == 0 or step == num_steps - 1:
+            print(
+                f"    Step {step:4d}/{num_steps}  "
+                f"loss={loss.item():.1f}  "
+                f"heatmap={details['heatmap']:.1f}  "
+                f"sigma={sigma:.0f}  "
+                f"pos_p={details['pos_penalty']:.4f}  "
+                f"rot_p={details['rot_penalty']:.4f}"
+            )
+
+    # Extract final optimised 3D positions
+    optimized_3d = []
+    with torch.no_grad():
+        for i in range(n_frames):
+            positions = forward_kinematics(
+                param_root_pos[i],
+                param_root_rot[i],
+                param_local_rots[i],
+                param_bone_lengths,
+            )
+            optimized_3d.append(positions.numpy().copy())
 
     return OptimizationResult(
-        mediapipe_coords=mp_coords,
-        optimized_coords=optimized_coords,
-        optimized_arms=optimized_arms,
-        bone_length_history=bone_length_history,
-        mediapipe_bone_lengths={"a_b": mp_a_b_length, "b_c": mp_b_c_length},
+        mediapipe_3d=mediapipe_3d,
+        optimized_3d=optimized_3d,
+        bone_lengths_final=param_bone_lengths.detach().numpy().copy(),
         loss_history=loss_history,
+        score_details_history=score_details_history,
     )

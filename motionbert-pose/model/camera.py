@@ -54,13 +54,28 @@ class Camera:
             return result[0]
         return result
 
-    def world_to_image_torch(self, point: torch.Tensor) -> torch.Tensor:
-        """Differentiable 3D→2D projection. Z gradient enables depth optimization."""
-        X, Y, Z = point[0], point[1], point[2]
-        Z = torch.clamp(Z, min=0.01)
+    def world_to_image_torch(self, points: torch.Tensor) -> torch.Tensor:
+        """Differentiable 3D→2D projection.
+
+        Args:
+            points: (3,) single point or (N, 3) batch of points.
+
+        Returns:
+            (2,) or (N, 2) pixel coordinates.
+        """
+        if points.dim() == 1:
+            X, Y, Z = points[0], points[1], points[2]
+            Z = torch.clamp(Z, min=0.01)
+            u = self._fx_t * X / Z + self._cx_t
+            v = self._fy_t * Y / Z + self._cy_t
+            return torch.stack([u, v])
+
+        X = points[:, 0]
+        Y = points[:, 1]
+        Z = torch.clamp(points[:, 2], min=0.01)
         u = self._fx_t * X / Z + self._cx_t
         v = self._fy_t * Y / Z + self._cy_t
-        return torch.stack([u, v])
+        return torch.stack([u, v], dim=-1)
 
     def reprojection_error(self, pts_2d: np.ndarray, pts_3d: np.ndarray) -> float:
         """Mean reprojection error in pixels."""
