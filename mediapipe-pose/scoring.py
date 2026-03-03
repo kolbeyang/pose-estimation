@@ -14,11 +14,11 @@ EPSILON = 1e-10
 
 @dataclass
 class OptimizationConfig:
-    num_steps: int = 200
+    num_steps: int = 500
     learning_rate: float = 0.0005
-    position_penalty_weight: float = 40
-    ab_rotation_penalty_weight: float = 5
-    bc_rotation_penalty_weight: float = 3
+    position_penalty_weight: float = 0.4
+    ab_rotation_penalty_weight: float = 0.005
+    bc_rotation_penalty_weight: float = 0.003
 
 
 def prepare_heatmaps(heatmaps: dict[str, np.ndarray]) -> dict[str, torch.Tensor]:
