@@ -13,12 +13,23 @@ import sys
 import time
 
 import matplotlib
-matplotlib.use("TkAgg")
+matplotlib.use("macosx")
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 import numpy as np
 
 from skeleton import JOINT_NAMES, BONES, NUM_JOINTS, BODY_GROUPS, GROUP_COLORS_RGB
+
+
+def _draw_camera(ax, radius=0.15):
+    """Draw the camera as a transparent sphere at the origin."""
+    u = np.linspace(0, 2 * np.pi, 20)
+    v = np.linspace(0, np.pi, 15)
+    x = radius * np.outer(np.cos(u), np.sin(v))
+    y = radius * np.outer(np.sin(u), np.sin(v))
+    z = radius * np.outer(np.ones_like(u), np.cos(v))
+    ax.plot_surface(x, y, z, color="gray", alpha=0.2)
+    ax.scatter([0], [0], [0], c="black", s=30, marker="^", label="Camera")
 
 
 def _draw_skeleton(ax, positions, color, label, alpha=0.8):
@@ -52,8 +63,8 @@ def visualize_prediction_file(json_path: str, fps: float = 5.0):
     fig = plt.figure(figsize=(12, 8))
     ax = fig.add_subplot(111, projection="3d")
 
-    # Determine axis limits from all data
-    all_positions = []
+    # Determine axis limits from all data (including camera at origin)
+    all_positions = [np.zeros((1, 3))]  # camera at origin
     for frame in frames:
         all_positions.append(np.array(frame["mediapipe_3d"]))
         all_positions.append(np.array(frame["optimized_3d"]))
@@ -63,6 +74,16 @@ def visualize_prediction_file(json_path: str, fps: float = 5.0):
     center = all_pts.mean(axis=0)
     span = max(all_pts.max(axis=0) - all_pts.min(axis=0)) / 2 * 1.2
 
+    # Mutable zoom state for scroll callback
+    zoom = {"span": span}
+
+    def _on_scroll(event):
+        factor = 0.8 if event.button == "up" else 1.25
+        zoom["span"] *= factor
+
+    fig.canvas.mpl_connect("scroll_event", _on_scroll)
+
+    print("Controls: scroll to zoom, drag to rotate, close window to exit")
     plt.ion()
 
     frame_idx = 0
@@ -72,16 +93,18 @@ def visualize_prediction_file(json_path: str, fps: float = 5.0):
 
         mp = np.array(frame["mediapipe_3d"])
         opt = np.array(frame["optimized_3d"])
-        _draw_skeleton(ax, mp, "green", "MediaPipe")
+        _draw_camera(ax)
+        _draw_skeleton(ax, mp, "green", "Detector")
         _draw_skeleton(ax, opt, "red", "Optimised")
 
         if frame.get("ground_truth_3d") is not None:
             gt = np.array(frame["ground_truth_3d"])
             _draw_skeleton(ax, gt, "blue", "Ground Truth", alpha=0.5)
 
-        ax.set_xlim(center[0] - span, center[0] + span)
-        ax.set_ylim(center[1] - span, center[1] + span)
-        ax.set_zlim(center[2] - span, center[2] + span)
+        s = zoom["span"]
+        ax.set_xlim(center[0] - s, center[0] + s)
+        ax.set_ylim(center[1] - s, center[1] + s)
+        ax.set_zlim(center[2] - s, center[2] + s)
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")

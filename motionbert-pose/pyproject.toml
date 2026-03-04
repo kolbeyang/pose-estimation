@@ -1,16 +1,19 @@
 [project]
 name = "motionbert-pose"
 version = "0.2.0"
-description = "Full-body FK pose optimisation with MediaPipe on CMU Panoptic"
+description = "Full-body FK pose optimisation with MotionBERT on CMU Panoptic"
 requires-python = ">=3.12"
 dependencies = [
     "opencv-python",
     "torch",
+    "torchvision",
     "numpy",
     "matplotlib",
-    "mediapipe",
     "scipy",
     "tqdm",
+    "ultralytics",
+    "easydict",
+    "pytorch-stacked-hourglass",
 ]
 
 [tool.setuptools]

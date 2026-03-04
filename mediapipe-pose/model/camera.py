@@ -1,151 +1,123 @@
-import cv2
 import numpy as np
 import torch
 
 
 class Camera:
+    """Perspective camera with known intrinsics.
+
+    Projects 3D camera-space points to 2D image coordinates:
+        u = fx * X / Z + cx
+        v = fy * Y / Z + cy
+
+    Z gradient flows through the division, enabling depth optimization.
+    """
+
     def __init__(
         self,
-        position: np.ndarray,
-        rotation: np.ndarray,
-        focal_length: tuple[float, float],
-        principal_point: tuple[float, float],
+        fx: float,
+        fy: float,
+        cx: float,
+        cy: float,
         image_size: tuple[int, int],
     ):
-        """
-        Camera model with intrinsic and extrinsic parameters.
-
-        Args:
-            position: Camera position in world coordinates (3,)
-            rotation: Camera rotation matrix (3, 3)
-            focal_length: (fx, fy) focal lengths in pixels
-            principal_point: (cx, cy) principal point in pixels
-            image_size: (height, width) of the image
-        """
-        self.position = np.asarray(position, dtype=np.float64)
-        self.rotation = np.asarray(rotation, dtype=np.float64)
-        self.focal_length = focal_length
-        self.principal_point = principal_point
+        self.fx = fx
+        self.fy = fy
+        self.cx = cx
+        self.cy = cy
         self.image_size = image_size
-        self.K = self._build_intrinsic_matrix()
-
-    def _build_intrinsic_matrix(self) -> np.ndarray:
-        """Build the 3x3 camera intrinsic matrix."""
-        fx, fy = self.focal_length
-        cx, cy = self.principal_point
-        return np.array(
-            [[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float64
-        )
-
-    def world_to_image_torch(self, point: torch.Tensor) -> torch.Tensor:
-        """
-        Project 3D world point to 2D image coordinates (differentiable).
-
-        Args:
-            point: Single point (3,) as torch.Tensor
-
-        Returns:
-            Image coordinates (2,) as torch.Tensor
-        """
-        position = torch.tensor(self.position, dtype=torch.float32)
-        rotation = torch.tensor(self.rotation, dtype=torch.float32)
-        K = torch.tensor(self.K, dtype=torch.float32)
-
-        point_camera = rotation @ (point - position)
-        point_homogeneous = K @ point_camera
-        return point_homogeneous[:2] / point_homogeneous[2]
+        self._fx_t = torch.tensor(fx, dtype=torch.float32)
+        self._fy_t = torch.tensor(fy, dtype=torch.float32)
+        self._cx_t = torch.tensor(cx, dtype=torch.float32)
+        self._cy_t = torch.tensor(cy, dtype=torch.float32)
 
     def world_to_image(self, point: np.ndarray | torch.Tensor) -> np.ndarray:
-        """
-        Project 3D world point(s) to 2D image coordinates.
+        """Project 3D point(s) to 2D image coordinates.
 
         Args:
-            point: Single point (3,) or batch of points (N, 3)
-
-        Returns:
-            Image coordinates (2,) or (N, 2)
+            point: (3,) or (N, 3) in camera coordinates (Z > 0 is forward)
         """
         if isinstance(point, torch.Tensor):
             point = point.detach().numpy()
         point = np.asarray(point, dtype=np.float64)
-        single_point = point.ndim == 1
+        single = point.ndim == 1
 
-        if single_point:
+        if single:
             point = point.reshape(1, 3)
 
-        points_camera = (self.rotation @ (point - self.position).T).T
-        points_homogeneous = (self.K @ points_camera.T).T
-        image_points = points_homogeneous[:, :2] / points_homogeneous[:, 2:3]
+        X, Y, Z = point[:, 0], point[:, 1], point[:, 2]
+        Z = np.maximum(Z, 0.01)  # avoid division by zero
+        u = self.fx * X / Z + self.cx
+        v = self.fy * Y / Z + self.cy
+        result = np.stack([u, v], axis=-1)
 
-        if single_point:
-            return image_points[0]
-        return image_points
+        if single:
+            return result[0]
+        return result
+
+    def world_to_image_torch(self, points: torch.Tensor) -> torch.Tensor:
+        """Differentiable 3D→2D projection.
+
+        Args:
+            points: (3,) single point or (N, 3) batch of points.
+
+        Returns:
+            (2,) or (N, 2) pixel coordinates.
+        """
+        if points.dim() == 1:
+            X, Y, Z = points[0], points[1], points[2]
+            Z = torch.clamp(Z, min=0.01)
+            u = self._fx_t * X / Z + self._cx_t
+            v = self._fy_t * Y / Z + self._cy_t
+            return torch.stack([u, v])
+
+        X = points[:, 0]
+        Y = points[:, 1]
+        Z = torch.clamp(points[:, 2], min=0.01)
+        u = self._fx_t * X / Z + self._cx_t
+        v = self._fy_t * Y / Z + self._cy_t
+        return torch.stack([u, v], dim=-1)
+
+    def reprojection_error(self, pts_2d: np.ndarray, pts_3d: np.ndarray) -> float:
+        """Mean reprojection error in pixels."""
+        reproj = self.world_to_image(pts_3d)
+        return float(np.mean(np.linalg.norm(reproj - pts_2d, axis=1)))
+
+    @classmethod
+    def from_focal_length(
+        cls,
+        focal_length: float,
+        image_size: tuple[int, int],
+    ) -> "Camera":
+        """Create camera with known focal length, principal point at image center.
+
+        Args:
+            focal_length: focal length in pixels (fx = fy)
+            image_size: (height, width)
+        """
+        h, w = image_size
+        return cls(
+            fx=focal_length,
+            fy=focal_length,
+            cx=w / 2.0,
+            cy=h / 2.0,
+            image_size=image_size,
+        )
 
     def to_dict(self) -> dict:
-        """Serialize camera parameters for JSON storage."""
         return {
-            "camera_position": self.position.tolist(),
-            "camera_rotation": self.rotation.tolist(),
-            "focal_length": list(self.focal_length),
-            "principal_point": list(self.principal_point),
+            "fx": self.fx,
+            "fy": self.fy,
+            "cx": self.cx,
+            "cy": self.cy,
             "image_size": list(self.image_size),
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "Camera":
-        """Load camera from JSON dict."""
         return cls(
-            position=np.array(data["camera_position"], dtype=np.float64),
-            rotation=np.array(data["camera_rotation"], dtype=np.float64),
-            focal_length=tuple(data.get("focal_length", (50.0, 50.0))),
-            principal_point=tuple(data.get("principal_point", (50.0, 50.0))),
-            image_size=tuple(data.get("image_size", (100, 100))),
-        )
-
-    @classmethod
-    def fit_from_correspondences(
-        cls,
-        pts_2d_px: np.ndarray,
-        pts_3d: np.ndarray,
-        image_size: tuple[int, int],
-    ) -> "Camera":
-        """
-        Fit pinhole camera from 2D-3D point correspondences using cv2.solvePnP.
-
-        Args:
-            pts_2d_px: 2D pixel coordinates (N, 2)
-            pts_3d: 3D world coordinates (N, 3)
-            image_size: (height, width) of the image
-
-        Returns:
-            Fitted Camera instance
-        """
-        h, w = image_size
-        f = float(max(h, w))
-        cx, cy = w / 2.0, h / 2.0
-
-        camera_matrix = np.array(
-            [[f, 0.0, cx], [0.0, f, cy], [0.0, 0.0, 1.0]], dtype=np.float64
-        )
-        dist_coeffs = np.zeros(4, dtype=np.float64)
-
-        pts_3d = np.asarray(pts_3d, dtype=np.float64)
-        pts_2d_px = np.asarray(pts_2d_px, dtype=np.float64)
-
-        success, rvec, tvec = cv2.solvePnP(
-            pts_3d, pts_2d_px, camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_SQPNP
-        )
-        if not success:
-            raise RuntimeError("solvePnP failed to find a solution")
-
-        R, _ = cv2.Rodrigues(rvec)
-        # Camera position in world coords: C = -R^T @ t
-        position = (-R.T @ tvec).flatten()
-
-        return cls(
-            position=position,
-            rotation=R,
-            focal_length=(f, f),
-            principal_point=(cx, cy),
-            image_size=image_size,
+            fx=data["fx"],
+            fy=data["fy"],
+            cx=data["cx"],
+            cy=data["cy"],
+            image_size=tuple(data["image_size"]),
         )

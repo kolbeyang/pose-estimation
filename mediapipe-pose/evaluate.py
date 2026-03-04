@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from skeleton import NUM_JOINTS, JOINT_NAMES, EVAL_JOINTS, NUM_EVAL_JOINTS
+from skeleton import NUM_JOINTS, JOINT_NAMES
 
 
 def mpjpe(predicted: np.ndarray, target: np.ndarray) -> float:
@@ -29,6 +29,52 @@ def mpjpe_per_joint(predicted: np.ndarray, target: np.ndarray) -> np.ndarray:
         (J,) mean error per joint.
     """
     return np.mean(np.linalg.norm(predicted - target, axis=-1), axis=0)
+
+
+def mpjve(predicted: np.ndarray, target: np.ndarray) -> float:
+    """Mean Per-Joint Velocity Error.
+
+    Args:
+        predicted: (F, J, 3) root-relative positions.
+        target: (F, J, 3) root-relative positions.
+
+    Returns:
+        Scalar MPJVE.
+    """
+    pred_vel = np.diff(predicted, axis=0)
+    tgt_vel = np.diff(target, axis=0)
+    return float(np.mean(np.linalg.norm(pred_vel - tgt_vel, axis=-1)))
+
+
+def mpjve_per_joint(predicted: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """Per-joint velocity error.
+
+    Args:
+        predicted: (F, J, 3)
+        target: (F, J, 3)
+
+    Returns:
+        (J,) mean velocity error per joint.
+    """
+    pred_vel = np.diff(predicted, axis=0)
+    tgt_vel = np.diff(target, axis=0)
+    return np.mean(np.linalg.norm(pred_vel - tgt_vel, axis=-1), axis=0)
+
+
+def mpjve_per_frame(predicted: np.ndarray, target: np.ndarray) -> list[float]:
+    """Per-frame velocity error (F-1 values).
+
+    Args:
+        predicted: (F, J, 3)
+        target: (F, J, 3)
+
+    Returns:
+        List of length F-1, mean joint velocity error per frame transition.
+    """
+    pred_vel = np.diff(predicted, axis=0)
+    tgt_vel = np.diff(target, axis=0)
+    return [float(np.mean(np.linalg.norm(pred_vel[i] - tgt_vel[i], axis=-1)))
+            for i in range(pred_vel.shape[0])]
 
 
 def root_relative(positions: np.ndarray) -> np.ndarray:
@@ -127,48 +173,50 @@ def compute_comparison(
     opt_arr = np.array([optimized_3d[i] for i in gt_indices])
     gt_arr = np.array([gt_3d[i] for i in gt_indices])
 
-    # Root-relative: subtract joint 0 (hip) from all 17 joints first,
-    # then slice to eval joints for error computation.
+    # Root-relative comparison
     mp_rr = root_relative(mp_arr)
     opt_rr = root_relative(opt_arr)
     gt_rr = root_relative(gt_arr)
 
-    # Slice to only the 12 consistently-mapped eval joints
-    ej = EVAL_JOINTS
-    mp_eval = mp_rr[:, ej, :]
-    opt_eval = opt_rr[:, ej, :]
-    gt_eval = gt_rr[:, ej, :]
+    results["mp_mpjpe"] = mpjpe(mp_rr, gt_rr)
+    results["opt_mpjpe"] = mpjpe(opt_rr, gt_rr)
+    results["mp_p_mpjpe"] = p_mpjpe(mp_rr, gt_rr)
+    results["opt_p_mpjpe"] = p_mpjpe(opt_rr, gt_rr)
 
-    results["mp_mpjpe"] = mpjpe(mp_eval, gt_eval)
-    results["opt_mpjpe"] = mpjpe(opt_eval, gt_eval)
-    results["mp_p_mpjpe"] = p_mpjpe(mp_eval, gt_eval)
-    results["opt_p_mpjpe"] = p_mpjpe(opt_eval, gt_eval)
+    # Per-joint errors
+    results["mp_per_joint"] = mpjpe_per_joint(mp_rr, gt_rr).tolist()
+    results["opt_per_joint"] = mpjpe_per_joint(opt_rr, gt_rr).tolist()
 
-    # Per-joint errors (12 eval joints)
-    results["mp_per_joint"] = mpjpe_per_joint(mp_eval, gt_eval).tolist()
-    results["opt_per_joint"] = mpjpe_per_joint(opt_eval, gt_eval).tolist()
-
-    # Per-frame MPJPE (over eval joints only)
+    # Per-frame MPJPE
     results["mp_per_frame_mpjpe"] = [
-        float(np.mean(np.linalg.norm(mp_eval[i] - gt_eval[i], axis=-1)))
+        float(np.mean(np.linalg.norm(mp_rr[i] - gt_rr[i], axis=-1)))
         for i in range(len(gt_indices))
     ]
     results["opt_per_frame_mpjpe"] = [
-        float(np.mean(np.linalg.norm(opt_eval[i] - gt_eval[i], axis=-1)))
+        float(np.mean(np.linalg.norm(opt_rr[i] - gt_rr[i], axis=-1)))
         for i in range(len(gt_indices))
     ]
 
-    # Per-joint P-MPJPE (Procrustes on eval joints only)
-    mp_p_per_joint = np.zeros(NUM_EVAL_JOINTS)
-    opt_p_per_joint = np.zeros(NUM_EVAL_JOINTS)
+    # Per-joint P-MPJPE (Procrustes-aligned per-joint error)
+    mp_p_per_joint = np.zeros(NUM_JOINTS)
+    opt_p_per_joint = np.zeros(NUM_JOINTS)
     for i in range(len(gt_indices)):
-        mp_aligned = procrustes_align(mp_eval[i], gt_eval[i])
-        opt_aligned = procrustes_align(opt_eval[i], gt_eval[i])
-        mp_p_per_joint += np.linalg.norm(mp_aligned - gt_eval[i], axis=-1)
-        opt_p_per_joint += np.linalg.norm(opt_aligned - gt_eval[i], axis=-1)
+        mp_aligned = procrustes_align(mp_rr[i], gt_rr[i])
+        opt_aligned = procrustes_align(opt_rr[i], gt_rr[i])
+        mp_p_per_joint += np.linalg.norm(mp_aligned - gt_rr[i], axis=-1)
+        opt_p_per_joint += np.linalg.norm(opt_aligned - gt_rr[i], axis=-1)
     mp_p_per_joint /= len(gt_indices)
     opt_p_per_joint /= len(gt_indices)
     results["mp_p_per_joint"] = mp_p_per_joint.tolist()
     results["opt_p_per_joint"] = opt_p_per_joint.tolist()
+
+    # MPJVE (velocity error) — need at least 2 GT frames
+    if len(gt_indices) >= 2:
+        results["mp_mpjve"] = mpjve(mp_rr, gt_rr)
+        results["opt_mpjve"] = mpjve(opt_rr, gt_rr)
+        results["mp_mpjve_per_joint"] = mpjve_per_joint(mp_rr, gt_rr).tolist()
+        results["opt_mpjve_per_joint"] = mpjve_per_joint(opt_rr, gt_rr).tolist()
+        results["mp_per_frame_mpjve"] = mpjve_per_frame(mp_rr, gt_rr)
+        results["opt_per_frame_mpjve"] = mpjve_per_frame(opt_rr, gt_rr)
 
     return results

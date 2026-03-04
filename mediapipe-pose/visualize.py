@@ -1,130 +1,136 @@
-"""VPython visualization for MediaPipe arm poses."""
+"""Standalone 3D visualisation: load a predictions JSON and animate.
 
+Usage:
+    python visualize.py results/predictions/171204_pose1_sample_0.json
+
+Shows MediaPipe (green) vs Optimised (red) skeletons side-by-side,
+with optional Ground Truth (blue).
+"""
+
+import argparse
+import json
+import sys
+import time
+
+import matplotlib
+matplotlib.use("macosx")
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 import numpy as np
-import torch
-from vpython import canvas, box, sphere, curve, vector, color, rate, checkbox
 
-from model.camera import Camera
-from model.environment import Environment
+from skeleton import JOINT_NAMES, BONES, NUM_JOINTS, BODY_GROUPS, GROUP_COLORS_RGB
 
 
-def to_vpython(arr: np.ndarray | torch.Tensor) -> vector:
-    """Convert numpy array or torch tensor to vpython vector."""
-    if isinstance(arr, torch.Tensor):
-        arr = arr.detach().numpy()
-    return vector(float(arr[0]), float(arr[1]), float(arr[2]))
+def _draw_camera(ax, radius=0.15):
+    """Draw the camera as a transparent sphere at the origin."""
+    u = np.linspace(0, 2 * np.pi, 20)
+    v = np.linspace(0, np.pi, 15)
+    x = radius * np.outer(np.cos(u), np.sin(v))
+    y = radius * np.outer(np.sin(u), np.sin(v))
+    z = radius * np.outer(np.ones_like(u), np.cos(v))
+    ax.plot_surface(x, y, z, color="gray", alpha=0.2)
+    ax.scatter([0], [0], [0], c="black", s=30, marker="^", label="Camera")
 
 
-ARM_COLORS = [
-    color.green,   # MediaPipe
-    color.red,     # Optimized
-    color.yellow,  # CMU GT
-]
-
-ARM_LABELS = [
-    "MediaPipe",
-    "Optimized",
-    "CMU GT",
-]
-
-
-class Visualizer:
-    def __init__(self, env: Environment, coords_list: list[dict], camera: Camera | None = None, fps: int = 10):
-        """
-        Args:
-            env: Environment object defining the scene bounds
-            coords_list: List of coordinate dicts, each with keys "a", "b", "c"
-            camera: Optional Camera object to display as transparent red sphere
-            fps: Frames per second for animation
-        """
-        self.fps = fps
-        self.scene = canvas(
-            title="MediaPipe (green) vs Optimized (red)",
-            width=800,
-            height=600,
-            center=vector(0, 0, 0),
-            background=color.gray(0.2),
-        )
-        self.scene.up = vector(0, 0, 1)
-        self.scene.forward = vector(-1, -0.5, -1)
-        self.scene.range = 1.0
-
-        # Camera position
-        if camera is not None:
-            camera_pos = to_vpython(camera.position)
-            sphere(pos=camera_pos, radius=0.02, color=color.red, opacity=0.2)
-
-        # Environment cube
-        box(
-            pos=vector(0, 0, 0),
-            size=vector(env.cube_size, env.cube_size, env.cube_size),
-            color=color.white,
-            opacity=0.1,
+def _draw_skeleton(ax, positions, color, label, alpha=0.8):
+    """Draw joints + bones for one skeleton."""
+    ax.scatter(
+        positions[:, 0], positions[:, 1], positions[:, 2],
+        c=[color], s=20, alpha=alpha, label=label,
+    )
+    for parent, child in BONES:
+        ax.plot(
+            [positions[parent, 0], positions[child, 0]],
+            [positions[parent, 1], positions[child, 1]],
+            [positions[parent, 2], positions[child, 2]],
+            color=color, alpha=alpha, linewidth=1.5,
         )
 
-        # Create visualization objects for each arm
-        self.arms = []
-        self.arm_visible = []
 
-        for i, coords in enumerate(coords_list):
-            arm_color = ARM_COLORS[i % len(ARM_COLORS)]
+def visualize_prediction_file(json_path: str, fps: float = 5.0):
+    """Animate a predictions JSON file."""
+    with open(json_path) as f:
+        data = json.load(f)
 
-            sphere_a = sphere(
-                pos=to_vpython(coords["a"]), radius=0.02, color=arm_color
-            )
-            sphere_b = sphere(
-                pos=to_vpython(coords["b"]), radius=0.015, color=arm_color
-            )
-            sphere_c = sphere(
-                pos=to_vpython(coords["c"]), radius=0.01, color=arm_color
-            )
-            arm_curve = curve(
-                pos=[
-                    to_vpython(coords["a"]),
-                    to_vpython(coords["b"]),
-                    to_vpython(coords["c"]),
-                ],
-                radius=0.003,
-                color=arm_color,
-            )
-            self.arms.append((sphere_a, sphere_b, sphere_c, arm_curve))
-            self.arm_visible.append(True)
+    frames = data["frames"]
+    title = data.get("sequence", json_path)
+    n_frames = len(frames)
 
-        # Create toggle checkboxes
-        self.scene.append_to_caption("\n\nToggle Arms:\n")
-        for i in range(len(coords_list)):
-            arm_label = ARM_LABELS[i] if i < len(ARM_LABELS) else f"Arm {i}"
-            checkbox(bind=self._make_toggle_handler(i), text=arm_label, checked=True)
-            self.scene.append_to_caption("  ")
+    print(f"Loaded {n_frames} frames from {json_path}")
+    print(f"Sequence: {title}")
+    print("Controls: close window to exit")
 
-    def _make_toggle_handler(self, arm_index: int):
-        def handler(evt):
-            self._set_arm_visible(arm_index, evt.checked)
-        return handler
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(111, projection="3d")
 
-    def _set_arm_visible(self, arm_index: int, visible: bool):
-        if arm_index >= len(self.arms):
-            return
-        self.arm_visible[arm_index] = visible
-        sphere_a, sphere_b, sphere_c, arm_curve = self.arms[arm_index]
-        sphere_a.visible = visible
-        sphere_b.visible = visible
-        sphere_c.visible = visible
-        arm_curve.visible = visible
+    # Determine axis limits from all data (including camera at origin)
+    all_positions = [np.zeros((1, 3))]  # camera at origin
+    for frame in frames:
+        all_positions.append(np.array(frame["mediapipe_3d"]))
+        all_positions.append(np.array(frame["optimized_3d"]))
+        if frame.get("ground_truth_3d") is not None:
+            all_positions.append(np.array(frame["ground_truth_3d"]))
+    all_pts = np.concatenate(all_positions, axis=0)
+    center = all_pts.mean(axis=0)
+    span = max(all_pts.max(axis=0) - all_pts.min(axis=0)) / 2 * 1.2
 
-    def update(self, coords_list: list[dict]):
-        """Update positions for all arms."""
-        for i, coords in enumerate(coords_list):
-            if i >= len(self.arms):
-                break
-            if not self.arm_visible[i]:
-                continue
+    plt.ion()
 
-            sphere_a, sphere_b, sphere_c, arm_curve = self.arms[i]
-            sphere_a.pos = to_vpython(coords["a"])
-            sphere_b.pos = to_vpython(coords["b"])
-            sphere_c.pos = to_vpython(coords["c"])
-            arm_curve.clear()
-            arm_curve.append(to_vpython(coords["a"]))
-            arm_curve.append(to_vpython(coords["b"]))
-            arm_curve.append(to_vpython(coords["c"]))
+    # Track user's view state so zoom/rotation persists across redraws
+    user_xlim = (center[0] - span, center[0] + span)
+    user_ylim = (center[1] - span, center[1] + span)
+    user_zlim = (center[2] - span, center[2] + span)
+    user_elev = ax.elev
+    user_azim = ax.azim
+
+    frame_idx = 0
+    while plt.fignum_exists(fig.number):
+        # Save current view (may have been changed by user interaction)
+        user_elev = ax.elev
+        user_azim = ax.azim
+        user_xlim = ax.get_xlim()
+        user_ylim = ax.get_ylim()
+        user_zlim = ax.get_zlim()
+
+        ax.cla()
+
+        frame = frames[frame_idx]
+        mp = np.array(frame["mediapipe_3d"])
+        opt = np.array(frame["optimized_3d"])
+        _draw_camera(ax)
+        _draw_skeleton(ax, mp, "green", "MediaPipe")
+        _draw_skeleton(ax, opt, "red", "Optimised")
+
+        if frame.get("ground_truth_3d") is not None:
+            gt = np.array(frame["ground_truth_3d"])
+            _draw_skeleton(ax, gt, "blue", "Ground Truth", alpha=0.5)
+
+        # Restore user's view state
+        ax.set_xlim(user_xlim)
+        ax.set_ylim(user_ylim)
+        ax.set_zlim(user_zlim)
+        ax.view_init(elev=user_elev, azim=user_azim)
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+        ax.set_title(f"{title}  —  Frame {frame_idx}/{n_frames}")
+        ax.legend(fontsize=8, loc="upper left")
+
+        plt.draw()
+        plt.pause(1.0 / fps)
+        frame_idx = (frame_idx + 1) % n_frames
+
+    plt.ioff()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Visualise 3D pose predictions")
+    parser.add_argument("json_path", help="Path to predictions JSON file")
+    parser.add_argument("--fps", type=float, default=5.0, help="Playback FPS")
+    args = parser.parse_args()
+
+    visualize_prediction_file(args.json_path, fps=args.fps)
+
+
+if __name__ == "__main__":
+    main()

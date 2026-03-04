@@ -1,158 +1,110 @@
-"""Scoring functions for pose optimization (adapted from toy-arm/utils.py)."""
+"""Scoring functions for full-body FK optimization.
 
-from dataclasses import dataclass
+Uses analytical Gaussian score (equivalent to sampling log-Gaussian heatmaps
+but without materialising any heatmap images).
+"""
 
-import numpy as np
 import torch
-import torch.nn.functional as F
-
-from model.arm import Arm
-from model.camera import Camera
-
-EPSILON = 1e-10
 
 
-@dataclass
-class OptimizationConfig:
-    num_steps: int = 500
-    learning_rate: float = 0.0005
-    position_penalty_weight: float = 0.4
-    ab_rotation_penalty_weight: float = 0.005
-    bc_rotation_penalty_weight: float = 0.003
-
-
-def prepare_heatmaps(heatmaps: dict[str, np.ndarray]) -> dict[str, torch.Tensor]:
-    """Convert heatmaps to log-normalized torch tensors."""
-    result = {}
-    for name, heatmap in heatmaps.items():
-        normalized = heatmap.astype(np.float32) / 255.0
-        log_heatmap = np.log(normalized + EPSILON)
-        result[name] = torch.tensor(log_heatmap).unsqueeze(0).unsqueeze(0)
-    return result
-
-
-def sample_heatmap(
-    heatmap: torch.Tensor, x: torch.Tensor, y: torch.Tensor
+def heatmap_score(
+    projected_2d: torch.Tensor,
+    target_2d: torch.Tensor,
+    visibility: torch.Tensor,
+    sigma: float,
 ) -> torch.Tensor:
-    """Sample heatmap at (x, y) using differentiable bilinear interpolation."""
-    H, W = heatmap.shape[2], heatmap.shape[3]
+    """Analytical Gaussian heatmap log-likelihood.
 
-    x_norm = 2.0 * x / (W - 1) - 1.0
-    y_norm = 2.0 * y / (H - 1) - 1.0
+    Equivalent to generating a Gaussian blob at each target_2d position and
+    sampling its log-value at the projected position, but computed in closed
+    form — O(J) instead of O(J * H * W).
 
-    grid = torch.stack([x_norm, y_norm], dim=-1).view(1, 1, 1, 2)
+    Args:
+        projected_2d: (J, 2) differentiable projected 2D positions.
+        target_2d: (J, 2) target 2D positions from MediaPipe.
+        visibility: (J,) weights in [0, 1].
+        sigma: Gaussian sigma in pixels (controls blur / gradient basin).
 
-    sampled = F.grid_sample(
-        heatmap, grid, mode="bilinear", padding_mode="border", align_corners=True
-    )
-    return sampled.squeeze()
+    Returns:
+        Scalar score (higher = better alignment).
+    """
+    diff = projected_2d - target_2d
+    sq_dist = (diff ** 2).sum(dim=-1)   # (J,)
+    log_likelihood = -sq_dist / (2.0 * sigma ** 2)
+    return (log_likelihood * visibility).sum()
 
 
-def score_pose_against_heatmap(
-    log_heatmaps: dict[str, torch.Tensor],
-    arm: Arm,
-    camera: Camera,
+def motion_penalty_position(
+    positions_prev: torch.Tensor,
+    positions_curr: torch.Tensor,
 ) -> torch.Tensor:
-    """Compute differentiable score for a single pose against heatmaps."""
-    coords = arm.get_coordinates()
-
-    total = torch.tensor(0.0)
-    for name in ["a", "b", "c"]:
-        image_point = camera.world_to_image_torch(coords[name])
-        x, y = image_point[0], image_point[1]
-        total = total + sample_heatmap(log_heatmaps[name], x, y)
-
-    return total
+    """Penalise large root (hip) position jumps between consecutive frames."""
+    diff = positions_curr[0] - positions_prev[0]
+    return (diff ** 2).sum()
 
 
-def score_position_change(arm0: Arm, arm1: Arm) -> torch.Tensor:
-    """Compute position change penalty between two consecutive arm poses."""
-    coords0 = arm0.get_coordinates()
-    coords1 = arm1.get_coordinates()
+def motion_penalty_rotation(
+    local_rots_prev: torch.Tensor,
+    local_rots_curr: torch.Tensor,
+    per_joint_weights: torch.Tensor,
+) -> torch.Tensor:
+    """Penalise large rotation jumps between consecutive frames.
 
-    diff = coords1["a"] - coords0["a"]
-    return torch.sqrt(torch.sum(diff**2) + EPSILON)
-
-
-def score_ab_rotation_change(arm0: Arm, arm1: Arm) -> torch.Tensor:
-    """Compute upper arm rotation change penalty."""
-    origin = torch.zeros(3)
-
-    unit_arm0 = Arm(origin, 1.0, arm0.a_b_polar, 1.0, torch.tensor(0.0))
-    b0 = unit_arm0.get_coordinates()["b"]
-
-    unit_arm1 = Arm(origin, 1.0, arm1.a_b_polar, 1.0, torch.tensor(0.0))
-    b1 = unit_arm1.get_coordinates()["b"]
-
-    diff = b1 - b0
-    return torch.sqrt(torch.sum(diff**2) + EPSILON)
-
-
-def score_bc_rotation_change(arm0: Arm, arm1: Arm) -> torch.Tensor:
-    """Compute forearm rotation change penalty."""
-    origin = torch.zeros(3)
-
-    polar0 = torch.stack([torch.tensor(0.0), torch.tensor(0.0), arm0.a_b_polar[2]])
-    unit_arm0 = Arm(origin, 1.0, polar0, 1.0, arm0.b_c_theta)
-    c0 = unit_arm0.get_coordinates()["c"]
-
-    polar1 = torch.stack([torch.tensor(0.0), torch.tensor(0.0), arm1.a_b_polar[2]])
-    unit_arm1 = Arm(origin, 1.0, polar1, 1.0, arm1.b_c_theta)
-    c1 = unit_arm1.get_coordinates()["c"]
-
-    diff = c1 - c0
-    return torch.sqrt(torch.sum(diff**2) + EPSILON)
-
-
-def score(
-    all_log_heatmaps: list[dict[str, torch.Tensor]],
-    arms: list[Arm],
-    cameras: list[Camera],
-    config: OptimizationConfig,
-    return_components: bool = False,
-) -> torch.Tensor | tuple[torch.Tensor, dict[str, float]]:
+    Args:
+        local_rots_prev: (J, 3) axis-angle rotations for previous frame.
+        local_rots_curr: (J, 3) axis-angle rotations for current frame.
+        per_joint_weights: (J,) per-joint penalty weights (inner > outer).
     """
-    Compute total score across all frames (higher is better).
+    diff = local_rots_curr - local_rots_prev  # (J, 3)
+    per_joint = (diff ** 2).sum(dim=-1)        # (J,)
+    return (per_joint * per_joint_weights).sum()
 
-    Uses per-frame cameras (one camera per frame).
+
+def compute_total_score(
+    all_positions: list[torch.Tensor],
+    all_projected_2d: list[torch.Tensor],
+    all_local_rots: list[torch.Tensor],
+    target_2d_list: list[torch.Tensor],
+    visibility_list: list[torch.Tensor],
+    sigma: float,
+    position_penalty_weight: float,
+    rotation_penalty_weight: float,
+    rotation_per_joint_weights: torch.Tensor,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Compute total score across all frames.
+
+    Returns:
+        (total_score, details_dict)
+        total_score is positive = good, to be maximised (loss = -score).
     """
-    assert len(all_log_heatmaps) == len(arms)
-    assert len(cameras) == len(arms)
+    n_frames = len(all_positions)
+    total_heatmap = torch.tensor(0.0)
+    total_pos_penalty = torch.tensor(0.0)
+    total_rot_penalty = torch.tensor(0.0)
 
-    heatmap_total = torch.tensor(0.0)
-    for i, arm in enumerate(arms):
-        heatmap_total = heatmap_total + score_pose_against_heatmap(
-            all_log_heatmaps[i], arm, cameras[i]
+    for i in range(n_frames):
+        total_heatmap = total_heatmap + heatmap_score(
+            all_projected_2d[i], target_2d_list[i], visibility_list[i], sigma,
         )
+        if i > 0:
+            total_pos_penalty = total_pos_penalty + motion_penalty_position(
+                all_positions[i - 1], all_positions[i],
+            )
+            total_rot_penalty = total_rot_penalty + motion_penalty_rotation(
+                all_local_rots[i - 1], all_local_rots[i],
+                rotation_per_joint_weights,
+            )
 
-    position_penalty = torch.tensor(0.0)
-    ab_rotation_penalty = torch.tensor(0.0)
-    bc_rotation_penalty = torch.tensor(0.0)
-
-    for i in range(len(arms) - 1):
-        arm0 = arms[i]
-        arm1 = arms[i + 1]
-
-        position_penalty = position_penalty + score_position_change(arm0, arm1)
-        ab_rotation_penalty = ab_rotation_penalty + score_ab_rotation_change(arm0, arm1)
-        bc_rotation_penalty = bc_rotation_penalty + score_bc_rotation_change(arm0, arm1)
-
-    motion_penalty = (
-        config.position_penalty_weight * position_penalty
-        + config.ab_rotation_penalty_weight * ab_rotation_penalty
-        + config.bc_rotation_penalty_weight * bc_rotation_penalty
+    total_score = (
+        total_heatmap
+        - position_penalty_weight * total_pos_penalty
+        - rotation_penalty_weight * total_rot_penalty
     )
 
-    total_score = heatmap_total - motion_penalty
-
-    if return_components:
-        components = {
-            "heatmap": heatmap_total.item(),
-            "position": position_penalty.item(),
-            "ab_rotation": ab_rotation_penalty.item(),
-            "bc_rotation": bc_rotation_penalty.item(),
-            "weighted_motion": motion_penalty.item(),
-        }
-        return total_score, components
-
-    return total_score
+    details = {
+        "heatmap": float(total_heatmap.item()),
+        "pos_penalty": float(total_pos_penalty.item()),
+        "rot_penalty": float(total_rot_penalty.item()),
+        "total": float(total_score.item()),
+    }
+    return total_score, details

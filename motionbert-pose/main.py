@@ -2,7 +2,7 @@
 
 For each example:
   1. Extract video frames from CMU HD video.
-  2. Run MediaPipe to get 2D + 3D poses.
+  2. Run MotionBERT to get 2D + 3D poses.
   3. Load CMU 3D ground truth + camera calibration.
   4. Convert everything to camera coordinates.
   5. Optimise FK parameters against 2D detections.
@@ -12,13 +12,11 @@ For each example:
 
 import json
 import os
-
-import numpy as np
+from datetime import datetime
 
 import config as cfg
-from detect import detect_poses, mediapipe_3d_to_camera
+from detect import detect_poses, detector_3d_to_camera
 from evaluate import compute_comparison
-from fk import positions_to_fk_params
 from graphs import (
     generate_aggregate_summary,
     generate_bone_lengths_graph,
@@ -28,6 +26,7 @@ from graphs import (
     generate_summary,
     generate_trajectory_graphs,
 )
+from overlay_video import generate_overlay_video
 from model.camera import Camera
 from optimize import run_optimization
 from panoptic import (
@@ -38,7 +37,7 @@ from panoptic import (
     load_ground_truth_sequence,
     world_to_camera,
 )
-from skeleton import JOINT_NAMES, NUM_JOINTS
+from skeleton import JOINT_NAMES
 
 
 def _example_name(seq: str, start: int) -> str:
@@ -51,6 +50,7 @@ def process_example(
     start_frame: int,
     num_frames: int,
     person_idx: int,
+    run_dir: str,
 ) -> dict:
     """Process one CMU Panoptic example end-to-end."""
     name = _example_name(seq_name, start_frame)
@@ -108,18 +108,19 @@ def process_example(
         print("    ERROR: Need at least 2 frames. Skipping.")
         return {}
 
-    # --- 3. Run MediaPipe ---
-    print(f"\n  [3/7] Running MediaPipe on {len(frames_rgb)} frames...")
-    kp_2d, kp_3d, visibility = detect_poses(frames_rgb)
+    # --- 3. Run MotionBERT ---
+    print(f"\n  [3/7] Running MotionBERT on {len(frames_rgb)} frames...")
+    kp_2d, kp_3d, visibility, heatmaps, affine = detect_poses(frames_rgb)
     n_detected = sum(1 for v in visibility if v.mean() > 0.3)
     print(f"    Detected poses in {n_detected}/{len(frames_rgb)} frames")
+    print(f"    Heatmaps: {len(heatmaps)} frames × {heatmaps[0].shape}")
 
     # --- 4. Convert to camera coordinates ---
     print("\n  [4/7] Converting to camera coordinates...")
-    # MediaPipe 3D → camera space
+    # MotionBERT 3D → camera space
     mp_cam_positions = []
     for i in range(len(frames_rgb)):
-        pos_cam = mediapipe_3d_to_camera(
+        pos_cam = detector_3d_to_camera(
             kp_3d[i], kp_2d[i], fx, fy, cx, cy,
         )
         mp_cam_positions.append(pos_cam)
@@ -144,7 +145,8 @@ def process_example(
     print("\n  [5/7] Running FK optimisation...")
     result = run_optimization(
         initial_positions_cam=mp_cam_positions,
-        target_2d=kp_2d,
+        heatmaps_raw=heatmaps,
+        affine_256_to_pixel=affine,
         visibility=visibility,
         camera=camera,
     )
@@ -164,10 +166,11 @@ def process_example(
 
     # --- 7. Save results ---
     print("\n  [7/7] Saving results...")
-    example_graph_dir = os.path.join(cfg.GRAPHS_DIR, name)
+    predictions_dir = os.path.join(run_dir, "predictions")
+    example_graph_dir = os.path.join(run_dir, "graphs", name)
 
     # Prediction JSON
-    os.makedirs(cfg.PREDICTIONS_DIR, exist_ok=True)
+    os.makedirs(predictions_dir, exist_ok=True)
     pred_data = {
         "sequence": seq_name,
         "camera": camera_name,
@@ -185,6 +188,7 @@ def process_example(
             "mediapipe_3d": result.mediapipe_3d[i].tolist(),
             "optimized_3d": result.optimized_3d[i].tolist(),
             "mediapipe_2d": kp_2d[i].tolist(),
+            "visibility": visibility[i].tolist(),
         }
         if gt_cam[i] is not None:
             frame_data["ground_truth_3d"] = gt_cam[i].tolist()
@@ -192,7 +196,7 @@ def process_example(
             frame_data["ground_truth_3d"] = None
         pred_data["frames"].append(frame_data)
 
-    json_path = os.path.join(cfg.PREDICTIONS_DIR, f"{name}.json")
+    json_path = os.path.join(predictions_dir, f"{name}.json")
     with open(json_path, "w") as f:
         json.dump(pred_data, f, indent=2)
     print(f"    Saved predictions: {json_path}")
@@ -221,16 +225,27 @@ def process_example(
     )
     print(f"    Saved graphs: {example_graph_dir}")
 
+    # Overlay video
+    overlay_path = os.path.join(example_graph_dir, f"{name}_overlay.mp4")
+    generate_overlay_video(
+        json_path, overlay_path,
+        heatmaps_list=heatmaps,
+        affine_256_to_pixel=affine,
+    )
+
     return metrics
 
 
 def main():
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_dir = os.path.join(cfg.TRAINING_RUNS_DIR, f"motionbert-run-{timestamp}")
+    os.makedirs(run_dir, exist_ok=True)
+
     print("=" * 60)
     print("  Full-Body FK Pose Optimisation Pipeline")
     print(f"  {len(cfg.EXAMPLES)} examples to process")
+    print(f"  Run: {run_dir}")
     print("=" * 60)
-
-    os.makedirs(cfg.RESULTS_DIR, exist_ok=True)
 
     all_metrics = []
     for example in cfg.EXAMPLES:
@@ -238,6 +253,7 @@ def main():
         try:
             metrics = process_example(
                 seq_name, camera_name, start_frame, num_frames, person_idx,
+                run_dir,
             )
             if metrics:
                 all_metrics.append(metrics)
@@ -249,11 +265,12 @@ def main():
 
     # Aggregate summary
     if all_metrics:
-        generate_aggregate_summary(all_metrics, cfg.GRAPHS_DIR)
+        graphs_dir = os.path.join(run_dir, "graphs")
+        generate_aggregate_summary(all_metrics, graphs_dir)
 
     print(f"\n{'='*60}")
     print(f"  Done. {len(all_metrics)}/{len(cfg.EXAMPLES)} examples processed.")
-    print(f"  Results: {cfg.RESULTS_DIR}")
+    print(f"  Results: {run_dir}")
     print(f"{'='*60}")
 
 
