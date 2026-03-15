@@ -46,7 +46,7 @@ def run_experiment(attempt_name="test"):
 
     print(f"Running experiment '{attempt_name}' on {name}")
     print(f"Config: SIGMA={cfg.SIGMA}, POS_W={cfg.POSITION_PENALTY_WEIGHT}, "
-          f"ROT_W={cfg.ROTATION_PENALTY_WEIGHT}, BL_REG={cfg.BONE_LENGTH_REG_WEIGHT}, "
+          f"BL_LR={cfg.BONE_LENGTH_LR}, "
           f"LR={cfg.LEARNING_RATE}, STEPS={cfg.NUM_STEPS}")
     print(f"Rot per-joint weights: {cfg.ROTATION_PENALTY_PER_JOINT.tolist()}")
 
@@ -104,7 +104,7 @@ def run_experiment(attempt_name="test"):
     )
 
     # --- Evaluate ---
-    metrics = compute_comparison(result.mediapipe_3d, result.optimized_3d, gt_cam)
+    metrics = compute_comparison(result.mediapipe_3d, result.optimized_3d, gt_cam, camera)
 
     print(f"\n  MP  MPJPE:   {metrics.get('mp_mpjpe', 0)*100:.2f} cm")
     print(f"  Opt MPJPE:   {metrics.get('opt_mpjpe', 0)*100:.2f} cm")
@@ -121,8 +121,7 @@ def run_experiment(attempt_name="test"):
         "config": {
             "sigma": cfg.SIGMA,
             "position_penalty_weight": cfg.POSITION_PENALTY_WEIGHT,
-            "rotation_penalty_weight": cfg.ROTATION_PENALTY_WEIGHT,
-            "bone_length_reg_weight": cfg.BONE_LENGTH_REG_WEIGHT,
+            "bone_length_lr": cfg.BONE_LENGTH_LR,
             "learning_rate": cfg.LEARNING_RATE,
             "num_steps": cfg.NUM_STEPS,
             "rotation_per_joint_weights": cfg.ROTATION_PENALTY_PER_JOINT.tolist(),

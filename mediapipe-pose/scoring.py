@@ -55,8 +55,11 @@ def motion_penalty_rotation(
         local_rots_curr: (J, 3) axis-angle rotations for current frame.
         per_joint_weights: (J,) per-joint penalty weights (inner > outer).
     """
-    diff = local_rots_curr - local_rots_prev  # (J, 3)
-    per_joint = (diff ** 2).sum(dim=-1)        # (J,)
+    # Squared chord distance per component: 2 - 2*cos(Δ) ≈ Δ² for small Δ,
+    # but wraps correctly at ±π boundaries unlike raw axis-angle diff.
+    cos_diff_sq = (torch.cos(local_rots_curr) - torch.cos(local_rots_prev)) ** 2
+    sin_diff_sq = (torch.sin(local_rots_curr) - torch.sin(local_rots_prev)) ** 2
+    per_joint = (cos_diff_sq + sin_diff_sq).sum(dim=-1)  # (J,)
     return (per_joint * per_joint_weights).sum()
 
 
@@ -68,7 +71,6 @@ def compute_total_score(
     visibility_list: list[torch.Tensor],
     sigma: float,
     position_penalty_weight: float,
-    rotation_penalty_weight: float,
     rotation_per_joint_weights: torch.Tensor,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Compute total score across all frames.
@@ -98,7 +100,7 @@ def compute_total_score(
     total_score = (
         total_heatmap
         - position_penalty_weight * total_pos_penalty
-        - rotation_penalty_weight * total_rot_penalty
+        - total_rot_penalty
     )
 
     details = {

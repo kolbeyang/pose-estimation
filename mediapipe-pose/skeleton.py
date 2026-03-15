@@ -14,7 +14,7 @@ JOINT_NAMES = [
     "LAnkle",       # 6
     "Spine",        # 7
     "Thorax",       # 8
-    "Neck",         # 9
+    "Nose",         # 9
     "LShoulder",    # 10
     "LElbow",       # 11
     "LWrist",       # 12
@@ -42,7 +42,7 @@ REST_DIRECTIONS = np.array([
     [0, 1, 0],       # 6: LKnee → LAnkle  (down)
     [0, -1, 0],      # 7: Hip → Spine  (up = -Y in camera)
     [0, -1, 0],      # 8: Spine → Thorax  (up)
-    [0, -1, 0],      # 9: Thorax → Neck  (up)
+    [0, -1, 0],      # 9: Thorax → Nose  (up)
     [1, 0, 0],       # 10: Thorax → LShoulder  (camera-right = person's left)
     [0, 1, 0],       # 11: LShoulder → LElbow  (down)
     [0, 1, 0],       # 12: LElbow → LWrist  (down)
@@ -62,7 +62,7 @@ DEFAULT_BONE_LENGTHS = np.array([
     0.40,   # 6: LKnee → LAnkle
     0.22,   # 7: Hip → Spine
     0.22,   # 8: Spine → Thorax
-    0.12,   # 9: Thorax → Neck
+    0.12,   # 9: Thorax → Nose
     0.18,   # 10: Thorax → LShoulder
     0.28,   # 11: LShoulder → LElbow
     0.25,   # 12: LElbow → LWrist
@@ -118,7 +118,7 @@ def mediapipe_to_h36m(landmarks: np.ndarray) -> np.ndarray:
     h36m[4] = landmarks[23]          # LHip
     h36m[5] = landmarks[25]          # LKnee
     h36m[6] = landmarks[27]          # LAnkle
-    h36m[9] = landmarks[0]           # Neck (nose)
+    h36m[9] = landmarks[0]           # Nose
     h36m[10] = landmarks[11]         # LShoulder
     h36m[11] = landmarks[13]         # LElbow
     h36m[12] = landmarks[15]         # LWrist
@@ -157,7 +157,7 @@ def mediapipe_visibility_to_h36m(visibility: np.ndarray) -> np.ndarray:
     h36m_vis[7] = min(visibility[23], visibility[24],
                       visibility[11], visibility[12])    # Spine
     h36m_vis[8] = min(visibility[11], visibility[12])    # Thorax
-    h36m_vis[9] = visibility[0]                          # Neck/nose
+    h36m_vis[9] = visibility[0]                          # Nose
     h36m_vis[10] = visibility[11]                        # LShoulder
     h36m_vis[11] = visibility[13]                        # LElbow
     h36m_vis[12] = visibility[15]                        # LWrist
@@ -196,7 +196,7 @@ def coco19_to_h36m(joints19: np.ndarray) -> np.ndarray:
     h36m[6] = joints19[8]              # LAnkle
     h36m[7] = (joints19[2] + joints19[0]) / 2.0   # Spine ← mid(BodyCenter, Neck)
     h36m[8] = joints19[0]              # Thorax ← Neck
-    h36m[9] = joints19[1]              # Neck ← Nose
+    h36m[9] = joints19[1]              # Nose
     h36m[10] = joints19[3]             # LShoulder
     h36m[11] = joints19[4]             # LElbow
     h36m[12] = joints19[5]             # LWrist

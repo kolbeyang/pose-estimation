@@ -19,12 +19,12 @@ import config as cfg
 @dataclass
 class OptimizationResult:
     """Stores initial (MediaPipe) and optimised 3D predictions."""
-    mediapipe_3d: list[np.ndarray]       # Per-frame (17, 3) initial camera-space
-    optimized_3d: list[np.ndarray]       # Per-frame (17, 3) optimised camera-space
-    bone_lengths_final: np.ndarray       # (17,) final bone lengths
+
+    mediapipe_3d: list[np.ndarray]  # Per-frame (17, 3) initial camera-space
+    optimized_3d: list[np.ndarray]  # Per-frame (17, 3) optimised camera-space
+    bone_lengths_final: np.ndarray  # (17,) final bone lengths
     loss_history: list[float] = field(default_factory=list)
     score_details_history: list[dict] = field(default_factory=list)
-
 
 
 def run_optimization(
@@ -70,12 +70,10 @@ def run_optimization(
     # Create learnable parameters
     # Per-frame: root position, root rotation, local rotations
     param_root_pos = [
-        torch.tensor(rp, dtype=torch.float32, requires_grad=True)
-        for rp in all_root_pos
+        torch.tensor(rp, dtype=torch.float32, requires_grad=True) for rp in all_root_pos
     ]
     param_root_rot = [
-        torch.tensor(rr, dtype=torch.float32, requires_grad=True)
-        for rr in all_root_rot
+        torch.tensor(rr, dtype=torch.float32, requires_grad=True) for rr in all_root_rot
     ]
     param_local_rots = [
         torch.tensor(lr, dtype=torch.float32, requires_grad=True)
@@ -84,31 +82,28 @@ def run_optimization(
 
     # Shared bone lengths: median across frames
     median_bone_lengths = np.median(np.array(all_bone_lengths), axis=0)
-    initial_bone_lengths = torch.tensor(
-        median_bone_lengths, dtype=torch.float32,
-    )
     param_bone_lengths = torch.tensor(
-        median_bone_lengths, dtype=torch.float32, requires_grad=True,
+        median_bone_lengths,
+        dtype=torch.float32,
+        requires_grad=True,
     )
 
     # Target tensors (not learnable)
-    target_2d_t = [
-        torch.tensor(t, dtype=torch.float32) for t in target_2d
-    ]
-    visibility_t = [
-        torch.tensor(v, dtype=torch.float32) for v in visibility
-    ]
+    target_2d_t = [torch.tensor(t, dtype=torch.float32) for t in target_2d]
+    visibility_t = [torch.tensor(v, dtype=torch.float32) for v in visibility]
 
     # Per-joint rotation penalty weights
     rot_per_joint_weights = torch.tensor(
-        cfg.ROTATION_PENALTY_PER_JOINT, dtype=torch.float32,
+        cfg.ROTATION_PENALTY_PER_JOINT,
+        dtype=torch.float32,
     )
 
-    # Optimiser
-    all_params = (
-        param_root_pos + param_root_rot + param_local_rots + [param_bone_lengths]
-    )
-    optimizer = torch.optim.Adam(all_params, lr=cfg.LEARNING_RATE)
+    # Optimiser (bone lengths get their own learning rate)
+    pose_params = param_root_pos + param_root_rot + param_local_rots
+    optimizer = torch.optim.Adam([
+        {"params": pose_params, "lr": cfg.LEARNING_RATE},
+        {"params": [param_bone_lengths], "lr": cfg.BONE_LENGTH_LR},
+    ])
 
     loss_history = []
     score_details_history = []
@@ -147,14 +142,8 @@ def run_optimization(
             visibility_t,
             sigma,
             cfg.POSITION_PENALTY_WEIGHT,
-            cfg.ROTATION_PENALTY_WEIGHT,
             rot_per_joint_weights,
         )
-
-        # Bone length regularisation: keep close to initial estimate
-        bl_reg = ((param_bone_lengths - initial_bone_lengths) ** 2).sum()
-        total_score = total_score - cfg.BONE_LENGTH_REG_WEIGHT * bl_reg
-        details["bl_reg"] = float(bl_reg.item())
 
         loss = -total_score
         loss.backward()

@@ -147,17 +147,29 @@ def generate_per_frame_mpjve(
 def generate_bone_lengths_graph(
     bone_lengths: np.ndarray,
     output_dir: str,
+    gt_bone_lengths: list[float] | None = None,
+    mp_bone_lengths: list[float] | None = None,
 ):
-    """Bar chart of final optimised bone lengths."""
+    """Bar chart of bone lengths: GT / MediaPipe / Optimised."""
     os.makedirs(output_dir, exist_ok=True)
     fig, ax = plt.subplots(figsize=(14, 5))
     x = np.arange(1, NUM_JOINTS)
-    ax.bar(x, bone_lengths[1:], color="steelblue")
+    labels = [JOINT_NAMES[int(i)] for i in x]
+
+    if gt_bone_lengths is not None and mp_bone_lengths is not None:
+        width = 0.25
+        ax.bar(x - width, gt_bone_lengths[1:], width, label="Ground Truth", color="blue", alpha=0.7)
+        ax.bar(x, mp_bone_lengths[1:], width, label="MediaPipe", color="green", alpha=0.7)
+        ax.bar(x + width, bone_lengths[1:], width, label="Optimised", color="red", alpha=0.7)
+        ax.legend()
+        ax.set_title("Bone Lengths (m)")
+    else:
+        ax.bar(x, bone_lengths[1:], color="steelblue")
+        ax.set_title("Optimised Bone Lengths")
+
     ax.set_xticks(x)
-    labels = [f"{JOINT_NAMES[int(i)]}" for i in x]
     ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
     ax.set_ylabel("Length (m)")
-    ax.set_title("Optimised Bone Lengths")
     ax.grid(True, alpha=0.3, axis="y")
     _save(fig, os.path.join(output_dir, "bone_lengths.png"))
 
@@ -189,7 +201,7 @@ def generate_summary(
 
     # Row 0-1: select 6 key joints trajectories (Y coord = most visible)
     # Use first 6 cells across rows 0-1 (3 columns each)
-    key_joints = [0, 8, 9, 10, 12, 3]  # Hip, Thorax, Neck, LShoulder, LWrist, RAnkle
+    key_joints = [0, 8, 9, 10, 12, 3]  # Hip, Thorax, Nose, LShoulder, LWrist, RAnkle
     coord_colors = {0: "tab:red", 1: "tab:green", 2: "tab:blue"}  # X, Y, Z
     for idx, j in enumerate(key_joints):
         row, col = divmod(idx, 3)
@@ -269,10 +281,18 @@ def generate_summary(
     ax.set_title("Per-Joint P-MPJPE (m)", fontsize=9)
     ax.grid(True, alpha=0.2, axis="y")
 
-    # Row 2, Col 3: Bone lengths
+    # Row 2, Col 3: Bone lengths (GT / MediaPipe / Optimised)
     ax = axes[2, 3]
     x = np.arange(1, NUM_JOINTS)
-    ax.bar(x, bone_lengths[1:], color="steelblue", alpha=0.7, label="Bone Length")
+    gt_bl = metrics.get("gt_bone_lengths")
+    mp_bl = metrics.get("mp_bone_lengths")
+    if gt_bl is not None and mp_bl is not None:
+        width = 0.25
+        ax.bar(x - width, gt_bl[1:], width, label="GT", color="blue", alpha=0.6)
+        ax.bar(x, mp_bl[1:], width, label="MediaPipe", color="green", alpha=0.6)
+        ax.bar(x + width, bone_lengths[1:], width, label="Optimised", color="red", alpha=0.6)
+    else:
+        ax.bar(x, bone_lengths[1:], color="steelblue", alpha=0.7, label="Optimised")
     ax.set_xticks(x)
     ax.set_xticklabels([JOINT_NAMES[i] for i in range(1, NUM_JOINTS)], rotation=90, fontsize=5)
     ax.set_title("Bone Lengths (m)", fontsize=9)
@@ -301,8 +321,17 @@ def generate_summary(
     ax.set_title("Per-Joint MPJVE (m/frame)", fontsize=9)
     ax.grid(True, alpha=0.2, axis="y")
 
-    # Row 3, Col 2-3: empty
-    axes[3, 2].axis("off")
+    # Row 3, Col 2: Per-frame 2D MPJPE (pixels)
+    ax = axes[3, 2]
+    if "mp_per_frame_2d_mpjpe" in metrics:
+        ax.plot(metrics["mp_per_frame_2d_mpjpe"], "g-", label="MediaPipe", alpha=0.7, linewidth=0.8)
+        ax.plot(metrics["opt_per_frame_2d_mpjpe"], "r-", label="Optimised", alpha=0.7, linewidth=0.8)
+        ax.set_ylabel("MPJPE (px)", fontsize=7)
+        ax.legend(fontsize=7)
+    ax.set_title("Per-Frame 2D MPJPE (px)", fontsize=9)
+    ax.grid(True, alpha=0.2)
+
+    # Row 3, Col 3: empty
     axes[3, 3].axis("off")
 
     # Overall title with metrics

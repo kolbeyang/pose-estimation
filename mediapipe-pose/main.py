@@ -154,7 +154,7 @@ def process_example(
 
     # --- 6. Evaluate ---
     print("\n  [6/7] Evaluating...")
-    metrics = compute_comparison(result.mediapipe_3d, result.optimized_3d, gt_cam)
+    metrics = compute_comparison(result.mediapipe_3d, result.optimized_3d, gt_cam, camera)
     metrics["name"] = name
 
     if "mp_mpjpe" in metrics:
@@ -162,7 +162,10 @@ def process_example(
         print(f"    Opt MPJPE:   {metrics['opt_mpjpe']*100:.2f} cm")
         print(f"    MP  P-MPJPE: {metrics['mp_p_mpjpe']*100:.2f} cm")
         print(f"    Opt P-MPJPE: {metrics['opt_p_mpjpe']*100:.2f} cm")
-    else:
+    if "mp_2d_mpjpe" in metrics:
+        print(f"    MP  2D MPJPE: {metrics['mp_2d_mpjpe']:.1f} px")
+        print(f"    Opt 2D MPJPE: {metrics['opt_2d_mpjpe']:.1f} px")
+    if "mp_mpjpe" not in metrics:
         print("    No ground truth available for evaluation.")
 
     # --- 7. Save results ---
@@ -207,7 +210,11 @@ def process_example(
         result.mediapipe_3d, result.optimized_3d, gt_cam, example_graph_dir,
     )
     generate_loss_curve(result.loss_history, example_graph_dir)
-    generate_bone_lengths_graph(result.bone_lengths_final, example_graph_dir)
+    generate_bone_lengths_graph(
+        result.bone_lengths_final, example_graph_dir,
+        gt_bone_lengths=metrics.get("gt_bone_lengths"),
+        mp_bone_lengths=metrics.get("mp_bone_lengths"),
+    )
 
     if "mp_per_joint" in metrics:
         generate_per_joint_error_bar(
