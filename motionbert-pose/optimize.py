@@ -14,6 +14,15 @@ from skeleton import NUM_JOINTS
 import config as cfg
 
 
+def _get_sigma(step: int, num_steps: int) -> float:
+    """Get sigma for current step from coarse-to-fine schedule."""
+    progress: float = step / max(num_steps - 1, 1)
+    for frac, sigma in cfg.SIGMA_SCHEDULE:
+        if progress <= frac:
+            return sigma
+    return cfg.SIGMA_SCHEDULE[-1][1]
+
+
 def run_optimization(
     initial_positions_cam: list[np.ndarray],
     target_2d: list[np.ndarray],
@@ -110,16 +119,25 @@ def run_optimization(
         torch.tensor(v, dtype=torch.float32) for v in visibility
     ]
 
+    # Apply visibility threshold -- zero out low-confidence joints
+    for i in range(len(visibility_t)):
+        visibility_t[i] = torch.where(
+            visibility_t[i] >= cfg.VISIBILITY_THRESHOLD,
+            visibility_t[i],
+            torch.zeros_like(visibility_t[i]),
+        )
+
     # Per-joint rotation penalty weights
     rot_per_joint_weights: torch.Tensor = torch.tensor(
         cfg.ROTATION_PENALTY_PER_JOINT,
         dtype=torch.float32,
     )
 
-    # Optimizer (bone lengths get their own learning rate)
-    pose_params: list[torch.Tensor] = param_root_pos + param_root_rot + param_local_rots
+    # Optimizer (root_pos gets 1.5x LR, bone lengths get their own LR)
+    angle_params: list[torch.Tensor] = param_root_rot + param_local_rots
     optimizer: torch.optim.Adam = torch.optim.Adam([
-        {"params": pose_params, "lr": cfg.LEARNING_RATE},
+        {"params": param_root_pos, "lr": cfg.LEARNING_RATE * 1.5},
+        {"params": angle_params, "lr": cfg.LEARNING_RATE},
         {"params": [param_bone_lengths], "lr": cfg.BONE_LENGTH_LR},
     ])
 
@@ -148,7 +166,8 @@ def run_optimization(
             all_projected_2d.append(projected_2d_frame)
             all_local_rots_current.append(param_local_rots[i])
 
-        # Compute score
+        # Compute score with coarse-to-fine sigma
+        sigma: float = _get_sigma(step, num_steps)
         total_score: torch.Tensor
         details: dict[str, float]
         total_score, details = compute_total_score(
@@ -157,7 +176,7 @@ def run_optimization(
             all_local_rots_current,
             target_2d_t,
             visibility_t,
-            cfg.SIGMA,
+            sigma,
             cfg.POSITION_PENALTY_WEIGHT,
             rot_per_joint_weights,
         )
@@ -172,14 +191,15 @@ def run_optimization(
 
         loss_history.append(float(loss.item()))
 
-        # Print every step for initial 10-step testing
-        print(
-            f"    Step {step:4d}/{num_steps}  "
-            f"loss={loss.item():.1f}  "
-            f"heatmap={details['heatmap']:.1f}  "
-            f"pos_p={details['pos_penalty']:.4f}  "
-            f"rot_p={details['rot_penalty']:.4f}"
-        )
+        if step % 20 == 0 or step == num_steps - 1:
+            print(
+                f"    Step {step:4d}/{num_steps}  "
+                f"loss={loss.item():.1f}  "
+                f"heatmap={details['heatmap']:.1f}  "
+                f"sigma={sigma:.0f}  "
+                f"pos_p={details['pos_penalty']:.4f}  "
+                f"rot_p={details['rot_penalty']:.4f}"
+            )
 
     # Extract final optimised 3D positions
     optimized_3d: list[np.ndarray] = []

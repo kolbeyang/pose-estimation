@@ -30,12 +30,20 @@ EXAMPLES: list[tuple[str, str, int, int, int]] = [
 TARGET_FPS: float = 10.0  # Subsample HD video (native ~30 fps) to this rate
 
 # --- Optimization (Phase 2) ---
-NUM_STEPS: int = 10  # Start small for testing, increase after confirming correctness
+NUM_STEPS: int = 20
 LEARNING_RATE: float = 0.001
 BONE_LENGTH_LR: float = 0.0001
 
 # Gaussian sigma for heatmap scoring (pixels)
 SIGMA: float = 50.0
+
+# Coarse-to-fine sigma schedule: (fraction_of_steps, sigma)
+# Phase 1: wide basin for coarse alignment
+# Phase 2: medium for refinement
+# Phase 3: narrower for precision (but not too aggressive)
+SIGMA_SCHEDULE: list[tuple[float, float]] = [
+    (1.0, 80.0),   # Constant coarse sigma -- prevents overfitting to noisy 2D targets
+]
 
 # Motion penalty weights
 POSITION_PENALTY_WEIGHT: float = 50.0
