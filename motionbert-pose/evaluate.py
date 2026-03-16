@@ -1,19 +1,21 @@
-"""Evaluation metrics: MPJPE and per-joint error comparison."""
+"""Evaluation metrics: MPJPE, P-MPJPE, and per-joint error comparison."""
+
+from typing import Any
 
 import numpy as np
 
-from skeleton import NUM_JOINTS, JOINT_NAMES, EVAL_JOINTS, NUM_EVAL_JOINTS
+from skeleton import NUM_JOINTS, JOINT_NAMES, EVAL_JOINTS, NUM_EVAL_JOINTS, EVAL_JOINT_NAMES
 
 
 def mpjpe(predicted: np.ndarray, target: np.ndarray) -> float:
-    """Mean Per-Joint Position Error (mm or same unit as inputs).
+    """Mean Per-Joint Position Error.
 
     Args:
         predicted: (J, 3) or (F, J, 3) predicted positions.
         target: (J, 3) or (F, J, 3) ground truth positions.
 
     Returns:
-        Scalar MPJPE.
+        Scalar MPJPE in same units as inputs.
     """
     return float(np.mean(np.linalg.norm(predicted - target, axis=-1)))
 
@@ -22,8 +24,8 @@ def mpjpe_per_joint(predicted: np.ndarray, target: np.ndarray) -> np.ndarray:
     """Per-joint position error.
 
     Args:
-        predicted: (F, J, 3)
-        target: (F, J, 3)
+        predicted: (F, J, 3).
+        target: (F, J, 3).
 
     Returns:
         (J,) mean error per joint.
@@ -35,7 +37,7 @@ def root_relative(positions: np.ndarray) -> np.ndarray:
     """Make positions root-relative (subtract hip position per frame).
 
     Args:
-        positions: (J, 3) or (F, J, 3)
+        positions: (J, 3) or (F, J, 3).
 
     Returns:
         Same shape, hip-centered.
@@ -57,23 +59,26 @@ def procrustes_align(predicted: np.ndarray, target: np.ndarray) -> np.ndarray:
     Returns:
         (J, 3) aligned prediction.
     """
-    mu_p = predicted.mean(axis=0)
-    mu_t = target.mean(axis=0)
-    p_c = predicted - mu_p
-    t_c = target - mu_t
+    mu_p: np.ndarray = predicted.mean(axis=0)
+    mu_t: np.ndarray = target.mean(axis=0)
+    p_c: np.ndarray = predicted - mu_p
+    t_c: np.ndarray = target - mu_t
 
-    H = p_c.T @ t_c
+    H: np.ndarray = p_c.T @ t_c
+    U: np.ndarray
+    S: np.ndarray
+    Vt: np.ndarray
     U, S, Vt = np.linalg.svd(H)
-    d = np.linalg.det(Vt.T @ U.T)
-    D = np.diag([1, 1, d])
-    R = Vt.T @ D @ U.T
+    d: float = float(np.linalg.det(Vt.T @ U.T))
+    D: np.ndarray = np.diag([1, 1, d])
+    R: np.ndarray = Vt.T @ D @ U.T
 
-    var_p = np.sum(p_c ** 2)
+    var_p: float = float(np.sum(p_c ** 2))
     if var_p < 1e-10:
         return np.tile(mu_t, (predicted.shape[0], 1))
 
-    scale = np.trace(np.diag(S) @ D) / var_p
-    aligned = scale * (p_c @ R.T) + mu_t
+    scale: float = float(np.trace(np.diag(S) @ D) / var_p)
+    aligned: np.ndarray = scale * (p_c @ R.T) + mu_t
     return aligned
 
 
@@ -81,94 +86,78 @@ def p_mpjpe(predicted: np.ndarray, target: np.ndarray) -> float:
     """Protocol-2 MPJPE (after per-frame Procrustes alignment).
 
     Args:
-        predicted: (F, J, 3)
-        target: (F, J, 3)
+        predicted: (F, J, 3).
+        target: (F, J, 3).
 
     Returns:
         Scalar P-MPJPE.
     """
-    errors = []
+    errors: list[float] = []
     for i in range(predicted.shape[0]):
-        aligned = procrustes_align(predicted[i], target[i])
-        errors.append(np.mean(np.linalg.norm(aligned - target[i], axis=-1)))
+        aligned: np.ndarray = procrustes_align(predicted[i], target[i])
+        errors.append(float(np.mean(np.linalg.norm(aligned - target[i], axis=-1))))
     return float(np.mean(errors))
 
 
 def compute_comparison(
-    mediapipe_3d: list[np.ndarray],
-    optimized_3d: list[np.ndarray],
+    detector_3d: list[np.ndarray],
     gt_3d: list[np.ndarray | None],
-) -> dict:
-    """Compare MediaPipe vs Optimised vs Ground Truth.
+) -> dict[str, Any]:
+    """Compare detector predictions vs ground truth.
+
+    Phase 1 version: only detector vs GT (no optimized).
+    Uses root-relative comparison on 12 eval joints.
 
     All inputs should be in the same coordinate system (camera coords, meters).
 
+    Args:
+        detector_3d: List of (17, 3) detector predictions.
+        gt_3d: List of (17, 3) ground truth or None for missing frames.
+
     Returns:
-        Dict with metrics.
+        Dict with metrics including det_mpjpe, det_p_mpjpe, etc.
     """
-    n = len(mediapipe_3d)
-    results: dict = {"n_frames": n, "n_frames_with_gt": 0}
+    n: int = len(detector_3d)
+    results: dict[str, Any] = {"n_frames": n, "n_frames_with_gt": 0}
 
     # Frames that have ground truth
-    gt_indices = [i for i in range(n) if gt_3d[i] is not None]
+    gt_indices: list[int] = [i for i in range(n) if gt_3d[i] is not None]
     results["n_frames_with_gt"] = len(gt_indices)
 
     if not gt_indices:
-        # No GT available — only report self-consistency
-        mp_arr = np.array(mediapipe_3d)    # (F, 17, 3)
-        opt_arr = np.array(optimized_3d)   # (F, 17, 3)
-        mp_rr = root_relative(mp_arr)
-        opt_rr = root_relative(opt_arr)
-        results["mp_vs_opt_mpjpe"] = mpjpe(mp_rr, opt_rr)
         return results
 
     # Stack only frames with GT
-    mp_arr = np.array([mediapipe_3d[i] for i in gt_indices])
-    opt_arr = np.array([optimized_3d[i] for i in gt_indices])
-    gt_arr = np.array([gt_3d[i] for i in gt_indices])
+    det_arr: np.ndarray = np.array([detector_3d[i] for i in gt_indices])
+    gt_arr: np.ndarray = np.array([gt_3d[i] for i in gt_indices])
 
-    # Root-relative: subtract joint 0 (hip) from all 17 joints first,
-    # then slice to eval joints for error computation.
-    mp_rr = root_relative(mp_arr)
-    opt_rr = root_relative(opt_arr)
-    gt_rr = root_relative(gt_arr)
+    # Root-relative: subtract joint 0 (hip) first, then slice to eval joints
+    det_rr: np.ndarray = root_relative(det_arr)
+    gt_rr: np.ndarray = root_relative(gt_arr)
 
-    # Slice to only the 12 consistently-mapped eval joints
-    ej = EVAL_JOINTS
-    mp_eval = mp_rr[:, ej, :]
-    opt_eval = opt_rr[:, ej, :]
-    gt_eval = gt_rr[:, ej, :]
+    # Slice to 12 eval joints
+    ej: list[int] = EVAL_JOINTS
+    det_eval: np.ndarray = det_rr[:, ej, :]
+    gt_eval: np.ndarray = gt_rr[:, ej, :]
 
-    results["mp_mpjpe"] = mpjpe(mp_eval, gt_eval)
-    results["opt_mpjpe"] = mpjpe(opt_eval, gt_eval)
-    results["mp_p_mpjpe"] = p_mpjpe(mp_eval, gt_eval)
-    results["opt_p_mpjpe"] = p_mpjpe(opt_eval, gt_eval)
+    results["det_mpjpe"] = mpjpe(det_eval, gt_eval)
+    results["det_p_mpjpe"] = p_mpjpe(det_eval, gt_eval)
 
     # Per-joint errors (12 eval joints)
-    results["mp_per_joint"] = mpjpe_per_joint(mp_eval, gt_eval).tolist()
-    results["opt_per_joint"] = mpjpe_per_joint(opt_eval, gt_eval).tolist()
+    results["det_per_joint"] = mpjpe_per_joint(det_eval, gt_eval).tolist()
 
     # Per-frame MPJPE (over eval joints only)
-    results["mp_per_frame_mpjpe"] = [
-        float(np.mean(np.linalg.norm(mp_eval[i] - gt_eval[i], axis=-1)))
-        for i in range(len(gt_indices))
-    ]
-    results["opt_per_frame_mpjpe"] = [
-        float(np.mean(np.linalg.norm(opt_eval[i] - gt_eval[i], axis=-1)))
+    results["det_per_frame_mpjpe"] = [
+        float(np.mean(np.linalg.norm(det_eval[i] - gt_eval[i], axis=-1)))
         for i in range(len(gt_indices))
     ]
 
-    # Per-joint P-MPJPE (Procrustes on eval joints only)
-    mp_p_per_joint = np.zeros(NUM_EVAL_JOINTS)
-    opt_p_per_joint = np.zeros(NUM_EVAL_JOINTS)
+    # Per-joint P-MPJPE
+    det_p_per_joint: np.ndarray = np.zeros(NUM_EVAL_JOINTS)
     for i in range(len(gt_indices)):
-        mp_aligned = procrustes_align(mp_eval[i], gt_eval[i])
-        opt_aligned = procrustes_align(opt_eval[i], gt_eval[i])
-        mp_p_per_joint += np.linalg.norm(mp_aligned - gt_eval[i], axis=-1)
-        opt_p_per_joint += np.linalg.norm(opt_aligned - gt_eval[i], axis=-1)
-    mp_p_per_joint /= len(gt_indices)
-    opt_p_per_joint /= len(gt_indices)
-    results["mp_p_per_joint"] = mp_p_per_joint.tolist()
-    results["opt_p_per_joint"] = opt_p_per_joint.tolist()
+        det_aligned: np.ndarray = procrustes_align(det_eval[i], gt_eval[i])
+        det_p_per_joint += np.linalg.norm(det_aligned - gt_eval[i], axis=-1)
+    det_p_per_joint /= len(gt_indices)
+    results["det_p_per_joint"] = det_p_per_joint.tolist()
 
     return results

@@ -1,19 +1,17 @@
-"""Configuration for full-body FK pose optimization pipeline."""
+"""Configuration for MotionBERT pose estimation pipeline."""
 
 import os
 
 # --- Paths ---
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-PANOPTIC_ROOT = os.path.normpath(
+_THIS_DIR: str = os.path.dirname(os.path.abspath(__file__))
+PANOPTIC_ROOT: str = os.path.normpath(
     os.path.join(_THIS_DIR, "..", "data", "panoptic-toolbox")
 )
-TRAINING_RUNS_DIR = os.path.join(_THIS_DIR, "training_runs")
+TRAINING_RUNS_DIR: str = os.path.join(_THIS_DIR, "training_runs")
 
 # --- CMU Panoptic examples ---
-# (sequence_name, hd_camera, start_frame, num_frames, person_idx)
-# Frames are in HD video frame indices (~30 fps).
-# We subsample to TARGET_FPS during processing.
-EXAMPLES = [
+# Each tuple: (sequence_name, hd_camera, start_frame, num_frames, person_idx)
+EXAMPLES: list[tuple[str, str, int, int, int]] = [
     ("171204_pose1_sample", "00_00", 0, 100, 0),
     ("171204_pose2", "00_00", 200, 150, 0),
     ("171204_pose2", "00_00", 5000, 150, 0),
@@ -22,38 +20,9 @@ EXAMPLES = [
     ("171204_pose3", "00_00", 4000, 150, 0),
     ("160422_ultimatum1", "00_00", 200, 150, 0),
     ("160422_ultimatum1", "00_00", 10000, 150, 0),
-    ("160422_ultimatum1", "00_00", 20000, 150, 0),
+    ("171204_pose2", "00_00", 10000, 150, 0),
     ("171204_pose2", "00_00", 25000, 150, 0),
 ]
 
 # --- Video processing ---
-TARGET_FPS = 10.0  # Subsample HD video (native ~30 fps) to this rate
-
-# --- Optimization ---
-NUM_STEPS = 300
-LEARNING_RATE = 0.005
-BONE_LENGTH_LR = 0.001
-GRAD_CLIP_NORM = 10.0
-
-# Heatmap blur sigma schedule (coarse→fine): (fraction_of_steps, sigma_in_64x64_space)
-# sigma=8 ≈ 32px in 256-crop space (broad basin), sigma=0 = raw heatmaps
-BLUR_PHASES = [
-    (0.50, 8.0),
-    (0.80, 3.0),
-    (1.00, 0.0),
-]
-
-# Motion penalty weights
-POSITION_PENALTY_WEIGHT = 0.1
-ROTATION_PENALTY_WEIGHT = 0.05
-
-# Bone length regularisation: penalise deviation from initial detector-derived lengths
-BONE_LENGTH_REG_WEIGHT = 10000.0
-
-# Initial position regularisation: penalise deviation from initial detector 3D positions
-# Prevents the optimiser from destroying already-good detector estimates
-INIT_POSITION_REG_WEIGHT = 10.0
-
-# --- Heatmap / scoring ---
-# Visibility threshold: joints with MediaPipe visibility below this are ignored
-VISIBILITY_THRESHOLD = 0.5
+TARGET_FPS: float = 10.0  # Subsample HD video (native ~30 fps) to this rate

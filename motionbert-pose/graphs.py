@@ -1,316 +1,121 @@
-"""Generate comparison graphs for the full-body FK optimisation pipeline."""
+"""Matplotlib visualizations for the MotionBERT pose estimation pipeline."""
 
 import os
+from typing import Any
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 import numpy as np
 
-from skeleton import (
-    JOINT_NAMES, NUM_JOINTS, JOINT_GROUP, GROUP_COLORS_RGB,
-    EVAL_JOINTS, EVAL_JOINT_NAMES, NUM_EVAL_JOINTS,
-)
+from skeleton import EVAL_JOINT_NAMES, NUM_EVAL_JOINTS
 
 
-COORD_NAMES = {0: "X", 1: "Y", 2: "Z"}
-
-
-def _save(fig, path):
+def _save(fig: plt.Figure, path: str) -> None:
+    """Save figure and close."""
     fig.savefig(path, dpi=120, bbox_inches="tight")
     plt.close(fig)
 
 
-# ---------------------------------------------------------------------------
-# Per-example graphs
-# ---------------------------------------------------------------------------
-
-def generate_trajectory_graphs(
-    mediapipe_3d: list[np.ndarray],
-    optimized_3d: list[np.ndarray],
-    gt_3d: list[np.ndarray | None],
-    output_dir: str,
-):
-    """One graph per joint per coordinate: MediaPipe vs Optimised vs GT."""
-    os.makedirs(output_dir, exist_ok=True)
-    n = len(mediapipe_3d)
-    frames = list(range(n))
-    mp = np.array(mediapipe_3d)
-    opt = np.array(optimized_3d)
-    has_gt = [g is not None for g in gt_3d]
-
-    for j in range(NUM_JOINTS):
-        for c, cname in COORD_NAMES.items():
-            fig, ax = plt.subplots(figsize=(10, 3))
-            ax.plot(frames, mp[:, j, c], "g-", label="MediaPipe", alpha=0.8)
-            ax.plot(frames, opt[:, j, c], "r-", label="Optimised", alpha=0.8)
-            if any(has_gt):
-                gt_vals = [gt_3d[i][j, c] if gt_3d[i] is not None else np.nan for i in range(n)]
-                ax.plot(frames, gt_vals, "b--", label="Ground Truth", alpha=0.7)
-            ax.set_xlabel("Frame")
-            ax.set_ylabel(f"{cname} (m)")
-            ax.set_title(f"{JOINT_NAMES[j]} {cname}")
-            ax.legend(fontsize=8)
-            ax.grid(True, alpha=0.3)
-            _save(fig, os.path.join(output_dir, f"{JOINT_NAMES[j]}_{cname}.png"))
-
-
-def generate_loss_curve(loss_history: list[float], output_dir: str):
-    os.makedirs(output_dir, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(loss_history, "b-", linewidth=1)
-    ax.set_xlabel("Step")
-    ax.set_ylabel("Loss")
-    ax.set_title("Optimisation Loss")
-    ax.grid(True, alpha=0.3)
-    _save(fig, os.path.join(output_dir, "loss_curve.png"))
-
-
 def generate_per_joint_error_bar(
-    mp_per_joint: list[float],
-    opt_per_joint: list[float],
+    per_joint: list[float],
     output_dir: str,
-):
-    """Bar chart comparing per-joint MPJPE: MediaPipe vs Optimised (eval joints only)."""
-    os.makedirs(output_dir, exist_ok=True)
-    x = np.arange(NUM_EVAL_JOINTS)
-    width = 0.35
+) -> None:
+    """Bar chart of per-joint MPJPE for detector predictions (12 eval joints).
 
+    Args:
+        per_joint: List of 12 per-joint MPJPE values in meters.
+        output_dir: Directory to save the graph.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    x: np.ndarray = np.arange(NUM_EVAL_JOINTS)
+
+    fig: plt.Figure
+    ax: plt.Axes
     fig, ax = plt.subplots(figsize=(14, 5))
-    ax.bar(x - width / 2, mp_per_joint, width, label="MediaPipe", color="green", alpha=0.7)
-    ax.bar(x + width / 2, opt_per_joint, width, label="Optimised", color="red", alpha=0.7)
+    ax.bar(x, [v * 100 for v in per_joint], color="steelblue", alpha=0.7)
     ax.set_xticks(x)
     ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=45, ha="right", fontsize=8)
-    ax.set_ylabel("MPJPE (m)")
-    ax.set_title("Per-Joint Error vs Ground Truth (12 eval joints)")
-    ax.legend()
+    ax.set_ylabel("MPJPE (cm)")
+    ax.set_title("Per-Joint Error vs Ground Truth (Detector, 12 eval joints)")
     ax.grid(True, alpha=0.3, axis="y")
     _save(fig, os.path.join(output_dir, "per_joint_error.png"))
 
 
 def generate_per_frame_mpjpe(
-    mp_per_frame: list[float],
-    opt_per_frame: list[float],
+    per_frame: list[float],
     output_dir: str,
-):
-    """Line plot of per-frame MPJPE over time."""
+) -> None:
+    """Line plot of per-frame MPJPE over time.
+
+    Args:
+        per_frame: List of per-frame MPJPE values in meters.
+        output_dir: Directory to save the graph.
+    """
     os.makedirs(output_dir, exist_ok=True)
+    fig: plt.Figure
+    ax: plt.Axes
     fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(mp_per_frame, "g-", label="MediaPipe", alpha=0.8)
-    ax.plot(opt_per_frame, "r-", label="Optimised", alpha=0.8)
+    ax.plot([v * 100 for v in per_frame], "b-", alpha=0.8, label="Detector")
     ax.set_xlabel("Frame")
-    ax.set_ylabel("MPJPE (m)")
+    ax.set_ylabel("MPJPE (cm)")
     ax.set_title("Per-Frame MPJPE vs Ground Truth")
     ax.legend()
     ax.grid(True, alpha=0.3)
     _save(fig, os.path.join(output_dir, "per_frame_mpjpe.png"))
 
 
-def generate_bone_lengths_graph(
-    bone_lengths: np.ndarray,
+def generate_aggregate_summary(
+    all_metrics: list[dict[str, Any]],
     output_dir: str,
-):
-    """Bar chart of final optimised bone lengths."""
-    os.makedirs(output_dir, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(14, 5))
-    x = np.arange(1, NUM_JOINTS)
-    ax.bar(x, bone_lengths[1:], color="steelblue")
-    ax.set_xticks(x)
-    labels = [f"{JOINT_NAMES[int(i)]}" for i in x]
-    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
-    ax.set_ylabel("Length (m)")
-    ax.set_title("Optimised Bone Lengths")
-    ax.grid(True, alpha=0.3, axis="y")
-    _save(fig, os.path.join(output_dir, "bone_lengths.png"))
+) -> None:
+    """Summary across all examples: bar chart + printed table.
 
-
-# ---------------------------------------------------------------------------
-# Summary grid (one per example)
-# ---------------------------------------------------------------------------
-
-def generate_summary(
-    mediapipe_3d: list[np.ndarray],
-    optimized_3d: list[np.ndarray],
-    gt_3d: list[np.ndarray | None],
-    loss_history: list[float],
-    metrics: dict,
-    bone_lengths: np.ndarray,
-    output_dir: str,
-    title: str = "Summary",
-):
-    """Summary grid: 3x4 with trajectories, legend, per-frame MPJPE, loss,
-    per-joint MPJPE, per-joint P-MPJPE, and bone lengths."""
-    os.makedirs(output_dir, exist_ok=True)
-
-    n = len(mediapipe_3d)
-    frames = list(range(n))
-    mp = np.array(mediapipe_3d)
-    opt = np.array(optimized_3d)
-    has_gt = any(g is not None for g in gt_3d)
-
-    fig, axes = plt.subplots(3, 4, figsize=(26, 14))
-
-    # Row 0-1: select 6 key joints trajectories
-    key_joints = [0, 8, 9, 11, 13, 3]  # Hip, Thorax, Neck, LShoulder, LWrist, RAnkle
-    coord_colors = {0: "tab:red", 1: "tab:green", 2: "tab:blue"}  # X, Y, Z
-    for idx, j in enumerate(key_joints):
-        row, col = divmod(idx, 3)
-        ax = axes[row, col]
-        for c, cname in COORD_NAMES.items():
-            color = coord_colors[c]
-            ax.plot(frames, mp[:, j, c], linestyle="-", color=color,
-                    alpha=0.4, linewidth=0.8)
-            ax.plot(frames, opt[:, j, c], linestyle="--", color=color,
-                    alpha=0.7, linewidth=0.8)
-            if has_gt:
-                gt_vals = [gt_3d[i][j, c] if gt_3d[i] is not None else np.nan
-                           for i in range(n)]
-                ax.plot(frames, gt_vals, linestyle=":", color=color,
-                        alpha=0.5, linewidth=0.8)
-        ax.set_title(JOINT_NAMES[j], fontsize=9)
-        ax.grid(True, alpha=0.2)
-
-    # Legend panel in row 0, col 3
-    ax_legend = axes[0, 3]
-    ax_legend.axis("off")
-    style_handles = [
-        Line2D([0], [0], color="gray", linestyle="-", linewidth=1.5, label="Detector"),
-        Line2D([0], [0], color="gray", linestyle="--", linewidth=1.5, label="Optimised"),
-    ]
-    if has_gt:
-        style_handles.append(
-            Line2D([0], [0], color="gray", linestyle=":", linewidth=1.5, label="Ground Truth"))
-    coord_handles = [
-        Line2D([0], [0], color=coord_colors[0], linewidth=2, label="X"),
-        Line2D([0], [0], color=coord_colors[1], linewidth=2, label="Y"),
-        Line2D([0], [0], color=coord_colors[2], linewidth=2, label="Z"),
-    ]
-    ax_legend.legend(handles=style_handles + coord_handles, loc="center",
-                     fontsize=10, frameon=True, title="Trajectories",
-                     title_fontsize=11)
-
-    # Row 1, Col 3: Per-frame MPJPE (if GT available)
-    ax = axes[1, 3]
-    if "mp_per_frame_mpjpe" in metrics:
-        ax.plot(metrics["mp_per_frame_mpjpe"], "g-", label="Detector", alpha=0.7, linewidth=0.8)
-        ax.plot(metrics["opt_per_frame_mpjpe"], "r-", label="Optimised", alpha=0.7, linewidth=0.8)
-        ax.set_ylabel("MPJPE (m)", fontsize=7)
-        ax.legend(fontsize=7)
-    ax.set_title("Per-Frame MPJPE", fontsize=9)
-    ax.grid(True, alpha=0.2)
-
-    # Row 2, Col 0: Loss curve
-    ax = axes[2, 0]
-    ax.plot(loss_history, "b-", linewidth=0.8, label="Loss")
-    ax.set_title("Loss", fontsize=9)
-    ax.legend(fontsize=7)
-    ax.grid(True, alpha=0.2)
-
-    # Row 2, Col 1: Per-joint MPJPE (if GT available) — eval joints only
-    ax = axes[2, 1]
-    if "mp_per_joint" in metrics:
-        x = np.arange(NUM_EVAL_JOINTS)
-        ax.bar(x - 0.2, metrics["mp_per_joint"], 0.4, label="Detector", color="green", alpha=0.6)
-        ax.bar(x + 0.2, metrics["opt_per_joint"], 0.4, label="Optimised", color="red", alpha=0.6)
-        ax.set_xticks(x)
-        ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=90, fontsize=5)
-        ax.legend(fontsize=7)
-    ax.set_title("Per-Joint MPJPE (m)", fontsize=9)
-    ax.grid(True, alpha=0.2, axis="y")
-
-    # Row 2, Col 2: Per-joint P-MPJPE (if GT available) — eval joints only
-    ax = axes[2, 2]
-    if "mp_p_per_joint" in metrics:
-        x = np.arange(NUM_EVAL_JOINTS)
-        ax.bar(x - 0.2, metrics["mp_p_per_joint"], 0.4, label="Detector", color="green", alpha=0.6)
-        ax.bar(x + 0.2, metrics["opt_p_per_joint"], 0.4, label="Optimised", color="red", alpha=0.6)
-        ax.set_xticks(x)
-        ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=90, fontsize=5)
-        ax.legend(fontsize=7)
-    ax.set_title("Per-Joint P-MPJPE (m)", fontsize=9)
-    ax.grid(True, alpha=0.2, axis="y")
-
-    # Row 2, Col 3: Bone lengths
-    ax = axes[2, 3]
-    x = np.arange(1, NUM_JOINTS)
-    ax.bar(x, bone_lengths[1:], color="steelblue", alpha=0.7, label="Bone Length")
-    ax.set_xticks(x)
-    ax.set_xticklabels([JOINT_NAMES[i] for i in range(1, NUM_JOINTS)], rotation=90, fontsize=5)
-    ax.set_title("Bone Lengths (m)", fontsize=9)
-    ax.legend(fontsize=7)
-    ax.grid(True, alpha=0.2, axis="y")
-
-    # Overall title with metrics
-    metric_str = ""
-    if "mp_mpjpe" in metrics:
-        metric_str = (
-            f"  |  Det MPJPE: {metrics['mp_mpjpe']*100:.1f}cm"
-            f"  Opt MPJPE: {metrics['opt_mpjpe']*100:.1f}cm"
-            f"  |  Det P-MPJPE: {metrics['mp_p_mpjpe']*100:.1f}cm"
-            f"  Opt P-MPJPE: {metrics['opt_p_mpjpe']*100:.1f}cm"
-        )
-    fig.suptitle(f"{title}{metric_str}", fontsize=12, fontweight="bold")
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
-    _save(fig, os.path.join(output_dir, "summary.png"))
-
-
-# ---------------------------------------------------------------------------
-# Aggregate summary across all examples
-# ---------------------------------------------------------------------------
-
-def generate_aggregate_summary(all_metrics: list[dict], output_dir: str):
-    """Summary across all examples."""
+    Args:
+        all_metrics: List of metric dicts from compute_comparison.
+        output_dir: Directory to save the graph.
+    """
     os.makedirs(output_dir, exist_ok=True)
 
     # Filter examples that have GT
-    with_gt = [m for m in all_metrics if "mp_mpjpe" in m]
+    with_gt: list[dict[str, Any]] = [m for m in all_metrics if "det_mpjpe" in m]
     if not with_gt:
-        print("  No examples with ground truth — skipping aggregate summary.")
+        print("  No examples with ground truth -- skipping aggregate summary.")
         return
 
-    names = [m.get("name", f"Ex{i}") for i, m in enumerate(with_gt)]
-    mp_mpjpe = [m["mp_mpjpe"] * 100 for m in with_gt]
-    opt_mpjpe = [m["opt_mpjpe"] * 100 for m in with_gt]
-    mp_p_mpjpe = [m["mp_p_mpjpe"] * 100 for m in with_gt]
-    opt_p_mpjpe = [m["opt_p_mpjpe"] * 100 for m in with_gt]
+    names: list[str] = [m.get("name", f"Ex{i}") for i, m in enumerate(with_gt)]
+    det_mpjpe_cm: list[float] = [m["det_mpjpe"] * 100 for m in with_gt]
+    det_p_mpjpe_cm: list[float] = [m["det_p_mpjpe"] * 100 for m in with_gt]
 
     # MPJPE bar chart
+    fig: plt.Figure
+    ax: plt.Axes
     fig, ax = plt.subplots(figsize=(max(8, len(names) * 1.2), 5))
-    x = np.arange(len(names))
-    width = 0.35
-    ax.bar(x - width / 2, mp_mpjpe, width, label="Detector", color="green", alpha=0.7)
-    ax.bar(x + width / 2, opt_mpjpe, width, label="Optimised", color="red", alpha=0.7)
+    x: np.ndarray = np.arange(len(names))
+    ax.bar(x, det_mpjpe_cm, color="steelblue", alpha=0.7)
     ax.set_xticks(x)
     ax.set_xticklabels(names, rotation=45, ha="right", fontsize=8)
     ax.set_ylabel("MPJPE (cm)")
-    ax.set_title("MPJPE Comparison Across Examples")
-    ax.legend()
+    ax.set_title("MPJPE Across Examples (Detector)")
     ax.grid(True, alpha=0.3, axis="y")
     _save(fig, os.path.join(output_dir, "aggregate_mpjpe.png"))
 
     # P-MPJPE bar chart
     fig, ax = plt.subplots(figsize=(max(8, len(names) * 1.2), 5))
-    ax.bar(x - width / 2, mp_p_mpjpe, width, label="Detector", color="green", alpha=0.7)
-    ax.bar(x + width / 2, opt_p_mpjpe, width, label="Optimised", color="red", alpha=0.7)
+    ax.bar(x, det_p_mpjpe_cm, color="darkorange", alpha=0.7)
     ax.set_xticks(x)
     ax.set_xticklabels(names, rotation=45, ha="right", fontsize=8)
     ax.set_ylabel("P-MPJPE (cm)")
-    ax.set_title("Procrustes-Aligned MPJPE Comparison Across Examples")
-    ax.legend()
+    ax.set_title("Procrustes-Aligned MPJPE Across Examples (Detector)")
     ax.grid(True, alpha=0.3, axis="y")
     _save(fig, os.path.join(output_dir, "aggregate_p_mpjpe.png"))
 
     # Print table
     print("\n  === Aggregate Results ===")
-    print(f"  {'Example':<30} {'Det MPJPE':>9} {'Opt MPJPE':>10} {'Improv':>7} {'Det P-MPJPE':>11} {'Opt P-MPJPE':>12} {'Improv':>7}")
-    print(f"  {'-'*30} {'-'*9} {'-'*10} {'-'*7} {'-'*11} {'-'*12} {'-'*7}")
+    print(f"  {'Example':<35} {'MPJPE (cm)':>10} {'P-MPJPE (cm)':>12}")
+    print(f"  {'-'*35} {'-'*10} {'-'*12}")
     for i, name in enumerate(names):
-        diff = mp_mpjpe[i] - opt_mpjpe[i]
-        p_diff = mp_p_mpjpe[i] - opt_p_mpjpe[i]
-        print(f"  {name:<30} {mp_mpjpe[i]:>8.2f} {opt_mpjpe[i]:>9.2f} {diff:>+6.2f} {mp_p_mpjpe[i]:>10.2f} {opt_p_mpjpe[i]:>11.2f} {p_diff:>+6.2f}")
-    mean_mp = np.mean(mp_mpjpe)
-    mean_opt = np.mean(opt_mpjpe)
-    mean_mp_p = np.mean(mp_p_mpjpe)
-    mean_opt_p = np.mean(opt_p_mpjpe)
-    print(f"  {'MEAN':<30} {mean_mp:>8.2f} {mean_opt:>9.2f} {mean_mp - mean_opt:>+6.2f} {mean_mp_p:>10.2f} {mean_opt_p:>11.2f} {mean_mp_p - mean_opt_p:>+6.2f}")
+        print(f"  {name:<35} {det_mpjpe_cm[i]:>10.2f} {det_p_mpjpe_cm[i]:>12.2f}")
+    mean_mpjpe: float = float(np.mean(det_mpjpe_cm))
+    mean_p_mpjpe: float = float(np.mean(det_p_mpjpe_cm))
+    print(f"  {'MEAN':<35} {mean_mpjpe:>10.2f} {mean_p_mpjpe:>12.2f}")
