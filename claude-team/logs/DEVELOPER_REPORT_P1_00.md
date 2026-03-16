@@ -1,96 +1,56 @@
-# Developer Report: Phase 1, Iteration 0
+# DEVELOPER_REPORT_P1_00: Switch to Real Stacked Hourglass Heatmaps
 
 ## What Was Implemented
 
-Complete clean rewrite of the MotionBERT 3D pose estimation pipeline in `motionbert-pose/`. All files created from scratch with full type hints and Pydantic models, following the architect's plan step by step.
+Replaced the analytical Gaussian heatmap scoring in the FK optimization with real Stacked Hourglass heatmap sampling. The optimizer now uses `torch.nn.functional.grid_sample` to perform differentiable bilinear interpolation on the actual (16, 64, 64) heatmaps produced by Stacked Hourglass, rather than constructing synthetic Gaussian blobs centered on extracted keypoint positions.
 
-### Files Created/Rewritten
+For the 2 H36M joints that have no direct MPII heatmap (Hip=0 as midpoint of RHip+LHip, Spine=7 as midpoint of Pelvis+Thorax), the code falls back to the existing analytical Gaussian scoring.
 
-| File | Purpose |
-|------|---------|
-| `pyproject.toml` | uv project config with all dependencies |
-| `models.py` | Pydantic models: CameraParams, ExampleConfig, DetectionResult, EvaluationResult, ExampleResult |
-| `config.py` | 10 CMU Panoptic examples (matching mediapipe-pose), paths, TARGET_FPS |
-| `skeleton.py` | H36M 17-joint definition, EVAL_JOINTS (12), mpii_to_h36m(), coco19_to_h36m() |
-| `camera.py` | Pinhole Camera class with numpy/torch projection, from_panoptic_calibration() |
-| `panoptic.py` | CMU Panoptic data loading: calibration, GT, video frames, world_to_camera() |
-| `setup_models.py` | Download MotionBERT-Lite checkpoint from HuggingFace |
-| `detect.py` | Full pipeline: YOLO bbox -> Stacked Hourglass 2D -> MotionBERT 3D -> camera-space meters |
-| `evaluate.py` | MPJPE, P-MPJPE, per-joint/per-frame errors, compute_comparison() |
-| `graphs.py` | Per-joint bar chart, per-frame line plot, aggregate summary |
-| `main.py` | Process all 10 examples end-to-end |
-| `test_single.py` | Quick single-example test with detailed diagnostics |
+A `USE_REAL_HEATMAPS` config flag enables A/B testing. The old analytical Gaussian path is fully preserved as fallback.
 
-### Files Preserved
-- `motionbert-pose/external/MotionBERT/` -- untouched
-- `motionbert-pose/checkpoints/motionbert_lite_h36m.bin` -- downloaded by setup_models.py
+## Files Changed
+
+1. **`motionbert-pose/scoring.py`** -- Added `H36M_TO_MPII_HEATMAP` constant (maps each H36M joint index to its MPII heatmap index or None), added `real_heatmap_score()` function, updated `compute_total_score()` with 3 new optional parameters (`heatmaps_list`, `affine`, `use_real_heatmaps`).
+
+2. **`motionbert-pose/optimize.py`** -- Added `heatmaps` and `affine` parameters to `run_optimization()`. Converts heatmaps to torch tensors once at initialization (not per step). Passes them through to `compute_total_score`.
+
+3. **`motionbert-pose/main.py`** -- Threads heatmaps and affine from `detect_poses()` through to `run_optimization()`.
+
+4. **`motionbert-pose/test_single.py`** -- Same threading of heatmaps/affine to `run_optimization()`.
+
+5. **`motionbert-pose/config.py`** -- Added `USE_REAL_HEATMAPS: bool = True`.
 
 ## Commands Run
 
-1. `uv sync` -- installed all dependencies (torch, opencv, ultralytics, stacked-hourglass, pydantic, etc.)
-2. `uv run python setup_models.py` -- downloaded MotionBERT-Lite checkpoint (64.1 MB)
-3. `uv run python test_single.py` -- verified pipeline on first example
-4. `uv run python main.py` -- processed all 10 examples successfully
+```
+cd /Users/kolbeyang/Documents/School/spring_2026/capstone/pose-estimation/motionbert-pose && uv run python test_single.py
+```
 
-## Results
-
-### test_single.py (Example 0: 171204_pose1_sample_0)
-- MPJPE: 58.04 cm
-- P-MPJPE: 21.57 cm
-- GT root Z: 2.07-2.73 m (reasonable)
-- Detector root Z: 2.26-8.35 m (spread wider due to torso-height heuristic)
-
-### main.py (All 10 Examples)
-
-| Example | MPJPE (cm) | P-MPJPE (cm) |
-|---------|-----------|--------------|
-| 171204_pose1_sample_0 | 58.04 | 21.57 |
-| 171204_pose2_200 | 62.90 | 30.62 |
-| 171204_pose2_5000 | 18.08 | 11.84 |
-| 171204_pose2_15000 | 50.97 | 24.74 |
-| 171204_pose3_200 | 54.38 | 33.62 |
-| 171204_pose3_4000 | 39.57 | 17.99 |
-| 160422_ultimatum1_200 | 59.62 | 26.17 |
-| 160422_ultimatum1_10000 | 65.10 | 24.09 |
-| 171204_pose2_10000 | 20.36 | 10.66 |
-| 171204_pose2_25000 | 19.92 | 11.59 |
-| **MEAN** | **44.89** | **21.29** |
-
-All 10/10 examples processed. Mean MPJPE 44.89 cm is within the expected 20-60 cm range.
+**Result:** Ran to completion successfully. Key output:
+- Loss decreased from 1054.9 to 813.5 over 20 steps (optimizer is converging)
+- Log confirms: "Using real Stacked Hourglass heatmaps for scoring"
+- Det MPJPE: 30.98 cm, Opt MPJPE: 30.44 cm (improvement: +0.54 cm)
+- Det MPJPE (no ankles): 14.14 cm, Opt MPJPE (no ankles): 13.85 cm
+- No errors or warnings
 
 ## Decisions Made
 
-1. **Phase 1 metric keys use `det_` prefix**: `det_mpjpe`, `det_p_mpjpe`, `det_per_joint`, `det_per_frame_mpjpe`. This keeps naming generic for Phase 2 where we'll add `opt_` prefixed keys.
+1. **Affine inversion approach:** The affine transform maps from 256-crop coords to original pixel coords (x_orig = sx * x_256 + tx). To go the other direction (original -> 256-crop), I invert it as x_256 = (x_orig - tx) / sx. This is a simple division since the affine is axis-aligned (no rotation component in the crop transform).
 
-2. **coco19_to_h36m Head extrapolation**: H36M joint 10 (Head) is extrapolated as `nose + (nose - neck)` to create a proper head-top position, matching the architect's plan for the 17-joint skeleton.
+2. **grid_sample coordinate normalization:** Used `align_corners=True` with normalization formula `grid_x = x_64 / 63.0 * 2.0 - 1.0` so that pixel 0 maps to -1 and pixel 63 maps to +1, which is the standard convention when align_corners=True.
 
-3. **12 eval joints**: Evaluation uses only joints [1,2,3,4,5,6,11,12,13,14,15,16], excluding Hip(0), Spine(7), Thorax(8), Neck(9), Head(10) since their definitions differ between detector and GT.
+3. **Per-joint loop vs batched:** Implemented the heatmap sampling as a per-joint loop rather than batching across joints. This is because each joint samples from a different heatmap channel, and the fallback logic for Hip/Spine joints differs. With only 17 joints, the per-joint overhead is negligible compared to the FK computation.
 
-4. **No model/ subdirectory**: camera.py is at top level (not model/camera.py) since the plan specified flat file structure.
+4. **Epsilon for log:** Used `eps=1e-8` as the floor for `torch.log(torch.clamp(value, min=eps))` to avoid log(0) = -inf.
 
 ## Concerns
 
-1. **Depth estimation spread**: The torso-height heuristic produces detector Z values that are much more spread than GT (e.g., 2-8m detector vs 2-3m GT for example 0). This is a known limitation and the primary source of MPJPE error. P-MPJPE (which removes scale/position) is much better (21.29 cm mean), confirming the shape predictions are reasonable.
+1. **Small improvement magnitude:** The optimization only improved MPJPE by 0.54 cm in 20 steps. This could improve with more steps or hyperparameter tuning. The heatmap scores are in a very different range than the analytical Gaussian scores (log of heatmap values vs scaled squared distance), so the balance between heatmap score, position penalty, rotation penalty, and anchor penalty may need retuning.
 
-2. **Some examples exceed 60 cm MPJPE**: Examples 1 (62.90 cm) and 7 (65.10 cm) slightly exceed the expected upper bound. These involve the ultimatum sequence which has multiple people and more challenging poses. This is borderline but acceptable.
+2. **Ankle errors dominate:** Ankles have ~115 cm MPJPE, dwarfing all other joints. The Stacked Hourglass heatmaps for ankles often have very low confidence. The real heatmaps should be more informative here (the optimizer can see that the heatmap is diffuse/flat rather than peaked), but the depth ambiguity for ankles remains fundamental.
 
-3. **Bone lengths from detector are inflated**: Due to the depth spread issue, detector bone lengths are 2-5x larger than anatomical defaults. This will be a key area for Phase 2 FK optimization to improve.
+3. **Heatmap value range:** Stacked Hourglass heatmaps are not normalized to [0, 1] -- their peak values depend on the network's output activation. If peak values are much less than 1.0, the log scores will be very negative, potentially overwhelming other loss terms. If peak values are much greater than 1.0, log scores will be positive. The current implementation handles both cases correctly but the relative weighting of heatmap score vs penalties may need adjustment.
 
 ## Deviations from Plan
 
-None. All files were created in the specified order with the specified contents. The 10 EXAMPLES list matches mediapipe-pose exactly. All functions have type hints. Pydantic models are used for configs and result summaries.
-
-## Validation Checklist
-
-- [x] `uv run python setup_models.py` downloads checkpoint successfully
-- [x] `uv run python test_single.py` completes without errors
-- [x] test_single.py prints MPJPE in range 20-60 cm (58.04 cm)
-- [x] GT coordinate Z values are positive and in range 1-6m (2.07-2.73 m)
-- [x] Detector coordinate Z values are positive and in range 1-6m (mostly, some up to 8m)
-- [x] `uv run python main.py` processes all 10 examples
-- [x] All examples have MPJPE in roughly 20-60 cm range (18-65 cm)
-- [x] Results JSON files saved in `training_runs/{run_name}/predictions/`
-- [x] Graph PNGs saved in `training_runs/{run_name}/graphs/`
-- [x] No imports from `mediapipe-pose/` or other sibling directories
-- [x] All functions have type hints
-- [x] Pydantic models used for config and result summaries
+None. All 5 steps of the architect's plan were implemented as specified.

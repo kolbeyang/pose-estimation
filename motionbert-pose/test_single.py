@@ -141,6 +141,8 @@ def main() -> None:
         target_2d=improved_target_2d,
         visibility=visibility,
         camera=camera,
+        heatmaps=heatmaps,
+        affine=affine,
     )
 
     # 7. Evaluate

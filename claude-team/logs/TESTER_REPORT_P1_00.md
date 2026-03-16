@@ -1,151 +1,145 @@
-# Test Report: Phase 1, Iteration 0
+# TESTER_REPORT_P1_00: Verify Spirit of the Project
 
-## Summary
+## Tests Run
 
-**Verdict: NO** -- Phase 1 Definition of Done is not fully met. There are type hint violations in 2 files, and 2 examples have MPJPE slightly outside the specified 20-60 cm range (though borderline). The type hint issue is the primary blocker since the spec says "No exceptions."
+### Test 1: Smoke Test -- `test_single.py` runs to completion
 
----
+**Command:** `cd motionbert-pose && uv run python test_single.py`
 
-## Tests Executed
+**Result: PASS**
 
-### T1: Smoke Test -- Pipeline Execution
-**Status: PASS (from prior run)**
+The pipeline ran to completion on the first CMU Panoptic example (171204_pose1_sample, 100 frames). Key output:
+- Det MPJPE: 30.98 cm, Opt MPJPE: 30.44 cm (improvement: +0.54 cm)
+- Det P-MPJPE: 28.57 cm, Opt P-MPJPE: 28.42 cm
+- No ankles: Det 14.14 cm, Opt 13.85 cm
+- 100/100 frames with ground truth
+- No errors or tracebacks
 
-The developer's report confirms `uv run python main.py` ran to completion on all 10 examples. All core modules import successfully (verified independently). The existing training run at `training_runs/motionbert-run-20260315-210051/` contains complete output for all 10 examples.
+### Test 2: Code Review -- Real heatmaps are used in scoring
 
-Note: A full re-run was not performed due to the long execution time (model inference on 10 video sequences). The existing output was validated instead.
+**Result: PASS**
 
-### T2: Results JSON Validation
-**Status: PASS**
+Complete data flow traced and verified:
 
-All 10 prediction JSON files exist and have consistent, correct structure:
-- Top-level keys: `sequence`, `camera`, `start_frame`, `num_frames`, `frame_indices`, `joint_names`, `eval_joint_names`, `camera_intrinsics`, `metrics`, `frames`
-- `camera_intrinsics` matches CameraParams schema: `fx`, `fy`, `cx`, `cy`, `image_width`, `image_height`
-- `metrics` contains: `n_frames`, `n_frames_with_gt`, `det_mpjpe`, `det_p_mpjpe`, `det_per_joint`, `det_per_frame_mpjpe`, `det_p_per_joint`
-- All frames have `ground_truth_3d` populated (all 10 examples have GT)
-- Per-frame data includes `detector_3d`, `detector_2d`, `visibility`, `ground_truth_3d`
+1. **`config.py`** line 100: `USE_REAL_HEATMAPS: bool = True` -- flag is enabled.
 
-### T3: Graphs Validation
-**Status: PASS**
+2. **`detect.py`** `run_hourglass()`: Heatmaps come from `output[-1].cpu().numpy()[0]` (line 263) -- the final stack of the Stacked Hourglass network. Flip augmentation is applied and averaged (line 278). These are genuine neural network outputs, shape (16, 64, 64).
 
-- 10/10 example directories contain `per_joint_error.png` and `per_frame_mpjpe.png`
-- Aggregate directory contains `aggregate_mpjpe.png` and `aggregate_p_mpjpe.png`
+3. **`detect.py`** `detect_poses()`: Returns `all_heatmaps` and `affine` as elements of the 7-tuple return value (line 1103).
 
-### T4: MPJPE Range Check
-**Status: BORDERLINE PASS**
+4. **`test_single.py`** line 139-146: Passes `heatmaps=heatmaps` and `affine=affine` to `run_optimization()`.
 
-| Example | MPJPE (cm) | P-MPJPE (cm) | In Range? |
-|---------|-----------|--------------|-----------|
-| 171204_pose1_sample_0 | 58.04 | 21.57 | OK |
-| 171204_pose2_200 | 62.90 | 30.62 | OVER (62.90 > 60) |
-| 171204_pose2_5000 | 18.08 | 11.84 | UNDER (18.08 < 20) |
-| 171204_pose2_15000 | 50.97 | 24.74 | OK |
-| 171204_pose3_200 | 54.38 | 33.62 | OK |
-| 171204_pose3_4000 | 39.57 | 17.99 | OK |
-| 160422_ultimatum1_200 | 59.62 | 26.17 | OK |
-| 160422_ultimatum1_10000 | 65.10 | 24.09 | OVER (65.10 > 60) |
-| 171204_pose2_10000 | 20.36 | 10.66 | OK |
-| 171204_pose2_25000 | 19.92 | 11.59 | UNDER (19.92 < 20) |
-| **MEAN** | **44.89** | **21.29** | **OK** |
+5. **`optimize.py`** `run_optimization()` line 134: Checks `cfg.USE_REAL_HEATMAPS` and converts heatmaps to torch tensors. Line 140: Prints "Using real Stacked Hourglass heatmaps for scoring". Line 209: Passes `use_real_heatmaps=cfg.USE_REAL_HEATMAPS` to `compute_total_score()`.
 
-4 of 10 examples are slightly outside the "roughly 20-60 cm" range. The spec says "roughly," so minor deviations (2-5 cm) are acceptable. The mean MPJPE of 44.89 cm is solidly in range. The P-MPJPE values (10-33 cm) indicate the shape predictions are good and the error is dominated by depth estimation, which is expected. This is a **borderline pass** -- the numbers are realistic and consistent with known MotionBERT performance.
+6. **`scoring.py`** `compute_total_score()` line 274-278: Computes `_use_real = use_real_heatmaps and heatmaps_list is not None and affine is not None`. When True, line 282 calls `real_heatmap_score()` instead of `heatmap_score()`.
 
-### T5: Code Review -- Type Hints
-**Status: FAIL**
+7. **`scoring.py`** `real_heatmap_score()` lines 64-141: Uses `F.grid_sample(hm, grid, mode="bilinear", ...)` to sample the actual Stacked Hourglass heatmap at projected 2D locations. Takes `torch.log(torch.clamp(value, min=eps))` of the sampled value. Falls back to analytical Gaussian only for Hip (0) and Spine (7) which have no dedicated MPII heatmap.
 
-Two files have functions with **missing type annotations**, violating the spec requirement that "All code has type hints" with "No exceptions":
+**Conclusion:** When `USE_REAL_HEATMAPS=True` (which is the default), the optimizer genuinely samples from real Stacked Hourglass heatmaps for 15 of 17 joints. The 2 fallback joints (Hip, Spine) are synthetic midpoints that have no corresponding heatmap channel, so analytical Gaussian is the correct approach for those.
 
-**`overlay_heatmaps.py`** (1 function):
-- `def main():` -- missing return type annotation
+### Test 3: Code Review -- Heatmaps come from Stacked Hourglass (not generated)
 
-**`test_norm_comparison.py`** (5 functions):
-- `def normalize_crop_scale(kpts_2d):` -- no param or return types
-- `def normalize_vid_size(kpts_2d, res_w=1000, res_h=1000):` -- no param or return types
-- `def flip_data(data):` -- no param or return types
-- `def run_inference(model, kpts_norm):` -- no param or return types
-- `def main():` -- no return type
+**Result: PASS**
 
-**Core pipeline files are fully typed.** The following files have complete type annotations on all functions:
-- `models.py` -- OK
-- `config.py` -- OK (module-level constants with type annotations)
-- `skeleton.py` -- OK
-- `camera.py` -- OK
-- `panoptic.py` -- OK
-- `setup_models.py` -- OK
-- `detect.py` -- OK
-- `evaluate.py` -- OK
-- `graphs.py` -- OK
-- `main.py` -- OK
-- `test_single.py` -- OK
+In `detect.py`, `run_hourglass()`:
+- Line 262: `output = model(inp)` -- forward pass through the HG8 model.
+- Line 263: `heatmaps = output[-1].cpu().numpy()[0]` -- takes the final stack output directly.
+- Lines 266-278: Flip augmentation: flips the input image, runs the model again, flips the output heatmaps, averages with the original. This is a standard augmentation technique that preserves the real heatmap character.
+- Line 279: `all_heatmaps.append(heatmaps)` -- raw network output is stored.
 
-### T6: Code Review -- Pydantic Usage
-**Status: PASS (with note)**
+No Gaussian generation functions are applied to the heatmaps. They are genuine Stacked Hourglass outputs.
 
-Pydantic models defined in `models.py`:
-- `CameraParams` -- used in `main.py` (line 126) to validate camera intrinsics
-- `ExampleResult` -- used in `main.py` (line 247) to validate per-example results
-- `ExampleConfig` -- defined but **not instantiated** anywhere
-- `DetectionResult` -- defined but **not instantiated** anywhere
-- `EvaluationResult` -- defined but **not instantiated** anywhere
+### Test 4: Code Review -- H36M-to-MPII heatmap mapping
 
-The spec says "Pydantic models for all data structures that pass between pipeline stages." The camera params and example results are validated. The detection and evaluation data flows primarily through numpy arrays and dicts, which is noted in the spec as acceptable: "For large tensor data, store as numpy/torch and validate shapes separately." The unused models are available for future use (Phase 2) but ideally should be instantiated at pipeline boundaries.
+**Result: PASS (with minor note)**
 
-This is a pass because the core pipeline data structures (camera params, results) do use Pydantic, and the spec explicitly acknowledges tensor data should not go in Pydantic models.
+Cross-referenced `H36M_TO_MPII_HEATMAP` in `scoring.py` against `mpii_to_h36m()` in `skeleton.py`:
 
-### T7: No Sibling Imports
-**Status: PASS**
+| H36M idx | H36M name    | MPII heatmap idx | MPII name      | Correct? |
+|----------|-------------|------------------|----------------|----------|
+| 0        | Hip         | None             | midpoint       | Yes      |
+| 1        | RHip        | 2                | RHip           | Yes      |
+| 2        | RKnee       | 1                | RKnee          | Yes      |
+| 3        | RAnkle      | 0                | RAnkle         | Yes      |
+| 4        | LHip        | 3                | LHip           | Yes      |
+| 5        | LKnee       | 4                | LKnee          | Yes      |
+| 6        | LAnkle      | 5                | LAnkle         | Yes      |
+| 7        | Spine       | None             | midpoint       | Yes      |
+| 8        | Thorax      | 7                | Thorax         | Yes*     |
+| 9        | Neck        | 8                | Neck           | Yes*     |
+| 10       | Head        | 9                | Head           | Yes*     |
+| 11       | LShoulder   | 13               | LShoulder      | Yes      |
+| 12       | LElbow      | 14               | LElbow         | Yes      |
+| 13       | LWrist      | 15               | LWrist         | Yes      |
+| 14       | RShoulder   | 12               | RShoulder      | Yes      |
+| 15       | RElbow      | 11               | RElbow         | Yes      |
+| 16       | RWrist      | 10               | RWrist         | Yes      |
 
-Grep for imports from `mediapipe-pose/`, `rtmw-pose/`, or relative parent imports (`from ..`) returned zero results. All imports are either local to `motionbert-pose/` or standard/third-party packages.
+*Note: There is a naming inconsistency in `mpii_to_h36m()` where `h36m[8] = keypoints_mpii[8]` (comment: "Thorax = MPII Neck") but `H36M_TO_MPII_HEATMAP[8] = 7` (MPII Thorax). The heatmap mapping follows the standard academic convention (H36M Thorax = MPII Thorax = index 7), which is correct for sampling the appropriate heatmap. The `mpii_to_h36m()` 2D keypoint mapping is a separate concern used only for MotionBERT input, not for heatmap sampling. This does not cause a bug in practice because for H36M joint 8, the heatmap path is taken (not the fallback), and the correct heatmap channel (MPII 7, Thorax) is sampled.
 
-### T8: Extra Files
-**Status: FAIL (same as T5)**
+### Test 5: Code Review -- Other capstone report constraints
 
-Three extra files exist that were not in the architect's plan:
-- `overlay_heatmaps.py` -- heatmap overlay utility (missing type hints)
-- `test_norm_comparison.py` -- normalization comparison test (missing ALL type hints)
-- `run_all.py` -- trivial wrapper around `main.main()` (no functions, only imports, acceptable)
+**Result: PASS**
 
-These files are part of the codebase and subject to the same type hint requirements.
+All core claims from the capstone report are respected:
 
----
+1. **Rigid skeleton parameterization (joint angles, not raw coordinates):** `optimize.py` optimizes `param_root_pos`, `param_root_rot`, and `param_local_rots` (all axis-angle), with `forward_kinematics()` converting these to 3D positions. Joint angles are the optimization variables.
+
+2. **Bone lengths shared across frames:** `optimize.py` line 111: `median_bone_lengths = np.median(np.array(all_bone_lengths), axis=0)` -- a single `param_bone_lengths` tensor is shared across all frames (line 112-116).
+
+3. **Forward kinematics is differentiable:** `fk.py` uses PyTorch operations (Rodrigues formula, matrix multiplication). `positions_3d` is computed via `forward_kinematics()` with gradient tracking.
+
+4. **Temporal smoothness penalties:** `scoring.py` includes `motion_penalty_position()` (root position jumps), `motion_penalty_rotation()` (rotation jumps using chord distance), and `motion_penalty_all_joints()`. These are applied in `compute_total_score()` for consecutive frame pairs.
+
+5. **Coarse-to-fine schedule:** `config.py` line 44: `SIGMA_SCHEDULE` is defined (currently just a single phase at sigma=80). `optimize.py` line 17-23: `_get_sigma()` implements the schedule lookup. The infrastructure exists; it's currently set to a single coarse phase.
+
+6. **Evaluation uses MPJPE and P-MPJPE:** Confirmed in the test output: both `Det MPJPE` and `Det P-MPJPE` are reported, along with per-joint breakdowns.
+
+7. **No imports from sibling directories:** Grep confirmed zero matches for imports from `mediapipe-pose/`, `rtmw-pose/`, `toy-arm/`, or `comparison/`.
+
+### Test 6: Runtime verification -- log output confirms real heatmaps
+
+**Result: PASS**
+
+From the test output:
+```
+    Using real Stacked Hourglass heatmaps for scoring
+```
+
+This line is printed when `heatmaps is not None and cfg.USE_REAL_HEATMAPS` is True (optimize.py line 134). Confirms that real heatmaps are active at runtime.
 
 ## Bugs Found
 
-### BUG-1: Missing Type Hints in overlay_heatmaps.py and test_norm_comparison.py
-**Severity: Medium (spec violation)**
-**Files:** `motionbert-pose/overlay_heatmaps.py`, `motionbert-pose/test_norm_comparison.py`
-
-6 functions across 2 files lack type annotations. The spec explicitly states "Type hints on every function, every parameter, every return value. No exceptions."
-
-**Fix:** Add type annotations to all 6 functions in these 2 files, or remove the files if they are not needed for Phase 1.
-
----
+None. No blocking bugs were found in this phase.
 
 ## Code Review Findings
 
-### Positive Findings
-1. **Clean architecture**: All core pipeline files are well-organized with clear separation of concerns.
-2. **Thorough type annotations in core files**: Every function in the 11 core files has complete type hints on parameters and return values, including local variables in many cases.
-3. **Correct joint mappings**: MPII-to-H36M and COCO19-to-H36M mappings match the architect's plan exactly.
-4. **Proper eval joint exclusion**: 12 eval joints [1,2,3,4,5,6,11,12,13,14,15,16] correctly exclude ambiguous torso/head joints.
-5. **Pydantic models with runtime validation**: CameraParams and ExampleResult are properly validated with Pydantic v2.
-6. **JSON output is comprehensive**: Includes per-frame predictions, ground truth, camera intrinsics, and full metrics.
-7. **Proper unit handling**: GT converted from cm to m (`* 0.01`) after world-to-camera transform.
+### Finding 1: MPII naming inconsistency (MINOR, non-blocking)
 
-### Minor Observations (not blocking)
-1. `ExampleConfig`, `DetectionResult`, and `EvaluationResult` Pydantic models are defined but never instantiated. They should be used at pipeline boundaries or removed.
-2. The `run_all.py` file is redundant -- it just calls `main.main()`. Consider removing.
-3. `overlay_heatmaps.py` and `test_norm_comparison.py` appear to be developer debug/exploration scripts, not part of the core pipeline. If they're not needed, removing them would resolve the type hint issue.
+**Description:** The `mpii_to_h36m()` function maps `h36m[8] = keypoints_mpii[8]` with the comment "Thorax = MPII Neck", while `H36M_TO_MPII_HEATMAP[8] = 7` (MPII Thorax). These refer to different MPII joints for the same H36M joint. This does not cause a runtime bug because the heatmap sampling and 2D keypoint paths serve different purposes, but the naming inconsistency could confuse future developers.
 
----
+**Severity:** Minor. Does not affect correctness.
 
-## Verdict: NO
+**Suggested fix:** Add a clarifying comment in `scoring.py` noting that the heatmap mapping follows the standard academic MPII-H36M correspondence, which differs from the `mpii_to_h36m()` keypoint mapping used for MotionBERT input.
 
-The implementation is **very close** to meeting the Phase 1 Definition of Done. The pipeline works correctly, produces realistic MPJPE values, saves all required outputs, and the core code is well-typed with Pydantic validation. However, the type hint requirement applies to ALL code in `motionbert-pose/`, and 2 files violate this.
+### Finding 2: Single-phase sigma schedule (NOTED, not a bug)
 
-### Required to Pass
-1. **Add type hints to `overlay_heatmaps.py`** (1 function) and **`test_norm_comparison.py`** (5 functions), OR remove these files if they are not needed for Phase 1.
+**Description:** `SIGMA_SCHEDULE` is `[(1.0, 80.0)]` -- a constant coarse sigma for all steps. The infrastructure for multi-phase coarse-to-fine exists but is not being used. The capstone report mentions coarse-to-fine scheduling as a feature. This is acceptable at the current 20-step optimization level but should be revisited when step count increases.
 
-### Not Required but Recommended
-- Instantiate `DetectionResult` and `EvaluationResult` Pydantic models at appropriate pipeline boundaries.
-- Remove `run_all.py` (redundant).
+**Severity:** Not a bug. The schedule infrastructure is present; the current single-phase setting is a conscious configuration choice.
+
+### Finding 3: High ankle MPJPE (NOTED, known issue)
+
+**Description:** RAnkle and LAnkle MPJPE are ~115 cm, dominating the overall 30.98 cm MPJPE. Without ankles, MPJPE drops to ~14 cm. This is a known depth ambiguity issue documented in the developer report.
+
+**Severity:** Not a bug in this phase's scope. The "no ankles" metric provides a better picture of upper-body accuracy.
+
+## Verdict
+
+**YES** -- the current implementation meets Phase 1's definition of done ("Verify that we are respecting the spirit of the project").
+
+Specifically:
+1. Real Stacked Hourglass heatmaps ARE being used in the FK optimization scoring function via differentiable bilinear sampling (`F.grid_sample`). The data flow from Stacked Hourglass network output through to the scoring function is complete and verified.
+2. All other capstone report constraints (rigid skeleton, shared bone lengths, differentiable FK, temporal smoothness, MPJPE evaluation) are satisfied.
+3. The pipeline runs to completion on a real CMU Panoptic example with no errors.
+4. No imports from sibling directories.

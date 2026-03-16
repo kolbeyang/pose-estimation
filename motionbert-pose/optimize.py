@@ -29,6 +29,8 @@ def run_optimization(
     visibility: list[np.ndarray],
     camera: Camera,
     num_steps: int | None = None,
+    heatmaps: list[np.ndarray] | None = None,
+    affine: np.ndarray | None = None,
 ) -> tuple[list[np.ndarray], np.ndarray, list[float]]:
     """Run FK optimization.
 
@@ -38,6 +40,8 @@ def run_optimization(
         visibility: Per-frame (17,) visibility weights.
         camera: Camera for 3D->2D projection.
         num_steps: Override for cfg.NUM_STEPS.
+        heatmaps: Per-frame (16, 64, 64) Stacked Hourglass heatmaps (optional).
+        affine: (2, 3) affine transform from 256-crop to original pixels (optional).
 
     Returns:
         optimized_3d: list of (17, 3) optimized camera-space positions per frame
@@ -124,6 +128,19 @@ def run_optimization(
         torch.tensor(v, dtype=torch.float32) for v in visibility
     ]
 
+    # Convert heatmaps to torch tensors (once, not per step)
+    heatmaps_t: list[torch.Tensor] | None = None
+    affine_t: torch.Tensor | None = None
+    if heatmaps is not None and cfg.USE_REAL_HEATMAPS:
+        heatmaps_t = [
+            torch.tensor(hm, dtype=torch.float32) for hm in heatmaps
+        ]
+        if affine is not None:
+            affine_t = torch.tensor(affine, dtype=torch.float32)
+        print(f"    Using real Stacked Hourglass heatmaps for scoring")
+    else:
+        print(f"    Using analytical Gaussian heatmaps for scoring")
+
     # Apply visibility threshold -- zero out low-confidence joints
     for i in range(len(visibility_t)):
         visibility_t[i] = torch.where(
@@ -187,6 +204,9 @@ def run_optimization(
             initial_positions_list=initial_positions_t,
             init_anchor_weight=cfg.INIT_ANCHOR_WEIGHT,
             all_joints_smooth_weight=cfg.ALL_JOINTS_SMOOTH_WEIGHT,
+            heatmaps_list=heatmaps_t,
+            affine=affine_t,
+            use_real_heatmaps=cfg.USE_REAL_HEATMAPS,
         )
 
         loss: torch.Tensor = -total_score

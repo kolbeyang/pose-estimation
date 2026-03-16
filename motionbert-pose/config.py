@@ -92,3 +92,9 @@ INIT_ANCHOR_WEIGHT: float = 5.0
 
 # Weight for all-joint temporal smoothing penalty.
 ALL_JOINTS_SMOOTH_WEIGHT: float = 0.0
+
+# Use real Stacked Hourglass heatmaps for optimization scoring.
+# When True, the optimizer samples from the actual (16, 64, 64) heatmaps
+# produced by Stacked Hourglass instead of analytical Gaussian approximations.
+# When False, uses the old analytical Gaussian approach.
+USE_REAL_HEATMAPS: bool = True
