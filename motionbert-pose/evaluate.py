@@ -161,3 +161,72 @@ def compute_comparison(
     results["det_p_per_joint"] = det_p_per_joint.tolist()
 
     return results
+
+
+def compute_comparison_with_optimization(
+    detector_3d: list[np.ndarray],
+    optimized_3d: list[np.ndarray],
+    gt_3d: list[np.ndarray | None],
+) -> dict[str, Any]:
+    """Compare detector baseline, optimized, and ground truth.
+
+    Same as compute_comparison but also computes opt_mpjpe, opt_p_mpjpe,
+    opt_per_joint, opt_per_frame_mpjpe, opt_p_per_joint.
+
+    All positions should be in camera-space meters.
+    Uses root-relative comparison on 12 eval joints.
+
+    Args:
+        detector_3d: List of (17, 3) detector predictions.
+        optimized_3d: List of (17, 3) optimized predictions.
+        gt_3d: List of (17, 3) ground truth or None for missing frames.
+
+    Returns:
+        Dict with metrics including det_*, opt_*, and improvement.
+    """
+    # Get detector metrics first
+    results: dict[str, Any] = compute_comparison(detector_3d, gt_3d)
+
+    n: int = len(detector_3d)
+    gt_indices: list[int] = [i for i in range(n) if gt_3d[i] is not None]
+
+    if not gt_indices:
+        return results
+
+    # Stack optimized frames with GT
+    opt_arr: np.ndarray = np.array([optimized_3d[i] for i in gt_indices])
+    gt_arr: np.ndarray = np.array([gt_3d[i] for i in gt_indices])
+
+    # Root-relative, then slice to eval joints
+    opt_rr: np.ndarray = root_relative(opt_arr)
+    gt_rr: np.ndarray = root_relative(gt_arr)
+
+    ej: list[int] = EVAL_JOINTS
+    opt_eval: np.ndarray = opt_rr[:, ej, :]
+    gt_eval: np.ndarray = gt_rr[:, ej, :]
+
+    results["opt_mpjpe"] = mpjpe(opt_eval, gt_eval)
+    results["opt_p_mpjpe"] = p_mpjpe(opt_eval, gt_eval)
+
+    # Per-joint errors (12 eval joints)
+    results["opt_per_joint"] = mpjpe_per_joint(opt_eval, gt_eval).tolist()
+
+    # Per-frame MPJPE
+    results["opt_per_frame_mpjpe"] = [
+        float(np.mean(np.linalg.norm(opt_eval[i] - gt_eval[i], axis=-1)))
+        for i in range(len(gt_indices))
+    ]
+
+    # Per-joint P-MPJPE
+    opt_p_per_joint: np.ndarray = np.zeros(NUM_EVAL_JOINTS)
+    for i in range(len(gt_indices)):
+        opt_aligned: np.ndarray = procrustes_align(opt_eval[i], gt_eval[i])
+        opt_p_per_joint += np.linalg.norm(opt_aligned - gt_eval[i], axis=-1)
+    opt_p_per_joint /= len(gt_indices)
+    results["opt_p_per_joint"] = opt_p_per_joint.tolist()
+
+    # Improvement (positive = optimized is better)
+    if "det_mpjpe" in results:
+        results["improvement"] = results["det_mpjpe"] - results["opt_mpjpe"]
+
+    return results

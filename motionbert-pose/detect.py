@@ -393,7 +393,7 @@ def flip_data(data: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
 def run_motionbert(
     keypoints_2d_list: list[np.ndarray],
     image_size: tuple[int, int],
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
     """Lift 2D keypoints to 3D using MotionBERT.
 
     Args:
@@ -401,7 +401,10 @@ def run_motionbert(
         image_size: (height, width) of original frames.
 
     Returns:
-        (N, 17, 3) array of pixel-aligned 3D joint positions in H36M format.
+        Tuple of:
+            positions_3d_pixel: (N, 17, 3) pixel-aligned 3D joint positions (H36M).
+            positions_3d_norm: (N, 17, 3) normalized 3D output (before denorm).
+            cs_params: crop_scale parameters dict with keys xs, ys, scale.
     """
     model: torch.nn.Module = load_motionbert_model()
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -450,6 +453,9 @@ def run_motionbert(
     print(f"  Root Z range (norm): {positions_3d[:, 0, 2].min():.4f} to "
           f"{positions_3d[:, 0, 2].max():.4f}")
 
+    # Save normalized positions BEFORE denormalization
+    positions_3d_norm: np.ndarray = positions_3d.copy()
+
     # Denormalize from crop_scale to pixel-aligned coordinates
     scale: float = cs_params["scale"]
     xs: float = cs_params["xs"]
@@ -459,7 +465,7 @@ def run_motionbert(
     positions_3d[:, :, 0] += xs + scale / 2.0
     positions_3d[:, :, 1] += ys + scale / 2.0
 
-    return positions_3d
+    return positions_3d, positions_3d_norm, cs_params
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +481,8 @@ def pixel_aligned_to_camera_space(
     cy: float,
 ) -> np.ndarray:
     """Convert pixel-aligned 3D to camera-space meters using torso-height heuristic.
+
+    DEPRECATED: Use motionbert_to_camera_space instead. Kept for reference.
 
     Args:
         kp_3d: (17, 3) pixel-aligned 3D from MotionBERT.
@@ -512,19 +520,98 @@ def pixel_aligned_to_camera_space(
     return cam_3d
 
 
+def motionbert_to_camera_space(
+    positions_3d_norm: np.ndarray,
+    kp_2d: np.ndarray,
+    scale: float,
+    fx: float,
+    fy: float,
+    cx: float,
+    cy: float,
+) -> np.ndarray:
+    """Convert MotionBERT normalized output to camera-space meters.
+
+    Uses a two-step approach:
+    1. Scale the root-relative 3D structure using bone length matching against
+       known anatomical reference lengths. This is more robust than relying on
+       2D torso height measurements which can be inaccurate.
+    2. Place the root in camera space using 2D detection + depth estimation.
+
+    Args:
+        positions_3d_norm: (17, 3) normalized MotionBERT output (before pixel denorm).
+        kp_2d: (17, 2) 2D detections in pixel coordinates.
+        scale: crop_scale scale parameter.
+        fx, fy, cx, cy: Camera intrinsics.
+
+    Returns:
+        (17, 3) camera-space meters.
+    """
+    from skeleton import PARENTS, DEFAULT_BONE_LENGTHS
+
+    # Root-relative in normalized space
+    root_relative: np.ndarray = positions_3d_norm - positions_3d_norm[0:1]
+
+    # Compute bone lengths in normalized space
+    detected_bone_lengths: list[float] = []
+    reference_bone_lengths: list[float] = []
+    for j in range(1, 17):
+        p: int = int(PARENTS[j])
+        det_bl: float = float(np.linalg.norm(root_relative[j] - root_relative[p]))
+        ref_bl: float = float(DEFAULT_BONE_LENGTHS[j])
+        if det_bl > 1e-4 and ref_bl > 1e-4:
+            detected_bone_lengths.append(det_bl)
+            reference_bone_lengths.append(ref_bl)
+
+    # Compute scale factor via median bone length ratio
+    if detected_bone_lengths:
+        ratios: np.ndarray = np.array(reference_bone_lengths) / np.array(detected_bone_lengths)
+        bone_scale: float = float(np.median(ratios))
+    else:
+        bone_scale = 1.0
+
+    # Scale root-relative structure to meters
+    root_relative_m: np.ndarray = root_relative * bone_scale
+
+    # Estimate root depth from 2D torso height for absolute positioning
+    thorax_2d: np.ndarray = kp_2d[8]
+    ankle_mid_2d: np.ndarray = (kp_2d[3] + kp_2d[6]) / 2.0
+    pixel_height: float = abs(float(thorax_2d[1] - ankle_mid_2d[1]))
+    assumed_height_m: float = 1.38
+    if pixel_height > 20:
+        root_depth: float = fy * assumed_height_m / pixel_height  # Use fy (vertical)
+    else:
+        root_depth = 3.0
+    root_depth = float(np.clip(root_depth, 1.0, 8.0))
+
+    # Place root in camera space using 2D detection (not MotionBERT output)
+    u_root: float = float(kp_2d[0, 0])
+    v_root: float = float(kp_2d[0, 1])
+    x_root: float = (u_root - cx) * root_depth / fx
+    y_root: float = (v_root - cy) * root_depth / fy
+    z_root: float = root_depth
+
+    # Assemble absolute camera-space positions
+    cam_3d: np.ndarray = root_relative_m.copy()
+    cam_3d[:, 0] += x_root
+    cam_3d[:, 1] += y_root
+    cam_3d[:, 2] += z_root
+
+    return cam_3d
+
+
 # ---------------------------------------------------------------------------
 # Pipeline Wrapper
 # ---------------------------------------------------------------------------
 
 def detect_poses(
     frames_rgb: list[np.ndarray],
-) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], np.ndarray]:
+) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], np.ndarray, np.ndarray, dict[str, float]]:
     """Full detection pipeline.
 
     Pipeline:
       1. YOLOv8 person detection -> union bounding box
       2. Stacked Hourglass -> MPII (16,3) 2D keypoints + raw heatmaps per frame
-      3. MotionBERT -> H36M (N,17,3) pixel-aligned 3D
+      3. MotionBERT -> H36M (N,17,3) pixel-aligned 3D + normalized output
       4. Convert MPII 2D to H36M 2D
 
     Args:
@@ -536,6 +623,8 @@ def detect_poses(
         confidence: List of (17,) confidence scores.
         heatmaps: List of (16, 64, 64) raw MPII heatmaps per frame.
         affine: (2, 3) affine from 256-crop coords to original pixel coords.
+        positions_3d_norm: (N, 17, 3) normalized MotionBERT output (before denorm).
+        cs_params: crop_scale parameters dict with keys xs, ys, scale.
     """
     h: int
     w: int
@@ -551,8 +640,11 @@ def detect_poses(
     affine: np.ndarray
     all_keypoints_2d, all_heatmaps, affine = run_hourglass(frames_rgb, union_bbox)
 
-    # 3. MotionBERT -> H36M pixel-aligned 3D
-    kp_3d_array: np.ndarray = run_motionbert(all_keypoints_2d, image_size)
+    # 3. MotionBERT -> H36M pixel-aligned 3D + normalized output
+    kp_3d_array: np.ndarray
+    positions_3d_norm: np.ndarray
+    cs_params: dict[str, float]
+    kp_3d_array, positions_3d_norm, cs_params = run_motionbert(all_keypoints_2d, image_size)
 
     # 4. Convert MPII 2D to H36M 2D + extract visibility
     kp_2d_list: list[np.ndarray] = []
@@ -566,4 +658,4 @@ def detect_poses(
         kp_3d_array[i] for i in range(kp_3d_array.shape[0])
     ]
 
-    return kp_2d_list, kp_3d_list, visibility_list, all_heatmaps, affine
+    return kp_2d_list, kp_3d_list, visibility_list, all_heatmaps, affine, positions_3d_norm, cs_params

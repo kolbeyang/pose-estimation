@@ -12,8 +12,9 @@ import numpy as np
 
 import config as cfg
 from camera import Camera
-from detect import detect_poses, pixel_aligned_to_camera_space
-from evaluate import compute_comparison
+from detect import detect_poses, motionbert_to_camera_space
+from evaluate import compute_comparison, compute_comparison_with_optimization
+from optimize import run_optimization
 from panoptic import (
     extract_video_frames,
     get_sequence_dir,
@@ -91,13 +92,16 @@ def main() -> None:
     visibility: list[np.ndarray]
     heatmaps: list[np.ndarray]
     affine: np.ndarray
-    kp_2d, kp_3d, visibility, heatmaps, affine = detect_poses(frames_rgb)
+    positions_3d_norm: np.ndarray
+    cs_params: dict[str, float]
+    kp_2d, kp_3d, visibility, heatmaps, affine, positions_3d_norm, cs_params = detect_poses(frames_rgb)
 
-    # 4. Camera-space conversion
+    # 4. Camera-space conversion (new method)
+    scale: float = cs_params["scale"]
     det_cam_positions: list[np.ndarray] = []
     for i in range(len(frames_rgb)):
-        pos_cam: np.ndarray = pixel_aligned_to_camera_space(
-            kp_3d[i], kp_2d[i], fx, fy, cx, cy
+        pos_cam: np.ndarray = motionbert_to_camera_space(
+            positions_3d_norm[i], kp_2d[i], scale, fx, fy, cx, cy
         )
         det_cam_positions.append(pos_cam)
 
@@ -113,13 +117,33 @@ def main() -> None:
         else:
             gt_cam.append(None)
 
-    # 6. Evaluate
-    metrics: dict[str, Any] = compute_comparison(det_cam_positions, gt_cam)
+    # 6. Optimize
+    print(f"\n=== OPTIMIZATION ===")
+    optimized_3d: list[np.ndarray]
+    bone_lengths_final: np.ndarray
+    loss_history: list[float]
+    optimized_3d, bone_lengths_final, loss_history = run_optimization(
+        initial_positions_cam=det_cam_positions,
+        target_2d=kp_2d,
+        visibility=visibility,
+        camera=camera,
+    )
+
+    # 7. Evaluate
+    metrics: dict[str, Any] = compute_comparison_with_optimization(
+        det_cam_positions, optimized_3d, gt_cam,
+    )
 
     print(f"\n=== RESULTS ===")
     if "det_mpjpe" in metrics:
         print(f"  Det MPJPE:   {metrics['det_mpjpe']*100:.2f} cm")
         print(f"  Det P-MPJPE: {metrics['det_p_mpjpe']*100:.2f} cm")
+    if "opt_mpjpe" in metrics:
+        print(f"  Opt MPJPE:   {metrics['opt_mpjpe']*100:.2f} cm")
+        print(f"  Opt P-MPJPE: {metrics['opt_p_mpjpe']*100:.2f} cm")
+    if "improvement" in metrics:
+        print(f"  Improvement: {metrics['improvement']*100:+.2f} cm")
+    if "det_mpjpe" in metrics:
         print(f"  Frames with GT: {metrics['n_frames_with_gt']}/{metrics['n_frames']}")
 
     # --- Detailed diagnostics ---

@@ -59,6 +59,29 @@ DEFAULT_BONE_LENGTHS: np.ndarray = np.array([
     0.25,   # 16: RElbow -> RWrist
 ], dtype=np.float64)
 
+# Rest-pose bone directions (unit vectors when all local rotations are zero).
+# Camera convention: Y-down, person facing camera.
+# Person's right = camera left (-X), head direction = -Y, feet = +Y.
+REST_DIRECTIONS: np.ndarray = np.array([
+    [0, 0, 0],       # 0: Hip (root, unused)
+    [-1, 0, 0],      # 1: Hip -> RHip  (camera-left = person's right)
+    [0, 1, 0],       # 2: RHip -> RKnee  (down)
+    [0, 1, 0],       # 3: RKnee -> RAnkle  (down)
+    [1, 0, 0],       # 4: Hip -> LHip  (camera-right = person's left)
+    [0, 1, 0],       # 5: LHip -> LKnee  (down)
+    [0, 1, 0],       # 6: LKnee -> LAnkle  (down)
+    [0, -1, 0],      # 7: Hip -> Spine  (up = -Y in camera)
+    [0, -1, 0],      # 8: Spine -> Thorax  (up)
+    [0, -1, 0],      # 9: Thorax -> Neck  (up)
+    [0, -1, 0],      # 10: Neck -> Head  (up)
+    [1, 0, 0],       # 11: Thorax -> LShoulder  (camera-right = person's left)
+    [0, 1, 0],       # 12: LShoulder -> LElbow  (down)
+    [0, 1, 0],       # 13: LElbow -> LWrist  (down)
+    [-1, 0, 0],      # 14: Thorax -> RShoulder  (camera-left = person's right)
+    [0, 1, 0],       # 15: RShoulder -> RElbow  (down)
+    [0, 1, 0],       # 16: RElbow -> RWrist  (down)
+], dtype=np.float64)
+
 # Body groups for coloring
 BODY_GROUPS: dict[str, list[int]] = {
     "spine":     [0, 7, 8, 9, 10],

@@ -2,6 +2,8 @@
 
 import os
 
+import numpy as np
+
 # --- Paths ---
 _THIS_DIR: str = os.path.dirname(os.path.abspath(__file__))
 PANOPTIC_ROOT: str = os.path.normpath(
@@ -26,3 +28,41 @@ EXAMPLES: list[tuple[str, str, int, int, int]] = [
 
 # --- Video processing ---
 TARGET_FPS: float = 10.0  # Subsample HD video (native ~30 fps) to this rate
+
+# --- Optimization (Phase 2) ---
+NUM_STEPS: int = 10  # Start small for testing, increase after confirming correctness
+LEARNING_RATE: float = 0.001
+BONE_LENGTH_LR: float = 0.0001
+
+# Gaussian sigma for heatmap scoring (pixels)
+SIGMA: float = 50.0
+
+# Motion penalty weights
+POSITION_PENALTY_WEIGHT: float = 50.0
+
+# Per-joint rotation penalty weights (17 joints)
+# Trunk joints penalized more to prevent wild torso swings.
+# Extremities penalized less so they can track fast motion.
+ROTATION_PENALTY_SCALAR: float = 10.0
+ROTATION_PENALTY_PER_JOINT: np.ndarray = np.array([
+    ROTATION_PENALTY_SCALAR * 3.0,   # 0: Hip (root rotation)
+    ROTATION_PENALTY_SCALAR * 1.0,   # 1: RHip
+    ROTATION_PENALTY_SCALAR * 0.5,   # 2: RKnee
+    ROTATION_PENALTY_SCALAR * 0.2,   # 3: RAnkle
+    ROTATION_PENALTY_SCALAR * 1.0,   # 4: LHip
+    ROTATION_PENALTY_SCALAR * 0.5,   # 5: LKnee
+    ROTATION_PENALTY_SCALAR * 0.2,   # 6: LAnkle
+    ROTATION_PENALTY_SCALAR * 1.0,   # 7: Spine
+    ROTATION_PENALTY_SCALAR * 1.0,   # 8: Thorax
+    ROTATION_PENALTY_SCALAR * 0.5,   # 9: Neck
+    ROTATION_PENALTY_SCALAR * 0.5,   # 10: Head
+    ROTATION_PENALTY_SCALAR * 0.5,   # 11: LShoulder
+    ROTATION_PENALTY_SCALAR * 0.3,   # 12: LElbow
+    ROTATION_PENALTY_SCALAR * 0.1,   # 13: LWrist
+    ROTATION_PENALTY_SCALAR * 0.5,   # 14: RShoulder
+    ROTATION_PENALTY_SCALAR * 0.3,   # 15: RElbow
+    ROTATION_PENALTY_SCALAR * 0.1,   # 16: RWrist
+], dtype=np.float64)
+
+# Visibility threshold: joints below this are ignored in scoring
+VISIBILITY_THRESHOLD: float = 0.5

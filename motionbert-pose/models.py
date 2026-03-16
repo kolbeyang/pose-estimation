@@ -45,6 +45,29 @@ class EvaluationResult(BaseModel):
     num_eval_joints: int
 
 
+class OptimizationConfig(BaseModel):
+    """Optimization hyperparameters."""
+
+    num_steps: int
+    learning_rate: float
+    bone_length_lr: float
+    sigma: float
+    position_penalty_weight: float
+    visibility_threshold: float
+
+
+class ComparisonResult(BaseModel):
+    """Comparison of detector vs optimized vs ground truth."""
+
+    det_mpjpe: float | None = None
+    det_p_mpjpe: float | None = None
+    opt_mpjpe: float | None = None
+    opt_p_mpjpe: float | None = None
+    det_mpjpe_cm: float | None = None
+    opt_mpjpe_cm: float | None = None
+    improvement_cm: float | None = None  # positive = improved
+
+
 class ExampleResult(BaseModel):
     """Summary result for one example."""
 
@@ -58,3 +81,8 @@ class ExampleResult(BaseModel):
     p_mpjpe: float | None = None
     mpjpe_cm: float | None = None
     p_mpjpe_cm: float | None = None
+    opt_mpjpe: float | None = None
+    opt_p_mpjpe: float | None = None
+    opt_mpjpe_cm: float | None = None
+    opt_p_mpjpe_cm: float | None = None
+    improvement_cm: float | None = None  # positive = improved

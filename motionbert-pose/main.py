@@ -18,14 +18,15 @@ import numpy as np
 
 import config as cfg
 from camera import Camera
-from detect import detect_poses, pixel_aligned_to_camera_space
-from evaluate import compute_comparison
+from detect import detect_poses, motionbert_to_camera_space
+from evaluate import compute_comparison, compute_comparison_with_optimization
 from graphs import (
     generate_aggregate_summary,
     generate_per_frame_mpjpe,
     generate_per_joint_error_bar,
 )
 from models import CameraParams, ExampleResult
+from optimize import run_optimization
 from panoptic import (
     extract_video_frames,
     get_sequence_dir,
@@ -151,14 +152,17 @@ def process_example(
     visibility: list[np.ndarray]
     heatmaps: list[np.ndarray]
     affine: np.ndarray
-    kp_2d, kp_3d, visibility, heatmaps, affine = detect_poses(frames_rgb)
+    positions_3d_norm: np.ndarray
+    cs_params: dict[str, float]
+    kp_2d, kp_3d, visibility, heatmaps, affine, positions_3d_norm, cs_params = detect_poses(frames_rgb)
 
     # --- 4. Convert to camera coordinates ---
     print("\n  [4/5] Converting to camera coordinates...")
+    scale: float = cs_params["scale"]
     det_cam_positions: list[np.ndarray] = []
     for i in range(len(frames_rgb)):
-        pos_cam: np.ndarray = pixel_aligned_to_camera_space(
-            kp_3d[i], kp_2d[i], fx, fy, cx, cy,
+        pos_cam: np.ndarray = motionbert_to_camera_space(
+            positions_3d_norm[i], kp_2d[i], scale, fx, fy, cx, cy,
         )
         det_cam_positions.append(pos_cam)
 
@@ -188,19 +192,41 @@ def process_example(
         ]
         print(f"    GT root Z range: {min(gt_z_vals):.2f} to {max(gt_z_vals):.2f} m")
 
-    # --- 5. Evaluate ---
-    print("\n  [5/5] Evaluating...")
-    metrics: dict[str, Any] = compute_comparison(det_cam_positions, gt_cam)
+    # --- 5. Optimize (Phase 2) ---
+    print(f"\n  [5/7] Running FK optimization...")
+    optimized_3d: list[np.ndarray]
+    bone_lengths_final: np.ndarray
+    loss_history: list[float]
+    optimized_3d, bone_lengths_final, loss_history = run_optimization(
+        initial_positions_cam=det_cam_positions,
+        target_2d=kp_2d,
+        visibility=visibility,
+        camera=camera,
+    )
+
+    # --- 6. Evaluate ---
+    print(f"\n  [6/7] Evaluating...")
+    metrics: dict[str, Any] = compute_comparison_with_optimization(
+        detector_3d=det_cam_positions,
+        optimized_3d=optimized_3d,
+        gt_3d=gt_cam,
+    )
     metrics["name"] = name
 
     if "det_mpjpe" in metrics:
         print(f"    Det MPJPE:   {metrics['det_mpjpe']*100:.2f} cm")
         print(f"    Det P-MPJPE: {metrics['det_p_mpjpe']*100:.2f} cm")
-    else:
+    if "opt_mpjpe" in metrics:
+        print(f"    Opt MPJPE:   {metrics['opt_mpjpe']*100:.2f} cm")
+        print(f"    Opt P-MPJPE: {metrics['opt_p_mpjpe']*100:.2f} cm")
+    if "improvement" in metrics:
+        improv_cm: float = metrics["improvement"] * 100
+        print(f"    Improvement: {improv_cm:+.2f} cm")
+    if "det_mpjpe" not in metrics:
         print("    No ground truth available for evaluation.")
 
-    # --- Save results ---
-    print("\n  Saving results...")
+    # --- 7. Save results ---
+    print(f"\n  [7/7] Saving results...")
     predictions_dir: str = os.path.join(run_dir, "predictions")
     example_graph_dir: str = os.path.join(run_dir, "graphs", name)
 
@@ -216,12 +242,15 @@ def process_example(
         "eval_joint_names": EVAL_JOINT_NAMES,
         "camera_intrinsics": camera_params.model_dump(),
         "metrics": {k: v for k, v in metrics.items() if k != "name"},
+        "bone_lengths_final": bone_lengths_final.tolist(),
+        "loss_history": loss_history,
         "frames": [],
     }
     for i in range(len(frames_rgb)):
         frame_data: dict[str, Any] = {
             "frame_idx": frame_indices[i] if i < len(frame_indices) else i,
             "detector_3d": det_cam_positions[i].tolist(),
+            "optimized_3d": optimized_3d[i].tolist(),
             "detector_2d": kp_2d[i].tolist(),
             "visibility": visibility[i].tolist(),
         }
@@ -238,9 +267,17 @@ def process_example(
 
     # Graphs
     if "det_per_joint" in metrics:
-        generate_per_joint_error_bar(metrics["det_per_joint"], example_graph_dir)
+        generate_per_joint_error_bar(
+            metrics["det_per_joint"],
+            example_graph_dir,
+            opt_per_joint=metrics.get("opt_per_joint"),
+        )
     if "det_per_frame_mpjpe" in metrics:
-        generate_per_frame_mpjpe(metrics["det_per_frame_mpjpe"], example_graph_dir)
+        generate_per_frame_mpjpe(
+            metrics["det_per_frame_mpjpe"],
+            example_graph_dir,
+            opt_per_frame=metrics.get("opt_per_frame_mpjpe"),
+        )
     print(f"    Saved graphs: {example_graph_dir}")
 
     # Build ExampleResult for summary
@@ -255,6 +292,11 @@ def process_example(
         p_mpjpe=metrics.get("det_p_mpjpe"),
         mpjpe_cm=metrics.get("det_mpjpe", 0) * 100 if "det_mpjpe" in metrics else None,
         p_mpjpe_cm=metrics.get("det_p_mpjpe", 0) * 100 if "det_p_mpjpe" in metrics else None,
+        opt_mpjpe=metrics.get("opt_mpjpe"),
+        opt_p_mpjpe=metrics.get("opt_p_mpjpe"),
+        opt_mpjpe_cm=metrics.get("opt_mpjpe", 0) * 100 if "opt_mpjpe" in metrics else None,
+        opt_p_mpjpe_cm=metrics.get("opt_p_mpjpe", 0) * 100 if "opt_p_mpjpe" in metrics else None,
+        improvement_cm=metrics.get("improvement", 0) * 100 if "improvement" in metrics else None,
     )
     print(f"    {example_result.model_dump_json(indent=2)}")
 
