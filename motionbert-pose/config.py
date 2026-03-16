@@ -74,3 +74,8 @@ ROTATION_PENALTY_PER_JOINT: np.ndarray = np.array([
 
 # Visibility threshold: joints below this are ignored in scoring
 VISIBILITY_THRESHOLD: float = 0.5
+
+# Confidence threshold for 2D keypoints fed to MotionBERT.
+# Joints below this threshold have their coordinates zeroed out,
+# telling MotionBERT to treat them as missing and infer from context.
+MOTIONBERT_CONF_THRESHOLD: float = 0.0

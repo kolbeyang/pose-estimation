@@ -197,12 +197,24 @@ def process_example(
 
     # --- 5. Optimize (Phase 2) ---
     print(f"\n  [5/7] Running FK optimization...")
+
+    # For joints where Stacked Hourglass is unreliable (below confidence threshold),
+    # use MotionBERT's projected 2D as the optimization target instead of garbage 2D.
+    improved_target_2d: list[np.ndarray] = []
+    for i in range(len(frames_rgb)):
+        target: np.ndarray = kp_2d[i].copy()
+        mb_projected: np.ndarray = camera.world_to_image(det_cam_positions[i])
+        for j in range(17):
+            if visibility[i][j] < cfg.MOTIONBERT_CONF_THRESHOLD:
+                target[j] = mb_projected[j]
+        improved_target_2d.append(target)
+
     optimized_3d: list[np.ndarray]
     bone_lengths_final: np.ndarray
     loss_history: list[float]
     optimized_3d, bone_lengths_final, loss_history = run_optimization(
         initial_positions_cam=det_cam_positions,
-        target_2d=kp_2d,
+        target_2d=improved_target_2d,
         visibility=visibility,
         camera=camera,
     )
@@ -219,9 +231,13 @@ def process_example(
     if "det_mpjpe" in metrics:
         print(f"    Det MPJPE:   {metrics['det_mpjpe']*100:.2f} cm")
         print(f"    Det P-MPJPE: {metrics['det_p_mpjpe']*100:.2f} cm")
+    if "det_mpjpe_no_ankles" in metrics:
+        print(f"    Det MPJPE (no ankles): {metrics['det_mpjpe_no_ankles']*100:.2f} cm")
     if "opt_mpjpe" in metrics:
         print(f"    Opt MPJPE:   {metrics['opt_mpjpe']*100:.2f} cm")
         print(f"    Opt P-MPJPE: {metrics['opt_p_mpjpe']*100:.2f} cm")
+    if "opt_mpjpe_no_ankles" in metrics:
+        print(f"    Opt MPJPE (no ankles): {metrics['opt_mpjpe_no_ankles']*100:.2f} cm")
     if "improvement" in metrics:
         improv_cm: float = metrics["improvement"] * 100
         print(f"    Improvement: {improv_cm:+.2f} cm")

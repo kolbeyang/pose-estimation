@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+import config as cfg
 from skeleton import mpii_to_h36m
 
 SCRIPT_DIR: str = os.path.dirname(os.path.abspath(__file__))
@@ -416,6 +417,23 @@ def run_motionbert(
     keypoints_h36m: np.ndarray = np.zeros((n_frames, 17, 3), dtype=np.float32)
     for i, kp_mpii in enumerate(keypoints_2d_list):
         keypoints_h36m[i] = mpii_to_h36m(kp_mpii)
+
+    # Zero out low-confidence joints so MotionBERT treats them as missing.
+    # This prevents garbage 2D detections (e.g. ankles with conf < 0.01)
+    # from corrupting MotionBERT's input.
+    # We zero all 3 channels (x, y, conf) so crop_scale excludes them from
+    # the bounding box and MotionBERT sees them as truly absent.
+    n_zeroed: int = 0
+    if cfg.MOTIONBERT_CONF_THRESHOLD > 0.0:
+        for i in range(n_frames):
+            for j in range(17):
+                if keypoints_h36m[i, j, 2] < cfg.MOTIONBERT_CONF_THRESHOLD:
+                    keypoints_h36m[i, j, :] = 0.0
+                    n_zeroed += 1
+    n_total: int = n_frames * 17
+    print(f"  Confidence threshold={cfg.MOTIONBERT_CONF_THRESHOLD}: "
+          f"zeroed {n_zeroed}/{n_total} joint-frames "
+          f"({100*n_zeroed/n_total:.1f}%)")
 
     # Official MotionBERT preprocessing: crop_scale normalization
     keypoints_norm: np.ndarray

@@ -6,6 +6,11 @@ import numpy as np
 
 from skeleton import NUM_JOINTS, JOINT_NAMES, EVAL_JOINTS, NUM_EVAL_JOINTS, EVAL_JOINT_NAMES
 
+# Eval joints excluding ankles (joints 3=RAnkle, 6=LAnkle)
+EVAL_JOINTS_NO_ANKLES: list[int] = [j for j in EVAL_JOINTS if j not in (3, 6)]
+NUM_EVAL_JOINTS_NO_ANKLES: int = len(EVAL_JOINTS_NO_ANKLES)
+EVAL_JOINT_NAMES_NO_ANKLES: list[str] = [JOINT_NAMES[j] for j in EVAL_JOINTS_NO_ANKLES]
+
 
 def mpjpe(predicted: np.ndarray, target: np.ndarray) -> float:
     """Mean Per-Joint Position Error.
@@ -160,6 +165,13 @@ def compute_comparison(
     det_p_per_joint /= len(gt_indices)
     results["det_p_per_joint"] = det_p_per_joint.tolist()
 
+    # No-ankles MPJPE (diagnostic: how much error comes from ankles)
+    ej_na: list[int] = EVAL_JOINTS_NO_ANKLES
+    det_eval_na: np.ndarray = det_rr[:, ej_na, :]
+    gt_eval_na: np.ndarray = gt_rr[:, ej_na, :]
+    results["det_mpjpe_no_ankles"] = mpjpe(det_eval_na, gt_eval_na)
+    results["det_p_mpjpe_no_ankles"] = p_mpjpe(det_eval_na, gt_eval_na)
+
     return results
 
 
@@ -224,6 +236,13 @@ def compute_comparison_with_optimization(
         opt_p_per_joint += np.linalg.norm(opt_aligned - gt_eval[i], axis=-1)
     opt_p_per_joint /= len(gt_indices)
     results["opt_p_per_joint"] = opt_p_per_joint.tolist()
+
+    # No-ankles MPJPE for optimized
+    ej_na: list[int] = EVAL_JOINTS_NO_ANKLES
+    opt_eval_na: np.ndarray = opt_rr[:, ej_na, :]
+    gt_eval_na: np.ndarray = gt_rr[:, ej_na, :]
+    results["opt_mpjpe_no_ankles"] = mpjpe(opt_eval_na, gt_eval_na)
+    results["opt_p_mpjpe_no_ankles"] = p_mpjpe(opt_eval_na, gt_eval_na)
 
     # Improvement (positive = optimized is better)
     if "det_mpjpe" in results:

@@ -13,7 +13,7 @@ import numpy as np
 import config as cfg
 from camera import Camera
 from detect import detect_poses, motionbert_to_camera_space
-from evaluate import compute_comparison, compute_comparison_with_optimization
+from evaluate import compute_comparison, compute_comparison_with_optimization, EVAL_JOINT_NAMES_NO_ANKLES
 from optimize import run_optimization
 from panoptic import (
     extract_video_frames,
@@ -120,14 +120,25 @@ def main() -> None:
         else:
             gt_cam.append(None)
 
-    # 6. Optimize
+    # 6. Optimize (with improved 2D targets for low-confidence joints)
     print(f"\n=== OPTIMIZATION ===")
+
+    # Replace garbage 2D targets with MotionBERT's projected 2D for low-conf joints
+    improved_target_2d: list[np.ndarray] = []
+    for i in range(len(frames_rgb)):
+        target: np.ndarray = kp_2d[i].copy()
+        mb_projected: np.ndarray = camera.world_to_image(det_cam_positions[i])
+        for j in range(17):
+            if visibility[i][j] < cfg.MOTIONBERT_CONF_THRESHOLD:
+                target[j] = mb_projected[j]
+        improved_target_2d.append(target)
+
     optimized_3d: list[np.ndarray]
     bone_lengths_final: np.ndarray
     loss_history: list[float]
     optimized_3d, bone_lengths_final, loss_history = run_optimization(
         initial_positions_cam=det_cam_positions,
-        target_2d=kp_2d,
+        target_2d=improved_target_2d,
         visibility=visibility,
         camera=camera,
     )
@@ -141,9 +152,15 @@ def main() -> None:
     if "det_mpjpe" in metrics:
         print(f"  Det MPJPE:   {metrics['det_mpjpe']*100:.2f} cm")
         print(f"  Det P-MPJPE: {metrics['det_p_mpjpe']*100:.2f} cm")
+    if "det_mpjpe_no_ankles" in metrics:
+        print(f"  Det MPJPE (no ankles):   {metrics['det_mpjpe_no_ankles']*100:.2f} cm")
+        print(f"  Det P-MPJPE (no ankles): {metrics['det_p_mpjpe_no_ankles']*100:.2f} cm")
     if "opt_mpjpe" in metrics:
         print(f"  Opt MPJPE:   {metrics['opt_mpjpe']*100:.2f} cm")
         print(f"  Opt P-MPJPE: {metrics['opt_p_mpjpe']*100:.2f} cm")
+    if "opt_mpjpe_no_ankles" in metrics:
+        print(f"  Opt MPJPE (no ankles):   {metrics['opt_mpjpe_no_ankles']*100:.2f} cm")
+        print(f"  Opt P-MPJPE (no ankles): {metrics['opt_p_mpjpe_no_ankles']*100:.2f} cm")
     if "improvement" in metrics:
         print(f"  Improvement: {metrics['improvement']*100:+.2f} cm")
     if "det_mpjpe" in metrics:
