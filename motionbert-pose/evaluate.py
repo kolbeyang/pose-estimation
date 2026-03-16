@@ -101,6 +101,44 @@ def root_relative(positions: np.ndarray) -> np.ndarray:
     return positions - positions[:, 0:1, :]
 
 
+def reprojection_error_vs_detections(
+    positions_3d: list[np.ndarray],
+    detections_2d: list[np.ndarray],
+    visibility: list[np.ndarray],
+    camera: "Camera",
+    visibility_threshold: float = 0.5,
+) -> dict[str, float]:
+    """Compute 2D reprojection error against 2D SH detections.
+
+    Projects 3D predictions to 2D via the camera model, then measures
+    pixel distance to the 2D Stacked Hourglass keypoints (NOT GT projections).
+
+    Args:
+        positions_3d: Per-frame (17, 3) camera-space positions.
+        detections_2d: Per-frame (17, 2) SH 2D keypoints in pixels.
+        visibility: Per-frame (17,) visibility scores.
+        camera: Camera for 3D->2D projection.
+        visibility_threshold: Only count joints above this threshold.
+
+    Returns:
+        Dict with 'mean_px' (mean pixel error across visible joints and frames),
+        'per_frame_px' (list of per-frame mean pixel errors).
+    """
+    per_frame_errors: list[float] = []
+    for i in range(len(positions_3d)):
+        proj_2d = camera.world_to_image(positions_3d[i])  # (17, 2)
+        diffs = np.linalg.norm(proj_2d - detections_2d[i], axis=-1)  # (17,)
+        mask = visibility[i] >= visibility_threshold
+        if mask.sum() > 0:
+            per_frame_errors.append(float(diffs[mask].mean()))
+        else:
+            per_frame_errors.append(0.0)
+    return {
+        "mean_px": float(np.mean(per_frame_errors)) if per_frame_errors else 0.0,
+        "per_frame_px": per_frame_errors,
+    }
+
+
 def procrustes_align(predicted: np.ndarray, target: np.ndarray) -> np.ndarray:
     """Rigid alignment (Procrustes) of predicted to target.
 
@@ -229,6 +267,8 @@ def compute_comparison_with_optimization(
     optimized_3d: list[np.ndarray],
     gt_3d: list[np.ndarray | None],
     camera: Camera | None = None,
+    detections_2d: list[np.ndarray] | None = None,
+    visibility: list[np.ndarray] | None = None,
 ) -> dict[str, Any]:
     """Compare detector baseline, optimized, and ground truth.
 
@@ -342,5 +382,18 @@ def compute_comparison_with_optimization(
         results["opt_per_frame_2d_mpjpe"] = opt_2d_errors
         results["det_2d_mpjpe"] = float(np.mean(det_2d_errors))
         results["opt_2d_mpjpe"] = float(np.mean(opt_2d_errors))
+
+    # --- 2D reprojection error vs 2D DETECTIONS (not GT) ---
+    if camera is not None and detections_2d is not None and visibility is not None:
+        det_vs_det = reprojection_error_vs_detections(
+            detector_3d, detections_2d, visibility, camera,
+        )
+        opt_vs_det = reprojection_error_vs_detections(
+            optimized_3d, detections_2d, visibility, camera,
+        )
+        results["det_2d_det_mpjpe_px"] = det_vs_det["mean_px"]
+        results["opt_2d_det_mpjpe_px"] = opt_vs_det["mean_px"]
+        results["det_2d_det_per_frame_px"] = det_vs_det["per_frame_px"]
+        results["opt_2d_det_per_frame_px"] = opt_vs_det["per_frame_px"]
 
     return results

@@ -151,6 +151,8 @@ def main() -> None:
     metrics: dict[str, Any] = compute_comparison_with_optimization(
         det_cam_positions, optimized_3d, gt_cam,
         camera=camera,
+        detections_2d=improved_target_2d,
+        visibility=visibility,
     )
 
     print(f"\n=== RESULTS ===")
@@ -168,6 +170,9 @@ def main() -> None:
         print(f"  Opt P-MPJPE (no ankles): {metrics['opt_p_mpjpe_no_ankles']*100:.2f} cm")
     if "improvement" in metrics:
         print(f"  Improvement: {metrics['improvement']*100:+.2f} cm")
+    if "det_2d_det_mpjpe_px" in metrics:
+        print(f"  Det 2D-vs-Det: {metrics['det_2d_det_mpjpe_px']:.1f} px")
+        print(f"  Opt 2D-vs-Det: {metrics['opt_2d_det_mpjpe_px']:.1f} px")
     if "det_mpjpe" in metrics:
         print(f"  Frames with GT: {metrics['n_frames_with_gt']}/{metrics['n_frames']}")
 

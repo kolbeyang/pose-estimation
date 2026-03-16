@@ -236,6 +236,8 @@ def process_example(
         optimized_3d=optimized_3d,
         gt_3d=gt_cam,
         camera=camera,
+        detections_2d=improved_target_2d,
+        visibility=visibility,
     )
     metrics["name"] = name
 
@@ -258,6 +260,9 @@ def process_example(
     if "det_2d_mpjpe" in metrics:
         print(f"    Det 2D MPJPE: {metrics['det_2d_mpjpe']:.1f} px")
         print(f"    Opt 2D MPJPE: {metrics['opt_2d_mpjpe']:.1f} px")
+    if "det_2d_det_mpjpe_px" in metrics:
+        print(f"    Det 2D-vs-Det: {metrics['det_2d_det_mpjpe_px']:.1f} px")
+        print(f"    Opt 2D-vs-Det: {metrics['opt_2d_det_mpjpe_px']:.1f} px")
     if "det_mpjpe" not in metrics:
         print("    No ground truth available for evaluation.")
 
