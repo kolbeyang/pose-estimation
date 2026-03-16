@@ -6,10 +6,12 @@ Handles person detection (YOLOv8), 2D heatmap extraction, and 2D->3D lifting.
 import copy
 import os
 import sys
+from functools import partial
 
 import cv2
 import numpy as np
 import torch
+import torch.nn as nn
 from tqdm import tqdm
 
 import config as cfg
@@ -247,9 +249,13 @@ def run_hourglass(
             if shared_affine is None:
                 shared_affine = affine
 
-            # Preprocess: normalize to [0, 1], HWC -> CHW
+            # Preprocess: normalize to [0, 1], subtract RGB mean, HWC -> CHW
+            # RGB channel means match the official HumanPosePredictor preprocessing
             img: np.ndarray = cropped.astype(np.float32) / 255.0
-            img = np.transpose(img, (2, 0, 1))
+            img = np.transpose(img, (2, 0, 1))  # HWC -> CHW
+            img[0] -= 0.4404  # R mean
+            img[1] -= 0.4440  # G mean
+            img[2] -= 0.4327  # B mean
             inp: torch.Tensor = torch.from_numpy(img).unsqueeze(0).to(device)
 
             # Forward pass - model returns list of heatmaps per stack
@@ -259,7 +265,10 @@ def run_hourglass(
             # Flip augmentation
             cropped_flip: np.ndarray = cropped[:, ::-1].copy()
             img_flip: np.ndarray = cropped_flip.astype(np.float32) / 255.0
-            img_flip = np.transpose(img_flip, (2, 0, 1))
+            img_flip = np.transpose(img_flip, (2, 0, 1))  # HWC -> CHW
+            img_flip[0] -= 0.4404  # R mean
+            img_flip[1] -= 0.4440  # G mean
+            img_flip[2] -= 0.4327  # B mean
             inp_flip: torch.Tensor = torch.from_numpy(img_flip).unsqueeze(0).to(device)
             output_flip: list[torch.Tensor] = model(inp_flip)
             heatmaps_flip: np.ndarray = output_flip[-1].cpu().numpy()[0]
@@ -319,6 +328,7 @@ def load_motionbert_model() -> torch.nn.Module:
         dim_feat=256, dim_rep=512,
         depth=5, num_heads=8, mlp_ratio=4,
         num_joints=17, maxlen=243,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
     )
 
     if not os.path.exists(lite_ckpt):

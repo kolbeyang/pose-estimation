@@ -27,7 +27,7 @@ EXAMPLES: list[tuple[str, str, int, int, int]] = [
 ]
 
 # --- Video processing ---
-TARGET_FPS: float = 10.0  # Subsample HD video (native ~30 fps) to this rate
+TARGET_FPS: float = 30.0  # Use native video rate for maximum temporal context
 
 # --- Optimization (Phase 2) ---
 NUM_STEPS: int = 20
