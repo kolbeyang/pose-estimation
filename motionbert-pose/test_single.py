@@ -148,6 +148,7 @@ def main() -> None:
     # 7. Evaluate
     metrics: dict[str, Any] = compute_comparison_with_optimization(
         det_cam_positions, optimized_3d, gt_cam,
+        camera=camera,
     )
 
     print(f"\n=== RESULTS ===")

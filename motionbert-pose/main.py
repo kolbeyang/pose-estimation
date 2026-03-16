@@ -22,8 +22,14 @@ from detect import detect_poses, motionbert_to_camera_space
 from evaluate import compute_comparison, compute_comparison_with_optimization
 from graphs import (
     generate_aggregate_summary,
+    generate_bone_lengths_graph,
+    generate_loss_curve,
     generate_per_frame_mpjpe,
+    generate_per_frame_mpjve,
     generate_per_joint_error_bar,
+    generate_per_joint_mpjve_bar,
+    generate_summary,
+    generate_trajectory_graphs,
 )
 from models import CameraParams, ExampleResult
 from optimize import run_optimization
@@ -227,6 +233,7 @@ def process_example(
         detector_3d=det_cam_positions,
         optimized_3d=optimized_3d,
         gt_3d=gt_cam,
+        camera=camera,
     )
     metrics["name"] = name
 
@@ -243,6 +250,12 @@ def process_example(
     if "improvement" in metrics:
         improv_cm: float = metrics["improvement"] * 100
         print(f"    Improvement: {improv_cm:+.2f} cm")
+    if "det_mpjve" in metrics:
+        print(f"    Det MPJVE:   {metrics['det_mpjve']*100:.2f} cm/f")
+        print(f"    Opt MPJVE:   {metrics['opt_mpjve']*100:.2f} cm/f")
+    if "det_2d_mpjpe" in metrics:
+        print(f"    Det 2D MPJPE: {metrics['det_2d_mpjpe']:.1f} px")
+        print(f"    Opt 2D MPJPE: {metrics['opt_2d_mpjpe']:.1f} px")
     if "det_mpjpe" not in metrics:
         print("    No ground truth available for evaluation.")
 
@@ -299,6 +312,32 @@ def process_example(
             example_graph_dir,
             opt_per_frame=metrics.get("opt_per_frame_mpjpe"),
         )
+    generate_trajectory_graphs(
+        det_cam_positions, optimized_3d, gt_cam, example_graph_dir,
+    )
+    generate_loss_curve(loss_history, example_graph_dir)
+    generate_bone_lengths_graph(
+        bone_lengths_final, example_graph_dir,
+        gt_bone_lengths=metrics.get("gt_bone_lengths"),
+        det_bone_lengths=metrics.get("det_bone_lengths"),
+    )
+    if "det_mpjve_per_joint" in metrics:
+        generate_per_joint_mpjve_bar(
+            metrics["det_mpjve_per_joint"],
+            metrics.get("opt_mpjve_per_joint"),
+            example_graph_dir,
+        )
+    if "det_per_frame_mpjve" in metrics:
+        generate_per_frame_mpjve(
+            metrics["det_per_frame_mpjve"],
+            metrics.get("opt_per_frame_mpjve"),
+            example_graph_dir,
+        )
+    generate_summary(
+        det_cam_positions, optimized_3d, gt_cam,
+        loss_history, metrics, bone_lengths_final,
+        example_graph_dir, title=name,
+    )
     print(f"    Saved graphs: {example_graph_dir}")
 
     # Build ExampleResult for summary

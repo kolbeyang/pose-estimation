@@ -1,10 +1,13 @@
-"""Evaluation metrics: MPJPE, P-MPJPE, and per-joint error comparison."""
+"""Evaluation metrics: MPJPE, P-MPJPE, MPJVE, and per-joint error comparison."""
+
+from __future__ import annotations
 
 from typing import Any
 
 import numpy as np
 
-from skeleton import NUM_JOINTS, JOINT_NAMES, EVAL_JOINTS, NUM_EVAL_JOINTS, EVAL_JOINT_NAMES
+from camera import Camera
+from skeleton import NUM_JOINTS, JOINT_NAMES, EVAL_JOINTS, NUM_EVAL_JOINTS, EVAL_JOINT_NAMES, PARENTS
 
 # Eval joints excluding ankles (joints 3=RAnkle, 6=LAnkle)
 EVAL_JOINTS_NO_ANKLES: list[int] = [j for j in EVAL_JOINTS if j not in (3, 6)]
@@ -36,6 +39,52 @@ def mpjpe_per_joint(predicted: np.ndarray, target: np.ndarray) -> np.ndarray:
         (J,) mean error per joint.
     """
     return np.mean(np.linalg.norm(predicted - target, axis=-1), axis=0)
+
+
+def mpjve(predicted: np.ndarray, target: np.ndarray) -> float:
+    """Mean Per-Joint Velocity Error.
+
+    Args:
+        predicted: (F, J, 3) root-relative positions.
+        target: (F, J, 3) root-relative positions.
+
+    Returns:
+        Scalar MPJVE.
+    """
+    pred_vel: np.ndarray = np.diff(predicted, axis=0)
+    tgt_vel: np.ndarray = np.diff(target, axis=0)
+    return float(np.mean(np.linalg.norm(pred_vel - tgt_vel, axis=-1)))
+
+
+def mpjve_per_joint(predicted: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """Per-joint velocity error.
+
+    Args:
+        predicted: (F, J, 3).
+        target: (F, J, 3).
+
+    Returns:
+        (J,) mean velocity error per joint.
+    """
+    pred_vel: np.ndarray = np.diff(predicted, axis=0)
+    tgt_vel: np.ndarray = np.diff(target, axis=0)
+    return np.mean(np.linalg.norm(pred_vel - tgt_vel, axis=-1), axis=0)
+
+
+def mpjve_per_frame(predicted: np.ndarray, target: np.ndarray) -> list[float]:
+    """Per-frame velocity error (F-1 values).
+
+    Args:
+        predicted: (F, J, 3).
+        target: (F, J, 3).
+
+    Returns:
+        List of length F-1, mean joint velocity error per frame transition.
+    """
+    pred_vel: np.ndarray = np.diff(predicted, axis=0)
+    tgt_vel: np.ndarray = np.diff(target, axis=0)
+    return [float(np.mean(np.linalg.norm(pred_vel[i] - tgt_vel[i], axis=-1)))
+            for i in range(pred_vel.shape[0])]
 
 
 def root_relative(positions: np.ndarray) -> np.ndarray:
@@ -179,11 +228,13 @@ def compute_comparison_with_optimization(
     detector_3d: list[np.ndarray],
     optimized_3d: list[np.ndarray],
     gt_3d: list[np.ndarray | None],
+    camera: Camera | None = None,
 ) -> dict[str, Any]:
     """Compare detector baseline, optimized, and ground truth.
 
     Same as compute_comparison but also computes opt_mpjpe, opt_p_mpjpe,
-    opt_per_joint, opt_per_frame_mpjpe, opt_p_per_joint.
+    opt_per_joint, opt_per_frame_mpjpe, opt_p_per_joint, MPJVE, bone
+    lengths, and optional 2D reprojection error.
 
     All positions should be in camera-space meters.
     Uses root-relative comparison on 12 eval joints.
@@ -192,6 +243,7 @@ def compute_comparison_with_optimization(
         detector_3d: List of (17, 3) detector predictions.
         optimized_3d: List of (17, 3) optimized predictions.
         gt_3d: List of (17, 3) ground truth or None for missing frames.
+        camera: Optional camera for 2D reprojection error.
 
     Returns:
         Dict with metrics including det_*, opt_*, and improvement.
@@ -205,11 +257,13 @@ def compute_comparison_with_optimization(
     if not gt_indices:
         return results
 
-    # Stack optimized frames with GT
+    # Stack arrays for frames with GT
+    det_arr: np.ndarray = np.array([detector_3d[i] for i in gt_indices])
     opt_arr: np.ndarray = np.array([optimized_3d[i] for i in gt_indices])
     gt_arr: np.ndarray = np.array([gt_3d[i] for i in gt_indices])
 
     # Root-relative, then slice to eval joints
+    det_rr: np.ndarray = root_relative(det_arr)
     opt_rr: np.ndarray = root_relative(opt_arr)
     gt_rr: np.ndarray = root_relative(gt_arr)
 
@@ -247,5 +301,46 @@ def compute_comparison_with_optimization(
     # Improvement (positive = optimized is better)
     if "det_mpjpe" in results:
         results["improvement"] = results["det_mpjpe"] - results["opt_mpjpe"]
+
+    # --- Bone lengths from GT and Detector ---
+    gt_bl: np.ndarray = np.zeros(NUM_JOINTS)
+    det_bl: np.ndarray = np.zeros(NUM_JOINTS)
+    for j in range(1, NUM_JOINTS):
+        p: int = int(PARENTS[j])
+        gt_bl[j] = float(np.mean([
+            np.linalg.norm(gt_rr[f, j] - gt_rr[f, p])
+            for f in range(len(gt_indices))
+        ]))
+        det_bl[j] = float(np.mean([
+            np.linalg.norm(det_rr[f, j] - det_rr[f, p])
+            for f in range(len(gt_indices))
+        ]))
+    results["gt_bone_lengths"] = gt_bl.tolist()
+    results["det_bone_lengths"] = det_bl.tolist()
+
+    # --- MPJVE (velocity error) -- need >= 2 GT frames ---
+    det_eval: np.ndarray = det_rr[:, ej, :]
+    if len(gt_indices) >= 2:
+        results["det_mpjve"] = mpjve(det_eval, gt_eval)
+        results["opt_mpjve"] = mpjve(opt_eval, gt_eval)
+        results["det_mpjve_per_joint"] = mpjve_per_joint(det_eval, gt_eval).tolist()
+        results["opt_mpjve_per_joint"] = mpjve_per_joint(opt_eval, gt_eval).tolist()
+        results["det_per_frame_mpjve"] = mpjve_per_frame(det_eval, gt_eval)
+        results["opt_per_frame_mpjve"] = mpjve_per_frame(opt_eval, gt_eval)
+
+    # --- 2D reprojection error (requires camera) ---
+    if camera is not None:
+        det_2d_errors: list[float] = []
+        opt_2d_errors: list[float] = []
+        for i in range(len(gt_indices)):
+            gt_2d: np.ndarray = camera.world_to_image(gt_arr[i])
+            det_2d: np.ndarray = camera.world_to_image(det_arr[i])
+            opt_2d: np.ndarray = camera.world_to_image(opt_arr[i])
+            det_2d_errors.append(float(np.mean(np.linalg.norm(det_2d - gt_2d, axis=-1))))
+            opt_2d_errors.append(float(np.mean(np.linalg.norm(opt_2d - gt_2d, axis=-1))))
+        results["det_per_frame_2d_mpjpe"] = det_2d_errors
+        results["opt_per_frame_2d_mpjpe"] = opt_2d_errors
+        results["det_2d_mpjpe"] = float(np.mean(det_2d_errors))
+        results["opt_2d_mpjpe"] = float(np.mean(opt_2d_errors))
 
     return results
