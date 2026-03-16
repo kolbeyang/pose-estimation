@@ -39,7 +39,7 @@ EXAMPLES: list[tuple[str, str, int, int, int]] = [
 TARGET_FPS: float = 30.0  # Use native video rate for maximum temporal context
 
 # --- Optimization (Phase 2) ---
-NUM_STEPS: int = 20
+NUM_STEPS: int = 100
 LEARNING_RATE: float = 0.001
 BONE_LENGTH_LR: float = 0.0001
 
@@ -47,11 +47,21 @@ BONE_LENGTH_LR: float = 0.0001
 SIGMA: float = 50.0
 
 # Coarse-to-fine sigma schedule: (fraction_of_steps, sigma)
-# Phase 1: wide basin for coarse alignment
-# Phase 2: medium for refinement
-# Phase 3: narrower for precision (but not too aggressive)
 SIGMA_SCHEDULE: list[tuple[float, float]] = [
     (1.0, 80.0),   # Constant coarse sigma -- prevents overfitting to noisy 2D targets
+]
+
+# Gaussian blur sigma applied to Stacked Hourglass heatmaps before optimization.
+# Applied in 64x64 heatmap space. sigma=2 at 64x64 ~ 8px at 256x256 crop.
+# 0 = no blur. Widens gradient basin for optimization.
+HEATMAP_BLUR_SIGMA: float = 0.0
+
+# Coarse-to-fine heatmap blur schedule: (fraction_of_steps, blur_sigma)
+# Starts with wide blur for coarse alignment, narrows for precision.
+# Set to None to use fixed HEATMAP_BLUR_SIGMA instead.
+HEATMAP_BLUR_SCHEDULE: list[tuple[float, float]] | None = [
+    (0.5, 8.0),   # First 50%: wide blur for coarse alignment
+    (1.0, 2.0),   # Last 50%: narrow blur for precision
 ]
 
 # Motion penalty weights

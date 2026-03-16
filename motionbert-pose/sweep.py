@@ -41,7 +41,8 @@ class SweepConfig:
     sigma_schedule: list[tuple[float, float]] = field(
         default_factory=lambda: [(1.0, 80.0)]
     )
-    heatmap_blur_sigma: float = 0.0  # Additional Gaussian blur on SH heatmaps
+    heatmap_blur_sigma: float = 0.0  # Fixed blur (applied before optimization)
+    heatmap_blur_schedule: list[tuple[float, float]] | None = None  # Coarse-to-fine blur
 
 
 # Per-joint rotation multipliers (same as config.py)
@@ -175,9 +176,10 @@ def run_sweep_config(data: dict[str, Any], config: SweepConfig) -> dict[str, Any
             dtype=np.float64,
         )
 
-        # Optionally blur heatmaps
+        # Optionally blur heatmaps (fixed, pre-optimization)
         heatmaps = data["heatmaps"]
-        if config.heatmap_blur_sigma > 0:
+        if config.heatmap_blur_sigma > 0 and config.heatmap_blur_schedule is None:
+            # Fixed blur only if no dynamic schedule
             import scipy.ndimage
 
             heatmaps = [
@@ -198,6 +200,7 @@ def run_sweep_config(data: dict[str, Any], config: SweepConfig) -> dict[str, Any
             num_steps=config.num_steps,
             heatmaps=heatmaps,
             affine=data["affine"],
+            heatmap_blur_schedule=config.heatmap_blur_schedule,
         )
 
         metrics = compute_comparison_with_optimization(
@@ -285,18 +288,107 @@ def get_phase1_1_configs() -> list[SweepConfig]:
     return configs
 
 
+def get_phase1_2_configs() -> list[SweepConfig]:
+    """Return Phase 1.2 heatmap blur sweep configurations."""
+    configs: list[SweepConfig] = []
+
+    # Common penalty settings (baseline -- Phase 1.1 showed these don't matter much)
+    base = dict(
+        position_penalty_weight=50.0,
+        rotation_penalty_scalar=10.0,
+        init_anchor_weight=5.0,
+    )
+
+    # --- Baseline (no blur) at multiple step counts ---
+    for steps in [20, 50, 100]:
+        configs.append(SweepConfig(
+            name=f"no_blur_{steps}s",
+            num_steps=steps,
+            **base,
+        ))
+
+    # --- Fixed blur sweep at 50 steps ---
+    for sigma in [1.0, 2.0, 4.0, 8.0]:
+        configs.append(SweepConfig(
+            name=f"blur{sigma:.0f}_{50}s",
+            num_steps=50,
+            heatmap_blur_sigma=sigma,
+            **base,
+        ))
+
+    # --- Fixed blur sweep at 100 steps ---
+    for sigma in [1.0, 2.0, 4.0, 8.0]:
+        configs.append(SweepConfig(
+            name=f"blur{sigma:.0f}_{100}s",
+            num_steps=100,
+            heatmap_blur_sigma=sigma,
+            **base,
+        ))
+
+    # --- Coarse-to-fine blur schedules at 100 steps ---
+    configs.append(SweepConfig(
+        name="c2f_8to0_100s",
+        num_steps=100,
+        heatmap_blur_schedule=[(0.3, 8.0), (0.7, 4.0), (1.0, 0.0)],
+        **base,
+    ))
+    configs.append(SweepConfig(
+        name="c2f_4to0_100s",
+        num_steps=100,
+        heatmap_blur_schedule=[(0.3, 4.0), (0.7, 2.0), (1.0, 0.0)],
+        **base,
+    ))
+    configs.append(SweepConfig(
+        name="c2f_4to1_100s",
+        num_steps=100,
+        heatmap_blur_schedule=[(0.3, 4.0), (0.7, 2.0), (1.0, 1.0)],
+        **base,
+    ))
+    configs.append(SweepConfig(
+        name="c2f_8to2_100s",
+        num_steps=100,
+        heatmap_blur_schedule=[(0.3, 8.0), (0.7, 4.0), (1.0, 2.0)],
+        **base,
+    ))
+
+    # --- Coarse-to-fine blur at 50 steps ---
+    configs.append(SweepConfig(
+        name="c2f_4to0_50s",
+        num_steps=50,
+        heatmap_blur_schedule=[(0.4, 4.0), (0.8, 2.0), (1.0, 0.0)],
+        **base,
+    ))
+    configs.append(SweepConfig(
+        name="c2f_8to0_50s",
+        num_steps=50,
+        heatmap_blur_schedule=[(0.4, 8.0), (0.8, 4.0), (1.0, 0.0)],
+        **base,
+    ))
+
+    return configs
+
+
 def main() -> None:
     """Run the parameter sweep."""
-    example_idx: int = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("example_idx", type=int, nargs="?", default=0)
+    parser.add_argument("--phase", choices=["1.1", "1.2"], default="1.2",
+                        help="Which config set to run")
+    args = parser.parse_args()
+
+    example_idx: int = args.example_idx
 
     print("Loading example data (detection + GT)...")
     data = load_example(example_idx)
     print(f"Example: {data['name']}, {len(data['det_cam_positions'])} frames\n")
 
-    # Define sweep configurations -- Phase 1.1
-    configs: list[SweepConfig] = get_phase1_1_configs()
+    if args.phase == "1.1":
+        configs: list[SweepConfig] = get_phase1_1_configs()
+    else:
+        configs = get_phase1_2_configs()
 
-    results: list[tuple[str, dict[str, Any]]] = []
+    results: list[tuple[str, dict[str, Any], SweepConfig]] = []
     for i, config in enumerate(configs):
         print(f"\n{'='*60}")
         print(
@@ -304,7 +396,8 @@ def main() -> None:
         )
         print(
             f"  pos_w={config.position_penalty_weight}, rot_s={config.rotation_penalty_scalar}, "
-            f"anchor={config.init_anchor_weight}, smooth={config.all_joints_smooth_weight}"
+            f"anchor={config.init_anchor_weight}, smooth={config.all_joints_smooth_weight}, "
+            f"blur={config.heatmap_blur_sigma}, blur_sched={config.heatmap_blur_schedule}"
         )
         print(f"{'='*60}")
 
@@ -312,29 +405,30 @@ def main() -> None:
         metrics = run_sweep_config(data, config)
         elapsed = time.time() - t0
 
-        results.append((config.name, metrics))
+        results.append((config.name, metrics, config))
         print(f"  Time: {elapsed:.1f}s")
 
     # Print summary table
-    print(f"\n\n{'='*100}")
+    print(f"\n\n{'='*110}")
     print(f"  SWEEP RESULTS -- {data['name']}")
-    print(f"{'='*100}")
+    print(f"{'='*110}")
     header = (
         f"{'Config':<40} {'Det MPJPE':>10} {'Opt MPJPE':>10} {'Improv':>8} "
-        f"{'Opt P-MPJPE':>12} {'Det 2D-Det':>10} {'Opt 2D-Det':>10}"
+        f"{'Opt P-MPJPE':>12} {'Opt MPJVE':>10} {'Det 2D-Det':>10} {'Opt 2D-Det':>10}"
     )
     print(header)
     print("-" * len(header))
-    for name, m in results:
+    for name, m, config in results:
         det_mpjpe = m.get("det_mpjpe", 0) * 100
         opt_mpjpe = m.get("opt_mpjpe", 0) * 100
         improv = m.get("improvement", 0) * 100
         opt_p = m.get("opt_p_mpjpe", 0) * 100
+        opt_mpjve = m.get("opt_mpjve", 0) * 100 if m.get("opt_mpjve") is not None else 0.0
         det_2d = m.get("det_2d_det_mpjpe_px", 0)
         opt_2d = m.get("opt_2d_det_mpjpe_px", 0)
         print(
             f"{name:<40} {det_mpjpe:>10.2f} {opt_mpjpe:>10.2f} {improv:>+8.2f} "
-            f"{opt_p:>12.2f} {det_2d:>10.1f} {opt_2d:>10.1f}"
+            f"{opt_p:>12.2f} {opt_mpjve:>10.2f} {det_2d:>10.1f} {opt_2d:>10.1f}"
         )
 
     # Save results to JSON
@@ -342,7 +436,7 @@ def main() -> None:
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"sweep_{data['name']}.json")
     save_data = []
-    for name, m in results:
+    for name, m, config in results:
         save_data.append(
             {
                 "config": name,
@@ -355,6 +449,9 @@ def main() -> None:
                 "opt_mpjve_cm": m.get("opt_mpjve", 0) * 100
                 if "opt_mpjve" in m
                 else None,
+                "num_steps": config.num_steps,
+                "heatmap_blur_sigma": config.heatmap_blur_sigma,
+                "heatmap_blur_schedule": config.heatmap_blur_schedule,
             }
         )
     with open(out_path, "w") as f:

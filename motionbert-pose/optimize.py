@@ -23,6 +23,31 @@ def _get_sigma(step: int, num_steps: int) -> float:
     return cfg.SIGMA_SCHEDULE[-1][1]
 
 
+def _get_blur_sigma(step: int, num_steps: int, schedule: list[tuple[float, float]]) -> float:
+    """Get heatmap blur sigma for current step from schedule."""
+    progress: float = step / max(num_steps - 1, 1)
+    for frac, sigma in schedule:
+        if progress <= frac:
+            return sigma
+    return schedule[-1][1]
+
+
+def _apply_blur_torch(
+    heatmaps: list[torch.Tensor], sigma: float
+) -> list[torch.Tensor]:
+    """Apply Gaussian blur to heatmaps using scipy (called rarely, not per-step)."""
+    import scipy.ndimage
+    blurred: list[torch.Tensor] = []
+    for hm in heatmaps:
+        hm_np = hm.numpy()
+        blurred_np = np.stack([
+            scipy.ndimage.gaussian_filter(hm_np[c], sigma=sigma)
+            for c in range(hm_np.shape[0])
+        ])
+        blurred.append(torch.tensor(blurred_np, dtype=torch.float32))
+    return blurred
+
+
 def run_optimization(
     initial_positions_cam: list[np.ndarray],
     target_2d: list[np.ndarray],
@@ -31,6 +56,7 @@ def run_optimization(
     num_steps: int | None = None,
     heatmaps: list[np.ndarray] | None = None,
     affine: np.ndarray | None = None,
+    heatmap_blur_schedule: list[tuple[float, float]] | None = None,
 ) -> tuple[list[np.ndarray], np.ndarray, list[float]]:
     """Run FK optimization.
 
@@ -141,6 +167,19 @@ def run_optimization(
     else:
         print(f"    Using analytical Gaussian heatmaps for scoring")
 
+    # Store originals for re-blurring during coarse-to-fine schedule
+    heatmaps_t_orig: list[torch.Tensor] | None = None
+    if heatmaps_t is not None and heatmap_blur_schedule is not None:
+        heatmaps_t_orig = [hm.clone() for hm in heatmaps_t]
+        # Apply initial blur
+        initial_blur = _get_blur_sigma(0, num_steps, heatmap_blur_schedule)
+        if initial_blur > 0:
+            heatmaps_t = _apply_blur_torch(heatmaps_t_orig, initial_blur)
+    current_blur_sigma: float = (
+        _get_blur_sigma(0, num_steps, heatmap_blur_schedule)
+        if heatmap_blur_schedule else 0.0
+    )
+
     # Apply visibility threshold -- zero out low-confidence joints
     for i in range(len(visibility_t)):
         visibility_t[i] = torch.where(
@@ -188,6 +227,17 @@ def run_optimization(
             all_projected_2d.append(projected_2d_frame)
             all_local_rots_current.append(param_local_rots[i])
 
+        # Update blur if schedule changed
+        if heatmaps_t_orig is not None and heatmap_blur_schedule is not None:
+            new_blur = _get_blur_sigma(step, num_steps, heatmap_blur_schedule)
+            if abs(new_blur - current_blur_sigma) > 1e-6:
+                if new_blur > 0:
+                    heatmaps_t = _apply_blur_torch(heatmaps_t_orig, new_blur)
+                else:
+                    heatmaps_t = [hm.clone() for hm in heatmaps_t_orig]
+                current_blur_sigma = new_blur
+                print(f"    [Step {step}] Heatmap blur sigma changed to {new_blur:.1f}")
+
         # Compute score with coarse-to-fine sigma
         sigma: float = _get_sigma(step, num_steps)
         total_score: torch.Tensor
@@ -225,6 +275,7 @@ def run_optimization(
                 f"loss={loss.item():.1f}  "
                 f"heatmap={details['heatmap']:.1f}  "
                 f"sigma={sigma:.0f}  "
+                f"blur={current_blur_sigma:.1f}  "
                 f"pos_p={details['pos_penalty']:.4f}  "
                 f"rot_p={details['rot_penalty']:.4f}"
             )
