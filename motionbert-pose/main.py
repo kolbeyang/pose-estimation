@@ -161,8 +161,11 @@ def process_example(
     scale: float = cs_params["scale"]
     det_cam_positions: list[np.ndarray] = []
     for i in range(len(frames_rgb)):
+        dist_coeffs: np.ndarray | None = cam_calib.get("distCoef")
         pos_cam: np.ndarray = motionbert_to_camera_space(
             positions_3d_norm[i], kp_2d[i], scale, fx, fy, cx, cy,
+            dist_coeffs=dist_coeffs,
+            visibility=visibility[i],
         )
         det_cam_positions.append(pos_cam)
 
