@@ -205,7 +205,7 @@ def process_example(
         target: np.ndarray = kp_2d[i].copy()
         mb_projected: np.ndarray = camera.world_to_image(det_cam_positions[i])
         for j in range(17):
-            if visibility[i][j] < cfg.MOTIONBERT_CONF_THRESHOLD:
+            if visibility[i][j] < cfg.FK_TARGET_CONF_THRESHOLD:
                 target[j] = mb_projected[j]
         improved_target_2d.append(target)
 

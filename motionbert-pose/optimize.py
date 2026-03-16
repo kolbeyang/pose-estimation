@@ -111,6 +111,11 @@ def run_optimization(
         requires_grad=True,
     )
 
+    # Store initial positions (for anchor penalty)
+    initial_positions_t: list[torch.Tensor] = [
+        torch.tensor(pos, dtype=torch.float32) for pos in initial_positions_cam
+    ]
+
     # Target tensors (not learnable)
     target_2d_t: list[torch.Tensor] = [
         torch.tensor(t, dtype=torch.float32) for t in target_2d
@@ -179,6 +184,9 @@ def run_optimization(
             sigma,
             cfg.POSITION_PENALTY_WEIGHT,
             rot_per_joint_weights,
+            initial_positions_list=initial_positions_t,
+            init_anchor_weight=cfg.INIT_ANCHOR_WEIGHT,
+            all_joints_smooth_weight=cfg.ALL_JOINTS_SMOOTH_WEIGHT,
         )
 
         loss: torch.Tensor = -total_score

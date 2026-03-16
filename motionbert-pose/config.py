@@ -79,3 +79,16 @@ VISIBILITY_THRESHOLD: float = 0.5
 # Joints below this threshold have their coordinates zeroed out,
 # telling MotionBERT to treat them as missing and infer from context.
 MOTIONBERT_CONF_THRESHOLD: float = 0.0
+
+# Confidence threshold for replacing FK optimization 2D targets.
+# For joints below this threshold, use MotionBERT's projected 2D
+# instead of (potentially garbage) Stacked Hourglass detections.
+# This does NOT affect MotionBERT's input (MOTIONBERT_CONF_THRESHOLD controls that).
+FK_TARGET_CONF_THRESHOLD: float = 0.1
+
+# Weight for initialization anchor penalty.
+# Prevents optimizer from drifting away from MotionBERT predictions.
+INIT_ANCHOR_WEIGHT: float = 5.0
+
+# Weight for all-joint temporal smoothing penalty.
+ALL_JOINTS_SMOOTH_WEIGHT: float = 0.0
