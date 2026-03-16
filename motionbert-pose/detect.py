@@ -1047,7 +1047,7 @@ def motionbert_to_camera_space(
 
 def detect_poses(
     frames_rgb: list[np.ndarray],
-) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], np.ndarray, np.ndarray, dict[str, float]]:
+) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], np.ndarray, np.ndarray, dict[str, float]]:
     """Full detection pipeline.
 
     Pipeline:
@@ -1064,6 +1064,7 @@ def detect_poses(
         keypoints_3d: List of (17, 3) pixel-aligned 3D (H36M).
         confidence: List of (17,) confidence scores.
         heatmaps: List of (16, 64, 64) raw MPII heatmaps per frame.
+        mpii_keypoints_2d: List of (16, 3) raw MPII keypoints per frame (x, y, conf) in original pixel coords.
         affine: (2, 3) affine from 256-crop coords to original pixel coords.
         positions_3d_norm: (N, 17, 3) normalized MotionBERT output (before denorm).
         cs_params: crop_scale parameters dict with keys xs, ys, scale.
@@ -1100,4 +1101,4 @@ def detect_poses(
         kp_3d_array[i] for i in range(kp_3d_array.shape[0])
     ]
 
-    return kp_2d_list, kp_3d_list, visibility_list, all_heatmaps, affine, positions_3d_norm, cs_params
+    return kp_2d_list, kp_3d_list, visibility_list, all_heatmaps, all_keypoints_2d, affine, positions_3d_norm, cs_params

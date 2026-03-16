@@ -98,3 +98,7 @@ ALL_JOINTS_SMOOTH_WEIGHT: float = 0.0
 # produced by Stacked Hourglass instead of analytical Gaussian approximations.
 # When False, uses the old analytical Gaussian approach.
 USE_REAL_HEATMAPS: bool = True
+
+# --- Overlay video ---
+OVERLAY_HEATMAP_INTENSITY: float = 200.0
+OVERLAY_FPS: float = 5.0

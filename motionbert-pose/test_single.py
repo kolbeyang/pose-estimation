@@ -13,6 +13,7 @@ import numpy as np
 import config as cfg
 from camera import Camera
 from detect import detect_poses, motionbert_to_camera_space
+from overlay_video import generate_overlay_video
 from evaluate import compute_comparison, compute_comparison_with_optimization, EVAL_JOINT_NAMES_NO_ANKLES
 from optimize import run_optimization
 from panoptic import (
@@ -94,7 +95,8 @@ def main() -> None:
     affine: np.ndarray
     positions_3d_norm: np.ndarray
     cs_params: dict[str, float]
-    kp_2d, kp_3d, visibility, heatmaps, affine, positions_3d_norm, cs_params = detect_poses(frames_rgb)
+    mpii_kp_2d: list[np.ndarray]
+    kp_2d, kp_3d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm, cs_params = detect_poses(frames_rgb)
 
     # 4. Camera-space conversion (new method)
     scale: float = cs_params["scale"]
@@ -231,6 +233,25 @@ def main() -> None:
     with open(diag_path, "w") as f:
         json.dump(diag, f, indent=2)
     print(f"\n  Saved diagnostics: {diag_path}")
+
+    # Generate overlay video
+    overlay_path: str = os.path.join(out_dir, f"overlay_{seq_name}_{start_frame}.mp4")
+    generate_overlay_video(
+        output_path=overlay_path,
+        frames_rgb=frames_rgb,
+        heatmaps=heatmaps,
+        mpii_keypoints_2d=mpii_kp_2d,
+        detector_3d=det_cam_positions,
+        optimized_3d=optimized_3d,
+        camera_fx=fx,
+        camera_fy=fy,
+        camera_cx=cx,
+        camera_cy=cy,
+        affine=affine,
+        frame_indices=frame_indices,
+        gt_3d=gt_cam,
+    )
+    print(f"  Saved overlay video: {overlay_path}")
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ import numpy as np
 import config as cfg
 from camera import Camera
 from detect import detect_poses, motionbert_to_camera_space
+from overlay_video import generate_overlay_video
 from evaluate import compute_comparison, compute_comparison_with_optimization
 from graphs import (
     generate_aggregate_summary,
@@ -160,7 +161,8 @@ def process_example(
     affine: np.ndarray
     positions_3d_norm: np.ndarray
     cs_params: dict[str, float]
-    kp_2d, kp_3d, visibility, heatmaps, affine, positions_3d_norm, cs_params = detect_poses(frames_rgb)
+    mpii_kp_2d: list[np.ndarray]
+    kp_2d, kp_3d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm, cs_params = detect_poses(frames_rgb)
 
     # --- 4. Convert to camera coordinates ---
     print("\n  [4/5] Converting to camera coordinates...")
@@ -339,6 +341,25 @@ def process_example(
         example_graph_dir, title=name,
     )
     print(f"    Saved graphs: {example_graph_dir}")
+
+    # Overlay video
+    overlay_path: str = os.path.join(example_graph_dir, f"{name}_overlay.mp4")
+    generate_overlay_video(
+        output_path=overlay_path,
+        frames_rgb=frames_rgb,
+        heatmaps=heatmaps,
+        mpii_keypoints_2d=mpii_kp_2d,
+        detector_3d=det_cam_positions,
+        optimized_3d=optimized_3d,
+        camera_fx=fx,
+        camera_fy=fy,
+        camera_cx=cx,
+        camera_cy=cy,
+        affine=affine,
+        frame_indices=frame_indices[:len(frames_rgb)],
+        gt_3d=gt_cam,
+    )
+    print(f"    Saved overlay video: {overlay_path}")
 
     # Build ExampleResult for summary
     example_result: ExampleResult = ExampleResult(
