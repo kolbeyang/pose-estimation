@@ -42,7 +42,7 @@ from panoptic import (
     load_ground_truth_sequence,
     world_to_camera,
 )
-from skeleton import JOINT_NAMES, EVAL_JOINT_NAMES
+from skeleton import JOINT_NAMES, EVAL_JOINT_NAMES, NUM_JOINTS
 
 
 def _example_name(seq: str, start: int) -> str:
@@ -212,7 +212,7 @@ def process_example(
     for i in range(len(frames_rgb)):
         target: np.ndarray = kp_2d[i].copy()
         mb_projected: np.ndarray = camera.world_to_image(det_cam_positions[i])
-        for j in range(17):
+        for j in range(NUM_JOINTS):
             if visibility[i][j] < cfg.FK_TARGET_CONF_THRESHOLD:
                 target[j] = mb_projected[j]
         improved_target_2d.append(target)

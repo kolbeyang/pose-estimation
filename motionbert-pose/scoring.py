@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 
 
-# Mapping from H36M joint index to MPII heatmap index.
+# Mapping from H36M 16-joint index to MPII heatmap index.
 # None means no single MPII heatmap exists (synthetic midpoint joints).
 H36M_TO_MPII_HEATMAP: list[int | None] = [
     None,  # 0: Hip (midpoint of RHip + LHip, no single heatmap)
@@ -24,13 +24,12 @@ H36M_TO_MPII_HEATMAP: list[int | None] = [
     None,  # 7: Spine (midpoint of Pelvis + Thorax, no single heatmap)
     7,     # 8: Thorax
     8,     # 9: Neck
-    9,     # 10: Head
-    13,    # 11: LShoulder
-    14,    # 12: LElbow
-    15,    # 13: LWrist
-    12,    # 14: RShoulder
-    11,    # 15: RElbow
-    10,    # 16: RWrist
+    13,    # 10: LShoulder
+    14,    # 11: LElbow
+    15,    # 12: LWrist
+    12,    # 13: RShoulder
+    11,    # 14: RElbow
+    10,    # 15: RWrist
 ]
 
 

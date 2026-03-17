@@ -311,7 +311,7 @@ def generate_summary(
     fig, axes = plt.subplots(4, 4, figsize=(26, 18))
 
     # Row 0-1: 6 key joint trajectories (3 columns x 2 rows)
-    key_joints: list[int] = [0, 8, 9, 10, 13, 3]  # Hip, Thorax, Neck, Head, LWrist, RAnkle
+    key_joints: list[int] = [0, 8, 9, 12, 15, 3]  # Hip, Thorax, Neck, LWrist, RWrist, RAnkle
     coord_colors: dict[int, str] = {0: "tab:red", 1: "tab:green", 2: "tab:blue"}
 
     for idx, j in enumerate(key_joints):

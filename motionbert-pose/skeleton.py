@@ -1,8 +1,11 @@
-"""H36M 17-joint skeleton definition, joint mappings, and body groups."""
+"""H36M 16-joint skeleton definition, joint mappings, and body groups.
+
+Head joint (old index 10) has been removed. All indices >= 10 are shifted down by 1.
+"""
 
 import numpy as np
 
-NUM_JOINTS: int = 17
+NUM_JOINTS: int = 16
 
 JOINT_NAMES: list[str] = [
     "Hip",          # 0  (root)
@@ -15,24 +18,24 @@ JOINT_NAMES: list[str] = [
     "Spine",        # 7
     "Thorax",       # 8
     "Neck",         # 9
-    "Head",         # 10
-    "LShoulder",    # 11
-    "LElbow",       # 12
-    "LWrist",       # 13
-    "RShoulder",    # 14
-    "RElbow",       # 15
-    "RWrist",       # 16
+    "LShoulder",    # 10
+    "LElbow",       # 11
+    "LWrist",       # 12
+    "RShoulder",    # 13
+    "RElbow",       # 14
+    "RWrist",       # 15
 ]
 
-# Eval joints: exclude Hip(0), Spine(7), Thorax(8), Neck(9), Head(10)
+# Eval joints: exclude Hip(0), Spine(7), Thorax(8), Neck(9)
 # because their definitions differ between detector, GT, and FK.
-EVAL_JOINTS: list[int] = [1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16]
+EVAL_JOINTS: list[int] = [1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15]
 EVAL_JOINT_NAMES: list[str] = [JOINT_NAMES[j] for j in EVAL_JOINTS]
 NUM_EVAL_JOINTS: int = len(EVAL_JOINTS)
 
 # Parent joint index for each joint (-1 = root, no parent)
+# Head (old index 10, child of Neck=9) removed; indices >= 10 shifted down by 1.
 PARENTS: np.ndarray = np.array(
-    [-1, 0, 1, 2, 0, 4, 5, 0, 7, 8, 9, 8, 11, 12, 8, 14, 15]
+    [-1, 0, 1, 2, 0, 4, 5, 0, 7, 8, 8, 10, 11, 8, 13, 14]
 )
 
 # Bone connections: list of (parent, child)
@@ -50,13 +53,12 @@ DEFAULT_BONE_LENGTHS: np.ndarray = np.array([
     0.22,   # 7: Hip -> Spine
     0.22,   # 8: Spine -> Thorax
     0.12,   # 9: Thorax -> Neck
-    0.12,   # 10: Neck -> Head
-    0.18,   # 11: Thorax -> LShoulder
-    0.28,   # 12: LShoulder -> LElbow
-    0.25,   # 13: LElbow -> LWrist
-    0.18,   # 14: Thorax -> RShoulder
-    0.28,   # 15: RShoulder -> RElbow
-    0.25,   # 16: RElbow -> RWrist
+    0.18,   # 10: Thorax -> LShoulder
+    0.28,   # 11: LShoulder -> LElbow
+    0.25,   # 12: LElbow -> LWrist
+    0.18,   # 13: Thorax -> RShoulder
+    0.28,   # 14: RShoulder -> RElbow
+    0.25,   # 15: RElbow -> RWrist
 ], dtype=np.float64)
 
 # Rest-pose bone directions (unit vectors when all local rotations are zero).
@@ -73,22 +75,21 @@ REST_DIRECTIONS: np.ndarray = np.array([
     [0, -1, 0],      # 7: Hip -> Spine  (up = -Y in camera)
     [0, -1, 0],      # 8: Spine -> Thorax  (up)
     [0, -1, 0],      # 9: Thorax -> Neck  (up)
-    [0, -1, 0],      # 10: Neck -> Head  (up)
-    [1, 0, 0],       # 11: Thorax -> LShoulder  (camera-right = person's left)
-    [0, 1, 0],       # 12: LShoulder -> LElbow  (down)
-    [0, 1, 0],       # 13: LElbow -> LWrist  (down)
-    [-1, 0, 0],      # 14: Thorax -> RShoulder  (camera-left = person's right)
-    [0, 1, 0],       # 15: RShoulder -> RElbow  (down)
-    [0, 1, 0],       # 16: RElbow -> RWrist  (down)
+    [1, 0, 0],       # 10: Thorax -> LShoulder  (camera-right = person's left)
+    [0, 1, 0],       # 11: LShoulder -> LElbow  (down)
+    [0, 1, 0],       # 12: LElbow -> LWrist  (down)
+    [-1, 0, 0],      # 13: Thorax -> RShoulder  (camera-left = person's right)
+    [0, 1, 0],       # 14: RShoulder -> RElbow  (down)
+    [0, 1, 0],       # 15: RElbow -> RWrist  (down)
 ], dtype=np.float64)
 
 # Body groups for coloring
 BODY_GROUPS: dict[str, list[int]] = {
-    "spine":     [0, 7, 8, 9, 10],
+    "spine":     [0, 7, 8, 9],
     "left_leg":  [4, 5, 6],
     "right_leg": [1, 2, 3],
-    "left_arm":  [11, 12, 13],
-    "right_arm": [14, 15, 16],
+    "left_arm":  [10, 11, 12],
+    "right_arm": [13, 14, 15],
 }
 
 GROUP_COLORS_RGB: dict[str, tuple[float, float, float]] = {
@@ -154,7 +155,7 @@ def mpii_to_h36m(keypoints_mpii: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Joint mapping: CMU Panoptic COCO19 -> H36M 17 joints
+# Joint mapping: CMU Panoptic COCO19 -> H36M 16 joints
 # ---------------------------------------------------------------------------
 # COCO19 order:
 #  0=Neck, 1=Nose, 2=BodyCenter, 3=lShoulder, 4=lElbow, 5=lWrist,
@@ -162,15 +163,15 @@ def mpii_to_h36m(keypoints_mpii: np.ndarray) -> np.ndarray:
 #  12=rHip, 13=rKnee, 14=rAnkle, 15=lEye, 16=lEar, 17=rEye, 18=rEar
 
 def coco19_to_h36m(joints19: np.ndarray) -> np.ndarray:
-    """Convert CMU Panoptic COCO19 (19, 3) to H36M (17, 3).
+    """Convert CMU Panoptic COCO19 (19, 3) to H36M (16, 3).
 
-    Head is extrapolated from neck->nose direction.
+    Head joint is omitted entirely.
 
     Args:
         joints19: (19, 3) xyz positions.
 
     Returns:
-        (17, 3) H36M joints.
+        (16, 3) H36M joints.
     """
     h36m: np.ndarray = np.zeros((NUM_JOINTS, 3), dtype=np.float64)
 
@@ -184,13 +185,23 @@ def coco19_to_h36m(joints19: np.ndarray) -> np.ndarray:
     h36m[7] = (joints19[2] + joints19[0]) / 2.0     # Spine <- mid(BodyCenter, Neck)
     h36m[8] = joints19[0]                            # Thorax <- Neck
     h36m[9] = joints19[1]                            # Neck <- Nose
-    # Head: extrapolate nose + (nose - neck)
-    h36m[10] = joints19[1] + (joints19[1] - joints19[0])
-    h36m[11] = joints19[3]                           # LShoulder
-    h36m[12] = joints19[4]                           # LElbow
-    h36m[13] = joints19[5]                           # LWrist
-    h36m[14] = joints19[9]                           # RShoulder
-    h36m[15] = joints19[10]                          # RElbow
-    h36m[16] = joints19[11]                          # RWrist
+    h36m[10] = joints19[3]                           # LShoulder
+    h36m[11] = joints19[4]                           # LElbow
+    h36m[12] = joints19[5]                           # LWrist
+    h36m[13] = joints19[9]                           # RShoulder
+    h36m[14] = joints19[10]                          # RElbow
+    h36m[15] = joints19[11]                          # RWrist
 
     return h36m
+
+
+def h36m_17_to_16(arr: np.ndarray) -> np.ndarray:
+    """Remove Head joint (index 10) from H36M 17-joint array.
+
+    Args:
+        arr: (..., 17, D) array.
+
+    Returns:
+        (..., 16, D) array with Head joint removed.
+    """
+    return np.delete(arr, 10, axis=-2)

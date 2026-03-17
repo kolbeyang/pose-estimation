@@ -15,7 +15,7 @@ import torch.nn as nn
 from tqdm import tqdm
 
 import config as cfg
-from skeleton import mpii_to_h36m
+from skeleton import mpii_to_h36m, h36m_17_to_16, NUM_JOINTS
 
 SCRIPT_DIR: str = os.path.dirname(os.path.abspath(__file__))
 EXTERNAL_DIR: str = os.path.join(SCRIPT_DIR, "external")
@@ -413,8 +413,8 @@ def run_motionbert(
 
     Returns:
         Tuple of:
-            positions_3d_pixel: (N, 17, 3) pixel-aligned 3D joint positions (H36M).
-            positions_3d_norm: (N, 17, 3) normalized 3D output (before denorm).
+            positions_3d_pixel: (N, 16, 3) pixel-aligned 3D joint positions (H36M, Head removed).
+            positions_3d_norm: (N, 16, 3) normalized 3D output (before denorm, Head removed).
             cs_params: crop_scale parameters dict with keys xs, ys, scale.
     """
     model: torch.nn.Module = load_motionbert_model()
@@ -493,60 +493,16 @@ def run_motionbert(
     positions_3d[:, :, 0] += xs + scale / 2.0
     positions_3d[:, :, 1] += ys + scale / 2.0
 
+    # Strip Head joint (index 10) from 17-joint MotionBERT output -> 16 joints
+    positions_3d = h36m_17_to_16(positions_3d)
+    positions_3d_norm = h36m_17_to_16(positions_3d_norm)
+
     return positions_3d, positions_3d_norm, cs_params
 
 
 # ---------------------------------------------------------------------------
 # Denormalization to Camera-Space Meters
 # ---------------------------------------------------------------------------
-
-def pixel_aligned_to_camera_space(
-    kp_3d: np.ndarray,
-    kp_2d: np.ndarray,
-    fx: float,
-    fy: float,
-    cx: float,
-    cy: float,
-) -> np.ndarray:
-    """Convert pixel-aligned 3D to camera-space meters using torso-height heuristic.
-
-    DEPRECATED: Use motionbert_to_camera_space instead. Kept for reference.
-
-    Args:
-        kp_3d: (17, 3) pixel-aligned 3D from MotionBERT.
-        kp_2d: (17, 2) pixel coordinates.
-        fx, fy, cx, cy: Camera intrinsics.
-
-    Returns:
-        (17, 3) camera-space meters.
-    """
-    # Compute pixel torso height: thorax(8) to ankle midpoint (3+6)/2
-    thorax_2d: np.ndarray = kp_2d[8]
-    ankle_mid_2d: np.ndarray = (kp_2d[3] + kp_2d[6]) / 2.0
-    pixel_height: float = abs(float(thorax_2d[1] - ankle_mid_2d[1]))
-
-    # Thorax-to-ankle anatomical height ~1.38m
-    assumed_height_m: float = 1.38
-    if pixel_height > 20:
-        root_depth: float = fx * assumed_height_m / pixel_height
-    else:
-        root_depth = 3.0
-    root_depth = float(np.clip(root_depth, 1.0, 8.0))
-
-    root_z_px: float = float(kp_3d[0, 2])
-    cam_3d: np.ndarray = np.zeros((17, 3), dtype=np.float64)
-
-    for j in range(17):
-        u: float = float(kp_3d[j, 0])
-        v: float = float(kp_3d[j, 1])
-        z_px: float = float(kp_3d[j, 2])
-        z_cam: float = root_depth + (z_px - root_z_px) * root_depth / fx
-        x_cam: float = (u - cx) * z_cam / fx
-        y_cam: float = (v - cy) * z_cam / fy
-        cam_3d[j] = [x_cam, y_cam, z_cam]
-
-    return cam_3d
-
 
 def _iqr_filtered_median(values: np.ndarray, k: float = 1.5) -> float:
     """Compute median after removing IQR outliers.
@@ -576,12 +532,12 @@ def _iqr_filtered_median(values: np.ndarray, k: float = 1.5) -> float:
 # they have clear 2D separation and minimal depth ambiguity.
 # Spine/neck/legs are excluded because MotionBERT often distorts them.
 _RELIABLE_BONES_FOR_SCALE: set[int] = {
-    11,  # Thorax -> LShoulder
-    12,  # LShoulder -> LElbow
-    13,  # LElbow -> LWrist
-    14,  # Thorax -> RShoulder
-    15,  # RShoulder -> RElbow
-    16,  # RElbow -> RWrist
+    10,  # Thorax -> LShoulder
+    11,  # LShoulder -> LElbow
+    12,  # LElbow -> LWrist
+    13,  # Thorax -> RShoulder
+    14,  # RShoulder -> RElbow
+    15,  # RElbow -> RWrist
 }
 
 
@@ -608,7 +564,7 @@ def _enforce_bone_lengths(
         (17, 3) corrected positions.
     """
     result: np.ndarray = positions.copy()
-    for j in range(1, 17):
+    for j in range(1, NUM_JOINTS):
         p: int = int(parents[j])
         bone_vec: np.ndarray = result[j] - result[p]
         bone_len: float = float(np.linalg.norm(bone_vec))
@@ -668,7 +624,7 @@ def _enforce_bone_lengths_with_2d(
         (17, 3) corrected root-relative positions.
     """
     result: np.ndarray = positions.copy()
-    for j in range(1, 17):
+    for j in range(1, NUM_JOINTS):
         p: int = int(parents[j])
         bone_vec: np.ndarray = result[j] - result[p]
         bone_len: float = float(np.linalg.norm(bone_vec))
@@ -761,7 +717,7 @@ def _reconstruct_from_2d(
     Returns:
         (17, 3) camera-space meters.
     """
-    result: np.ndarray = np.zeros((17, 3), dtype=np.float64)
+    result: np.ndarray = np.zeros((NUM_JOINTS, 3), dtype=np.float64)
 
     # Place root
     u_root: float = float(kp_2d[0, 0])
@@ -770,7 +726,7 @@ def _reconstruct_from_2d(
     result[0, 1] = (v_root - cy) * root_depth / fy
     result[0, 2] = root_depth
 
-    for j in range(1, 17):
+    for j in range(1, NUM_JOINTS):
         p: int = int(parents[j])
         ref_len: float = float(default_lengths[j])
         u_child: float = float(kp_2d[j, 0])
@@ -852,21 +808,20 @@ def motionbert_to_camera_space(
     2. Estimate depth (tz) from pairwise joint separation ratios with IQR
        outlier filtering, then solve for tx, ty from 2D projections.
 
-    Falls back to a torso-height heuristic if too few valid joints or if
-    the bone-length scale produces unreasonable results.
+    Falls back to a default depth of 3.0m if too few valid joints.
 
     Args:
-        positions_3d_norm: (17, 3) normalized MotionBERT output (before pixel denorm).
-        kp_2d: (17, 2) 2D detections in pixel coordinates.
+        positions_3d_norm: (16, 3) normalized MotionBERT output (before pixel denorm).
+        kp_2d: (16, 2) 2D detections in pixel coordinates.
         scale: crop_scale scale parameter.
         fx, fy, cx, cy: Camera intrinsics.
         dist_coeffs: Optional distortion coefficients from camera calibration.
             If None, zero distortion is assumed.
-        visibility: Optional (17,) confidence scores for each joint. Joints with
+        visibility: Optional (16,) confidence scores for each joint. Joints with
             confidence below 0.1 are excluded from depth estimation.
 
     Returns:
-        (17, 3) camera-space meters.
+        (16, 3) camera-space meters.
     """
     from skeleton import PARENTS, DEFAULT_BONE_LENGTHS
 
@@ -878,7 +833,7 @@ def motionbert_to_camera_space(
     # fall back to using all bones with IQR filtering.
     reliable_ratios: list[float] = []
     all_ratios: list[float] = []
-    for j in range(1, 17):
+    for j in range(1, NUM_JOINTS):
         p: int = int(PARENTS[j])
         det_bl: float = float(np.linalg.norm(root_relative[j] - root_relative[p]))
         ref_bl: float = float(DEFAULT_BONE_LENGTHS[j])
@@ -909,7 +864,7 @@ def motionbert_to_camera_space(
     # Knees (2,5) and ankles (3,6) are excluded from tz estimation because
     # MotionBERT often places them at wrong depths.
     _DEPTH_RELIABLE_JOINTS: set[int] = {
-        0, 1, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
+        0, 1, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15
     }
 
     # Filter joints: require nonzero 2D position AND sufficient confidence
@@ -919,7 +874,7 @@ def motionbert_to_camera_space(
 
     # For tz estimation, additionally filter to reliable joints only
     valid_for_tz: np.ndarray = valid.copy()
-    for j in range(17):
+    for j in range(NUM_JOINTS):
         if j not in _DEPTH_RELIABLE_JOINTS:
             valid_for_tz[j] = False
 
@@ -955,30 +910,7 @@ def motionbert_to_camera_space(
             tz_arr: np.ndarray = np.array(tz_estimates)
             tz: float = _iqr_filtered_median(tz_arr)
 
-            # Cross-check: torso-height heuristic for tz.
-            # Uses a fixed anatomical reference (0.55m shoulder-mid to hip-mid)
-            # which is independent of MotionBERT's predictions.
-            lshoulder_2d: np.ndarray = kp_2d[11]
-            rshoulder_2d: np.ndarray = kp_2d[14]
-            lhip_2d: np.ndarray = kp_2d[4]
-            rhip_2d: np.ndarray = kp_2d[1]
-            shoulder_mid_2d: np.ndarray = (lshoulder_2d + rshoulder_2d) / 2.0
-            hip_mid_2d: np.ndarray = (lhip_2d + rhip_2d) / 2.0
-            torso_pixel_height: float = abs(float(shoulder_mid_2d[1] - hip_mid_2d[1]))
-            if torso_pixel_height > 15:
-                # Fixed anatomical reference: shoulder-mid to hip-mid ~0.55m
-                # for a typical adult (measured from H3.6M/Panoptic GT).
-                torso_3d_height: float = 0.55
-                tz_heuristic: float = fy * torso_3d_height / torso_pixel_height
-                tz_heuristic = float(np.clip(tz_heuristic, 1.0, 8.0))
-                # Always blend pairwise tz with heuristic for robustness.
-                # The heuristic uses fixed anatomical reference and doesn't
-                # depend on MotionBERT's scale, so it anchors the depth.
-                # Weight the heuristic more heavily (60%) since the pairwise
-                # estimate inherits errors from MotionBERT's bone_scale.
-                tz = 0.4 * tz + 0.6 * tz_heuristic
-
-            # First compute tx, ty using reliable (uncorrected) joints
+            # Compute tx, ty using reliable (uncorrected) joints
             pts_3d_tx: np.ndarray = root_relative_m[valid_for_tz].astype(np.float64)
             pts_2d_tx: np.ndarray = kp_2d[valid_for_tz].astype(np.float64)
             tx_estimates: np.ndarray = (
@@ -1005,27 +937,13 @@ def motionbert_to_camera_space(
             cam_3d[:, 2] += tz
             return cam_3d.astype(np.float64)
 
-    # Fallback: heuristic depth estimation using shoulder-to-hip span
-    lshoulder_2d_fb: np.ndarray = kp_2d[11]
-    rshoulder_2d_fb: np.ndarray = kp_2d[14]
-    lhip_2d_fb: np.ndarray = kp_2d[4]
-    rhip_2d_fb: np.ndarray = kp_2d[1]
-    shoulder_mid_2d_fb: np.ndarray = (lshoulder_2d_fb + rshoulder_2d_fb) / 2.0
-    hip_mid_2d_fb: np.ndarray = (lhip_2d_fb + rhip_2d_fb) / 2.0
-    pixel_height: float = abs(float(shoulder_mid_2d_fb[1] - hip_mid_2d_fb[1]))
-    # Fixed anatomical reference: shoulder-mid to hip-mid ~0.55m
-    assumed_height_m: float = 0.55
-    if pixel_height > 20:
-        root_depth: float = fy * assumed_height_m / pixel_height
-    else:
-        root_depth = 3.0
-    root_depth = float(np.clip(root_depth, 1.0, 8.0))
-
+    # Fallback: too few valid joints for pairwise depth estimation.
+    # Use a reasonable default depth and compute tx, ty from root 2D keypoint.
+    tz = 3.0
     u_root: float = float(kp_2d[0, 0])
     v_root: float = float(kp_2d[0, 1])
-    x_root: float = (u_root - cx) * root_depth / fx
-    y_root: float = (v_root - cy) * root_depth / fy
-    z_root: float = root_depth
+    tx = (u_root - cx) * tz / fx
+    ty = (v_root - cy) * tz / fy
 
     # Enforce bone-length constraints before translation
     root_relative_corrected = _enforce_bone_lengths(
@@ -1034,11 +952,11 @@ def motionbert_to_camera_space(
     )
 
     cam_3d = root_relative_corrected.copy()
-    cam_3d[:, 0] += x_root
-    cam_3d[:, 1] += y_root
-    cam_3d[:, 2] += z_root
+    cam_3d[:, 0] += tx
+    cam_3d[:, 1] += ty
+    cam_3d[:, 2] += tz
 
-    return cam_3d
+    return cam_3d.astype(np.float64)
 
 
 # ---------------------------------------------------------------------------
@@ -1060,13 +978,13 @@ def detect_poses(
         frames_rgb: List of (H, W, 3) uint8 RGB frames.
 
     Returns:
-        keypoints_2d: List of (17, 2) pixel coordinates (H36M).
-        keypoints_3d: List of (17, 3) pixel-aligned 3D (H36M).
-        confidence: List of (17,) confidence scores.
+        keypoints_2d: List of (16, 2) pixel coordinates (H36M, Head removed).
+        keypoints_3d: List of (16, 3) pixel-aligned 3D (H36M, Head removed).
+        confidence: List of (16,) confidence scores.
         heatmaps: List of (16, 64, 64) raw MPII heatmaps per frame.
         mpii_keypoints_2d: List of (16, 3) raw MPII keypoints per frame (x, y, conf) in original pixel coords.
         affine: (2, 3) affine from 256-crop coords to original pixel coords.
-        positions_3d_norm: (N, 17, 3) normalized MotionBERT output (before denorm).
+        positions_3d_norm: (N, 16, 3) normalized MotionBERT output (before denorm, Head removed).
         cs_params: crop_scale parameters dict with keys xs, ys, scale.
     """
     h: int
@@ -1090,12 +1008,14 @@ def detect_poses(
     kp_3d_array, positions_3d_norm, cs_params = run_motionbert(all_keypoints_2d, image_size)
 
     # 4. Convert MPII 2D to H36M 2D + extract visibility
+    # mpii_to_h36m produces 17 joints; strip Head (index 10) to get 16.
     kp_2d_list: list[np.ndarray] = []
     visibility_list: list[np.ndarray] = []
     for kp_mpii in all_keypoints_2d:
         kp_h36m: np.ndarray = mpii_to_h36m(kp_mpii)  # (17, 3) with confidence
-        kp_2d_list.append(kp_h36m[:, :2])  # (17, 2)
-        visibility_list.append(kp_h36m[:, 2])  # (17,)
+        kp_h36m_16: np.ndarray = h36m_17_to_16(kp_h36m)  # (16, 3)
+        kp_2d_list.append(kp_h36m_16[:, :2])  # (16, 2)
+        visibility_list.append(kp_h36m_16[:, 2])  # (16,)
 
     kp_3d_list: list[np.ndarray] = [
         kp_3d_array[i] for i in range(kp_3d_array.shape[0])

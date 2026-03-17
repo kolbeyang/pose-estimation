@@ -85,10 +85,10 @@ def load_ground_truth_sequence(
 ) -> list[np.ndarray | None]:
     """Load ground truth for a sequence of frames.
 
-    Converts from COCO19 to H36M 17-joint format.
+    Converts from COCO19 to H36M 16-joint format (Head omitted).
 
     Returns:
-        List of (17, 3) H36M arrays in world coordinates (centimeters),
+        List of (16, 3) H36M arrays in world coordinates (centimeters),
         or None for missing frames.
     """
     results: list[np.ndarray | None] = []

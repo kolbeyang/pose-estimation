@@ -28,7 +28,7 @@ class DetectionResult(BaseModel):
     """Metadata about a detection run. Actual tensor data stored separately."""
 
     num_frames: int
-    num_joints: int  # always 17
+    num_joints: int  # always 16
     image_height: int
     image_width: int
     bbox: list[float]  # [x1, y1, x2, y2] union bbox
