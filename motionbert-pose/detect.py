@@ -579,215 +579,6 @@ def _enforce_bone_lengths(
     return result
 
 
-def _enforce_bone_lengths_with_2d(
-    positions: np.ndarray,
-    parents: np.ndarray,
-    default_lengths: np.ndarray,
-    kp_2d: np.ndarray,
-    fx: float,
-    fy: float,
-    cx: float,
-    cy: float,
-    tz: float,
-    tx: float = 0.0,
-    ty: float = 0.0,
-    max_ratio: float = 1.5,
-) -> np.ndarray:
-    """Enforce bone-length constraints using 2D keypoints to solve for depth.
-
-    For extreme bones, uses the 2D keypoint and camera intrinsics to
-    reconstruct the child joint position. Given parent camera-space position,
-    child 2D projection, and known bone length, solves for child depth (Z)
-    analytically.
-
-    For child joint at camera-space (X_c, Y_c, Z_c):
-        u = fx * X_c / Z_c + cx  =>  X_c = (u - cx) * Z_c / fx
-        v = fy * Y_c / Z_c + cy  =>  Y_c = (v - cy) * Z_c / fy
-
-    Bone length constraint:
-        (X_c - X_p)^2 + (Y_c - Y_p)^2 + (Z_c - Z_p)^2 = L^2
-
-    Substituting X_c, Y_c as functions of Z_c gives a quadratic in Z_c.
-
-    Args:
-        positions: (17, 3) root-relative joint positions in meters.
-        parents: (17,) parent index array.
-        default_lengths: (17,) default bone lengths in meters.
-        kp_2d: (17, 2) 2D pixel coordinates.
-        fx, fy, cx, cy: Camera intrinsics.
-        tz: Estimated root depth (z translation to camera space).
-        tx: Estimated x translation to camera space.
-        ty: Estimated y translation to camera space.
-        max_ratio: Maximum allowed bone length ratio for triggering correction.
-
-    Returns:
-        (17, 3) corrected root-relative positions.
-    """
-    result: np.ndarray = positions.copy()
-    for j in range(1, NUM_JOINTS):
-        p: int = int(parents[j])
-        bone_vec: np.ndarray = result[j] - result[p]
-        bone_len: float = float(np.linalg.norm(bone_vec))
-        ref_len: float = float(default_lengths[j])
-        if bone_len < 1e-6 or ref_len < 1e-6:
-            continue
-        ratio: float = bone_len / ref_len
-        if ratio > max_ratio or ratio < 1.0 / max_ratio:
-            u_child: float = float(kp_2d[j, 0])
-            v_child: float = float(kp_2d[j, 1])
-            if abs(u_child) < 1.0 and abs(v_child) < 1.0:
-                # No valid 2D -- fall back to direction clamping
-                direction: np.ndarray = bone_vec / bone_len
-                result[j] = result[p] + direction * ref_len
-                continue
-
-            # Parent position in camera space
-            x_p_cam: float = float(result[p, 0]) + tx
-            y_p_cam: float = float(result[p, 1]) + ty
-            z_p_cam: float = float(result[p, 2]) + tz
-
-            # Child 2D -> normalized image coordinates
-            nx: float = (u_child - cx) / fx
-            ny: float = (v_child - cy) / fy
-
-            # Solve quadratic for Z_c (child camera-space Z):
-            # (nx*Z_c - x_p)^2 + (ny*Z_c - y_p)^2 + (Z_c - z_p)^2 = L^2
-            a: float = nx * nx + ny * ny + 1.0
-            b: float = -2.0 * (nx * x_p_cam + ny * y_p_cam + z_p_cam)
-            c: float = x_p_cam**2 + y_p_cam**2 + z_p_cam**2 - ref_len**2
-
-            discriminant: float = b * b - 4.0 * a * c
-            if discriminant < 0:
-                # No real solution -- bone is too short to reach the 2D point.
-                # Fall back to direction clamping.
-                direction = bone_vec / bone_len
-                result[j] = result[p] + direction * ref_len
-                continue
-
-            sqrt_disc: float = float(np.sqrt(discriminant))
-            z_c1: float = (-b + sqrt_disc) / (2.0 * a)
-            z_c2: float = (-b - sqrt_disc) / (2.0 * a)
-
-            # Pick the solution closest to parent Z (most likely correct)
-            if abs(z_c1 - z_p_cam) < abs(z_c2 - z_p_cam):
-                z_c: float = z_c1
-            else:
-                z_c = z_c2
-
-            # Ensure positive depth
-            if z_c < 0.1:
-                z_c = z_p_cam  # Fall back to parent depth
-
-            x_c: float = nx * z_c
-            y_c: float = ny * z_c
-
-            # Convert back to root-relative
-            result[j, 0] = x_c - tx
-            result[j, 1] = y_c - ty
-            result[j, 2] = z_c - tz
-
-    return result
-
-
-def _reconstruct_from_2d(
-    kp_2d: np.ndarray,
-    parents: np.ndarray,
-    default_lengths: np.ndarray,
-    fx: float,
-    fy: float,
-    cx: float,
-    cy: float,
-    root_depth: float,
-    visibility: np.ndarray | None = None,
-) -> np.ndarray:
-    """Reconstruct 3D skeleton from 2D keypoints using bone-length constraints.
-
-    Places root at root_depth, then for each joint in kinematic chain order,
-    uses the 2D keypoint to define a ray and solves for the depth that gives
-    the correct bone length from parent.
-
-    Args:
-        kp_2d: (17, 2) 2D pixel coordinates.
-        parents: (17,) parent index array.
-        default_lengths: (17,) default bone lengths in meters.
-        fx, fy, cx, cy: Camera intrinsics.
-        root_depth: Estimated root joint depth (Z) in camera space.
-        visibility: Optional (17,) confidence scores.
-
-    Returns:
-        (17, 3) camera-space meters.
-    """
-    result: np.ndarray = np.zeros((NUM_JOINTS, 3), dtype=np.float64)
-
-    # Place root
-    u_root: float = float(kp_2d[0, 0])
-    v_root: float = float(kp_2d[0, 1])
-    result[0, 0] = (u_root - cx) * root_depth / fx
-    result[0, 1] = (v_root - cy) * root_depth / fy
-    result[0, 2] = root_depth
-
-    for j in range(1, NUM_JOINTS):
-        p: int = int(parents[j])
-        ref_len: float = float(default_lengths[j])
-        u_child: float = float(kp_2d[j, 0])
-        v_child: float = float(kp_2d[j, 1])
-
-        # Check if 2D is valid
-        is_valid: bool = abs(u_child) > 1.0 or abs(v_child) > 1.0
-        if visibility is not None and visibility[j] < 0.1:
-            is_valid = False
-
-        if not is_valid or ref_len < 1e-4:
-            # No valid 2D -- place at parent position (zero bone)
-            result[j] = result[p].copy()
-            continue
-
-        # Normalized image coordinates for child
-        nx: float = (u_child - cx) / fx
-        ny: float = (v_child - cy) / fy
-
-        # Parent camera position
-        x_p: float = float(result[p, 0])
-        y_p: float = float(result[p, 1])
-        z_p: float = float(result[p, 2])
-
-        # Solve quadratic: (nx*z - x_p)^2 + (ny*z - y_p)^2 + (z - z_p)^2 = L^2
-        a: float = nx * nx + ny * ny + 1.0
-        b: float = -2.0 * (nx * x_p + ny * y_p + z_p)
-        c: float = x_p**2 + y_p**2 + z_p**2 - ref_len**2
-
-        discriminant: float = b * b - 4.0 * a * c
-        if discriminant < 0:
-            # Bone too short to reach ray -- place at closest point on ray to parent
-            # z_closest = (nx*x_p + ny*y_p + z_p) / (nx^2 + ny^2 + 1)
-            z_closest: float = (nx * x_p + ny * y_p + z_p) / a
-            if z_closest < 0.1:
-                z_closest = z_p
-            result[j, 0] = nx * z_closest
-            result[j, 1] = ny * z_closest
-            result[j, 2] = z_closest
-            continue
-
-        sqrt_disc: float = float(np.sqrt(discriminant))
-        z_c1: float = (-b + sqrt_disc) / (2.0 * a)
-        z_c2: float = (-b - sqrt_disc) / (2.0 * a)
-
-        # Pick solution closest to parent Z
-        if abs(z_c1 - z_p) < abs(z_c2 - z_p):
-            z_c: float = z_c1
-        else:
-            z_c = z_c2
-
-        if z_c < 0.1:
-            z_c = z_p
-
-        result[j, 0] = nx * z_c
-        result[j, 1] = ny * z_c
-        result[j, 2] = z_c
-
-    return result
-
-
 def motionbert_to_camera_space(
     positions_3d_norm: np.ndarray,
     kp_2d: np.ndarray,
@@ -805,10 +596,12 @@ def motionbert_to_camera_space(
     1. Scale the root-relative 3D structure using bone length matching against
        known anatomical reference lengths, with IQR outlier filtering and
        preference for reliable upper-body bones.
-    2. Estimate depth (tz) from pairwise joint separation ratios with IQR
-       outlier filtering, then solve for tx, ty from 2D projections.
+    2. Use OpenCV solvePnP (SQPNP) to estimate the rigid transform (rotation +
+       translation) that best explains the 2D observations given the 3D shape.
+       This mirrors the mediapipe-pose approach in mediapipe_3d_to_camera().
 
-    Falls back to a default depth of 3.0m if too few valid joints.
+    Falls back to a person-height depth heuristic if solvePnP fails or
+    produces unreasonable results (root Z outside 0.5-15m).
 
     Args:
         positions_3d_norm: (16, 3) normalized MotionBERT output (before pixel denorm).
@@ -852,110 +645,80 @@ def motionbert_to_camera_space(
 
     root_relative_m: np.ndarray = root_relative * bone_scale
 
-    # Step 2: Estimate optimal translation (tx, ty, tz) to place skeleton in
-    # camera space. MotionBERT's coordinate frame is already approximately aligned
-    # with the camera (trained on H3.6M camera-space data), so rotation is not
-    # needed. We estimate depth (tz) from the median of pairwise joint separation
-    # ratios (3D distance / 2D distance) with IQR outlier filtering, then compute
-    # tx, ty from the 2D projections at the estimated depth.
+    # Step 2: Use solvePnP to estimate rigid transform placing skeleton in camera space.
+    # This mirrors the mediapipe-pose approach in mediapipe_3d_to_camera().
+    K: np.ndarray = np.array([
+        [fx, 0, cx],
+        [0, fy, cy],
+        [0, 0, 1],
+    ], dtype=np.float64)
+    dc: np.ndarray = dist_coeffs if dist_coeffs is not None else np.zeros(4, dtype=np.float64)
 
-    # Joints to use for depth estimation: prefer upper-body + hips which are
-    # more reliable than knees/ankles in MotionBERT's output.
-    # Knees (2,5) and ankles (3,6) are excluded from tz estimation because
-    # MotionBERT often places them at wrong depths.
-    _DEPTH_RELIABLE_JOINTS: set[int] = {
-        0, 1, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15
-    }
-
-    # Filter joints: require nonzero 2D position AND sufficient confidence
+    # Filter to joints with valid 2D detections and sufficient confidence
     valid: np.ndarray = np.linalg.norm(kp_2d, axis=1) > 1.0
     if visibility is not None:
         valid = valid & (visibility > 0.1)
 
-    # For tz estimation, additionally filter to reliable joints only
-    valid_for_tz: np.ndarray = valid.copy()
-    for j in range(NUM_JOINTS):
-        if j not in _DEPTH_RELIABLE_JOINTS:
-            valid_for_tz[j] = False
+    if valid.sum() >= 4:
+        obj_pts: np.ndarray = root_relative_m[valid].astype(np.float64)
+        img_pts: np.ndarray = kp_2d[valid].astype(np.float64)
 
-    n_valid: int = int(valid.sum())
-    n_valid_tz: int = int(valid_for_tz.sum())
+        success: bool
+        rvec: np.ndarray
+        tvec: np.ndarray
+        success, rvec, tvec = cv2.solvePnP(
+            obj_pts, img_pts, K, dc, flags=cv2.SOLVEPNP_SQPNP,
+        )
 
-    if n_valid_tz >= 4:
-        pts_3d_tz: np.ndarray = root_relative_m[valid_for_tz].astype(np.float64)
-        pts_2d_tz: np.ndarray = kp_2d[valid_for_tz].astype(np.float64)
+        if success:
+            R_pnp: np.ndarray
+            R_pnp, _ = cv2.Rodrigues(rvec)
+            cam_3d: np.ndarray = (R_pnp @ root_relative_m.T).T + tvec.T
 
-        # Estimate tz from pairwise joint separations with IQR filtering.
-        # Only uses reliable joints (no knees/ankles).
-        tz_estimates: list[float] = []
-        n_pts: int = len(pts_3d_tz)
-        for i in range(n_pts):
-            for j in range(i + 1, n_pts):
-                dy_3d: float = float(pts_3d_tz[i, 1] - pts_3d_tz[j, 1])
-                dv_2d: float = float(pts_2d_tz[i, 1] - pts_2d_tz[j, 1])
-                if abs(dv_2d) > 10 and abs(dy_3d) > 0.05:
-                    tz_est: float = fy * dy_3d / dv_2d
-                    if 0.5 < tz_est < 15.0:
-                        tz_estimates.append(tz_est)
+            # Safety check: root Z should be positive and reasonable
+            root_z: float = float(cam_3d[0, 2])
+            if root_z > 0.5 and root_z < 15.0:
+                # Enforce bone-length constraints as safety clamp
+                cam_root: np.ndarray = cam_3d[0].copy()
+                cam_rr: np.ndarray = cam_3d - cam_root
+                cam_rr_fixed: np.ndarray = _enforce_bone_lengths(
+                    cam_rr, PARENTS, DEFAULT_BONE_LENGTHS, max_ratio=1.3,
+                )
+                cam_3d = cam_rr_fixed + cam_root
+                return cam_3d.astype(np.float64)
 
-                dx_3d: float = float(pts_3d_tz[i, 0] - pts_3d_tz[j, 0])
-                du_2d: float = float(pts_2d_tz[i, 0] - pts_2d_tz[j, 0])
-                if abs(du_2d) > 10 and abs(dx_3d) > 0.05:
-                    tz_est = fx * dx_3d / du_2d
-                    if 0.5 < tz_est < 15.0:
-                        tz_estimates.append(tz_est)
-
-        if tz_estimates:
-            # Use IQR-filtered median for robust tz estimation
-            tz_arr: np.ndarray = np.array(tz_estimates)
-            tz: float = _iqr_filtered_median(tz_arr)
-
-            # Compute tx, ty using reliable (uncorrected) joints
-            pts_3d_tx: np.ndarray = root_relative_m[valid_for_tz].astype(np.float64)
-            pts_2d_tx: np.ndarray = kp_2d[valid_for_tz].astype(np.float64)
-            tx_estimates: np.ndarray = (
-                (pts_2d_tx[:, 0] - cx) * (pts_3d_tx[:, 2] + tz) / fx - pts_3d_tx[:, 0]
-            )
-            ty_estimates: np.ndarray = (
-                (pts_2d_tx[:, 1] - cy) * (pts_3d_tx[:, 2] + tz) / fy - pts_3d_tx[:, 1]
-            )
-            tx: float = float(np.median(tx_estimates))
-            ty: float = float(np.median(ty_estimates))
-
-            # Enforce bone-length constraints: clamp extreme bones to default
-            # length while preserving direction. Uses max_ratio=1.3 to catch
-            # moderate distortions (MotionBERT commonly produces 1.3-1.5x
-            # ratios for knees/ankles).
-            root_relative_corrected: np.ndarray = _enforce_bone_lengths(
-                root_relative_m, PARENTS, DEFAULT_BONE_LENGTHS,
-                max_ratio=1.3,
-            )
-
-            cam_3d: np.ndarray = root_relative_corrected.copy()
-            cam_3d[:, 0] += tx
-            cam_3d[:, 1] += ty
-            cam_3d[:, 2] += tz
-            return cam_3d.astype(np.float64)
-
-    # Fallback: too few valid joints for pairwise depth estimation.
-    # Use a reasonable default depth and compute tx, ty from root 2D keypoint.
-    tz = 3.0
+    # Fallback: depth heuristic when solvePnP fails or produces unreasonable results
+    tz: float = 3.0
     u_root: float = float(kp_2d[0, 0])
     v_root: float = float(kp_2d[0, 1])
-    tx = (u_root - cx) * tz / fx
-    ty = (v_root - cy) * tz / fy
+
+    # Try person-height heuristic for better depth estimate
+    thorax_idx: int = 8
+    ankle_mid_2d: np.ndarray = (kp_2d[3] + kp_2d[6]) / 2.0
+    pixel_height: float = abs(kp_2d[thorax_idx, 1] - ankle_mid_2d[1])
+    height_3d: float = float(np.linalg.norm(
+        root_relative_m[thorax_idx] - (root_relative_m[3] + root_relative_m[6]) / 2
+    ))
+    if pixel_height > 20 and height_3d > 0.1:
+        tz = fy * height_3d / pixel_height
+        tz = float(np.clip(tz, 1.0, 8.0))
+
+    if abs(u_root) > 1.0 or abs(v_root) > 1.0:
+        tx: float = (u_root - cx) * tz / fx
+        ty: float = (v_root - cy) * tz / fy
+    else:
+        tx = 0.0
+        ty = 0.0
 
     # Enforce bone-length constraints before translation
-    root_relative_corrected = _enforce_bone_lengths(
-        root_relative_m, PARENTS, DEFAULT_BONE_LENGTHS,
-        max_ratio=1.3,
+    root_relative_corrected: np.ndarray = _enforce_bone_lengths(
+        root_relative_m, PARENTS, DEFAULT_BONE_LENGTHS, max_ratio=1.3,
     )
 
     cam_3d = root_relative_corrected.copy()
     cam_3d[:, 0] += tx
     cam_3d[:, 1] += ty
     cam_3d[:, 2] += tz
-
     return cam_3d.astype(np.float64)
 
 

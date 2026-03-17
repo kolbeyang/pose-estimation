@@ -1,440 +1,283 @@
-# Architect Plan P1-00: Parameter Tuning
+# Architect Plan: Phase 1, Iteration 0 -- Smooth Motion via solvePnP + Remove ALL_JOINTS_SMOOTH_WEIGHT
+
+**Date:** 2026-03-17
+**Spec:** `claude-team/specs/motion-bert-round-5.md` (Phase 1)
+**Round:** 5
 
 ## Goal Summary
 
-The FK optimization currently provides only +0.34 cm mean improvement over raw MotionBERT (32.99 -> 32.65 cm MPJPE). The hypothesis is that penalty terms (position, rotation, anchor) dominate the gradient signal and drown out the heatmap score. This plan covers: (1) adding a 2D detection-projected MPJPE metric that measures how well predictions match the 2D Stacked Hourglass detections (not GT projections), (2) creating a parameter sweep script, (3) defining specific experiments for Phase 1.1 coarse-to-fine parameter tuning, and (4) preparing for Phase 1.2 heatmap blur.
+The spec asks for two changes:
 
-## Key Analysis
+1. **Remove `ALL_JOINTS_SMOOTH_WEIGHT` and all code that uses it.** Temporal smoothness should come solely from the root position penalty and rotation change penalties -- smooth rotations imply smooth positions for all downstream joints.
 
-**Why optimization barely helps:** The `real_heatmap_score` returns `log(heatmap_value) * visibility` per joint. Heatmap values are 0-1, so log values are negative (e.g., log(0.5) = -0.69, log(0.01) = -4.6). With ~15 visible joints across ~150 frames, total heatmap score might be around -500 to -2000. Meanwhile, `POSITION_PENALTY_WEIGHT=50.0` and `ROTATION_PENALTY_SCALAR=10.0` with per-joint weights up to 30.0 create large penalty gradients. The `INIT_ANCHOR_WEIGHT=5.0` further anchors positions to MotionBERT, preventing the optimizer from moving joints toward heatmap peaks.
+2. **Use OpenCV `solvePnP` to estimate depth (and full camera-space placement) of the MotionBERT output BEFORE optimization, replacing the current `motionbert_to_camera_space()` pairwise-separation depth estimation.** This mirrors what the mediapipe-pose pipeline does in `mediapipe_3d_to_camera()`. The result is that the optimizer only ever works in camera coordinates and has full freedom to smooth the z values during optimization.
 
-**Current 2D reprojection metric bug:** The existing `det_2d_mpjpe` and `opt_2d_mpjpe` in `evaluate.py` measure reprojection error against *GT 2D projections* (`camera.world_to_image(gt_arr[i])`). The spec asks for error against *2D SH detections* -- this is a different and more informative metric for understanding optimization behavior.
+The testing requirement is: run on a simple example, pull out a heatmap video frame, analyze z values, and confirm MPJVE improves.
+
+## Depth Estimation Strategy (Explanation Required by Spec)
+
+### Current approach (to be replaced)
+
+`motionbert_to_camera_space()` in `detect.py` currently:
+1. Gets root-relative 3D structure from MotionBERT's normalized output
+2. Scales it to meters using bone-length ratio matching (reliable arm bones with IQR filtering)
+3. Estimates depth `tz` from pairwise joint separation ratios (3D distance / 2D pixel distance) with IQR filtering
+4. Computes `tx, ty` from 2D projections at estimated depth
+5. Enforces bone-length constraints by clamping extreme bones
+
+This approach is fragile: the pairwise separation method produces noisy depth estimates, especially for challenging poses, and the bone-length clamping is a band-aid.
+
+### New approach: solvePnP (modeled on mediapipe-pose)
+
+The mediapipe-pose pipeline (`mediapipe-pose/detect.py`, function `mediapipe_3d_to_camera()`) does this:
+1. Takes MediaPipe's hip-relative 3D predictions as "object points" (known 3D shape)
+2. Takes the 2D pixel detections as "image points"
+3. Calls `cv2.solvePnP(obj_pts, img_pts, K, dist_coeffs, flags=cv2.SOLVEPNP_SQPNP)` which solves for the rigid transform (rotation R + translation t) that best explains the 2D observations given the 3D shape
+4. Applies `cam_3d = (R @ obj_pts.T).T + t.T` to get all joints in camera space
+
+For motionbert-pose, we will do the same:
+1. Take MotionBERT's root-relative 3D output (already scaled to meters via bone-length matching, which is the good part of the current code)
+2. Use the 2D Stacked Hourglass keypoints as image points
+3. Call `cv2.solvePnP` with SQPNP to solve for the rigid transform
+4. Apply the transform to get camera-space positions
+
+**Why this is better:** solvePnP minimizes reprojection error globally across all visible joints simultaneously, producing a single consistent rigid placement. The current pairwise method estimates depth from individual joint pairs and takes a filtered median, which is inherently less constrained. solvePnP also naturally handles the rotation between MotionBERT's coordinate frame and the camera frame (MotionBERT is trained on H3.6M camera-space data so the rotation should be near-identity, but solvePnP will correct any residual misalignment).
+
+**Fallback:** If fewer than 4 joints are visible or solvePnP fails, fall back to the existing depth heuristic (estimate tz from person height in pixels, as the mediapipe version does).
 
 ## Files to Modify
 
-1. **`motionbert-pose/evaluate.py`** -- Add `det_2d_det_mpjpe` and `opt_2d_det_mpjpe` metrics that measure 2D error against SH detections (not GT projections).
+### 1. `motionbert-pose/config.py`
+- Remove `ALL_JOINTS_SMOOTH_WEIGHT` constant
 
-2. **`motionbert-pose/config.py`** -- No changes for now. The sweep script will override parameters.
+### 2. `motionbert-pose/scoring.py`
+- Remove `motion_penalty_all_joints()` function
+- Remove `all_joints_smooth_weight` parameter and related logic from `compute_total_score()`
+
+### 3. `motionbert-pose/optimize.py`
+- Remove the `all_joints_smooth_weight=cfg.ALL_JOINTS_SMOOTH_WEIGHT` argument from the `compute_total_score()` call
+
+### 4. `motionbert-pose/detect.py`
+- Replace the depth estimation portion of `motionbert_to_camera_space()` with solvePnP
+- Remove unused helper functions `_enforce_bone_lengths_with_2d()` and `_reconstruct_from_2d()`
 
 ## Files to Create
 
-1. **`motionbert-pose/sweep.py`** -- Parameter sweep script that runs a single example with different configs and reports all metrics in a table.
+None.
 
 ## Step-by-Step Instructions
 
-### Step 1: Add 2D-detection-projected MPJPE to evaluate.py
+### Step 1: Remove ALL_JOINTS_SMOOTH_WEIGHT from config.py
 
-Add a new function `reprojection_error_vs_detections` and integrate it into `compute_comparison_with_optimization`.
-
-**Add function** after the existing `root_relative` function:
-
+Delete this line (currently line 118):
 ```python
-def reprojection_error_vs_detections(
-    positions_3d: list[np.ndarray],
-    detections_2d: list[np.ndarray],
-    visibility: list[np.ndarray],
-    camera: "Camera",
-    visibility_threshold: float = 0.5,
-) -> dict[str, float]:
-    """Compute 2D reprojection error against 2D SH detections.
-
-    Projects 3D predictions to 2D via the camera model, then measures
-    pixel distance to the 2D Stacked Hourglass keypoints (NOT GT projections).
-
-    Args:
-        positions_3d: Per-frame (17, 3) camera-space positions.
-        detections_2d: Per-frame (17, 2) SH 2D keypoints in pixels.
-        visibility: Per-frame (17,) visibility scores.
-        camera: Camera for 3D->2D projection.
-        visibility_threshold: Only count joints above this threshold.
-
-    Returns:
-        Dict with 'mean_px' (mean pixel error across visible joints and frames),
-        'per_frame_px' (list of per-frame mean pixel errors).
-    """
-    per_frame_errors: list[float] = []
-    for i in range(len(positions_3d)):
-        proj_2d = camera.world_to_image(positions_3d[i])  # (17, 2)
-        diffs = np.linalg.norm(proj_2d - detections_2d[i], axis=-1)  # (17,)
-        mask = visibility[i] >= visibility_threshold
-        if mask.sum() > 0:
-            per_frame_errors.append(float(diffs[mask].mean()))
-        else:
-            per_frame_errors.append(0.0)
-    return {
-        "mean_px": float(np.mean(per_frame_errors)) if per_frame_errors else 0.0,
-        "per_frame_px": per_frame_errors,
-    }
+ALL_JOINTS_SMOOTH_WEIGHT: float = 0.0
 ```
 
-**Modify `compute_comparison_with_optimization` signature** to accept additional optional parameters:
+Note: it is already 0.0, so this is purely a cleanup. But the spec explicitly asks for removal.
 
+### Step 2: Remove motion_penalty_all_joints from scoring.py
+
+2a. Delete the `motion_penalty_all_joints()` function entirely (lines 208-222).
+
+2b. In `compute_total_score()`:
+- Remove parameter `all_joints_smooth_weight: float = 0.0` from the function signature
+- Remove `total_all_joints_smooth: torch.Tensor = torch.tensor(0.0)` initialization
+- Remove the entire `if all_joints_smooth_weight > 0.0:` block inside the frame loop (the block that calls `motion_penalty_all_joints`)
+- Remove `- all_joints_smooth_weight * total_all_joints_smooth` from the `total_score` calculation
+- Remove `"all_joints_smooth": float(total_all_joints_smooth.item()),` from the `details` dict
+
+### Step 3: Remove all_joints_smooth_weight from optimize.py
+
+In `run_optimization()`, in the `compute_total_score()` call (around line 258), remove the keyword argument:
 ```python
-def compute_comparison_with_optimization(
-    detector_3d: list[np.ndarray],
-    optimized_3d: list[np.ndarray],
-    gt_3d: list[np.ndarray | None],
-    camera: Camera | None = None,
-    detections_2d: list[np.ndarray] | None = None,
-    visibility: list[np.ndarray] | None = None,
-) -> dict[str, Any]:
+all_joints_smooth_weight=cfg.ALL_JOINTS_SMOOTH_WEIGHT,
 ```
 
-**Add at the end of `compute_comparison_with_optimization`**, after the existing 2D reprojection block:
+### Step 4: Implement solvePnP in motionbert_to_camera_space()
+
+This is the main change. Replace the body of `motionbert_to_camera_space()` in `detect.py`.
+
+**Keep unchanged:** The function signature, the bone-length scaling step (Step 1 of current code), and the `_iqr_filtered_median`, `_RELIABLE_BONES_FOR_SCALE`, `_enforce_bone_lengths` helpers.
+
+**Replace:** Everything after `root_relative_m` is computed (currently line 853 onward).
+
+The new implementation after `root_relative_m = root_relative * bone_scale`:
 
 ```python
-    # --- 2D reprojection error vs 2D DETECTIONS (not GT) ---
-    if camera is not None and detections_2d is not None and visibility is not None:
-        det_vs_det = reprojection_error_vs_detections(
-            detector_3d, detections_2d, visibility, camera,
+    # Step 2: Use solvePnP to estimate rigid transform placing skeleton in camera space.
+    # This mirrors the mediapipe-pose approach in mediapipe_3d_to_camera().
+    K = np.array([
+        [fx, 0, cx],
+        [0, fy, cy],
+        [0, 0, 1],
+    ], dtype=np.float64)
+    dc = dist_coeffs if dist_coeffs is not None else np.zeros(4, dtype=np.float64)
+
+    # Filter to joints with valid 2D detections and sufficient confidence
+    valid = np.linalg.norm(kp_2d, axis=1) > 1.0
+    if visibility is not None:
+        valid = valid & (visibility > 0.1)
+
+    if valid.sum() >= 4:
+        obj_pts = root_relative_m[valid].astype(np.float64)
+        img_pts = kp_2d[valid].astype(np.float64)
+
+        success, rvec, tvec = cv2.solvePnP(
+            obj_pts, img_pts, K, dc, flags=cv2.SOLVEPNP_SQPNP,
         )
-        opt_vs_det = reprojection_error_vs_detections(
-            optimized_3d, detections_2d, visibility, camera,
-        )
-        results["det_2d_det_mpjpe_px"] = det_vs_det["mean_px"]
-        results["opt_2d_det_mpjpe_px"] = opt_vs_det["mean_px"]
-        results["det_2d_det_per_frame_px"] = det_vs_det["per_frame_px"]
-        results["opt_2d_det_per_frame_px"] = opt_vs_det["per_frame_px"]
-```
 
-### Step 2: Thread 2D detections and visibility through callers
+        if success:
+            R_pnp, _ = cv2.Rodrigues(rvec)
+            cam_3d = (R_pnp @ root_relative_m.T).T + tvec.T
 
-**In `main.py`**, update the call to `compute_comparison_with_optimization` (around line 234):
+            # Safety check: root Z should be positive and reasonable
+            root_z = float(cam_3d[0, 2])
+            if root_z > 0.5 and root_z < 15.0:
+                # Enforce bone-length constraints as safety clamp
+                cam_root = cam_3d[0].copy()
+                cam_rr = cam_3d - cam_root
+                cam_rr_fixed = _enforce_bone_lengths(
+                    cam_rr, PARENTS, DEFAULT_BONE_LENGTHS, max_ratio=1.3,
+                )
+                cam_3d = cam_rr_fixed + cam_root
+                return cam_3d.astype(np.float64)
 
-```python
-    metrics: dict[str, Any] = compute_comparison_with_optimization(
-        detector_3d=det_cam_positions,
-        optimized_3d=optimized_3d,
-        gt_3d=gt_cam,
-        camera=camera,
-        detections_2d=improved_target_2d,
-        visibility=visibility,
+    # Fallback: depth heuristic when solvePnP fails or produces unreasonable results
+    tz = 3.0
+    u_root = float(kp_2d[0, 0])
+    v_root = float(kp_2d[0, 1])
+
+    # Try person-height heuristic for better depth estimate
+    thorax_idx = 8
+    ankle_mid_2d = (kp_2d[3] + kp_2d[6]) / 2.0
+    pixel_height = abs(kp_2d[thorax_idx, 1] - ankle_mid_2d[1])
+    height_3d = float(np.linalg.norm(
+        root_relative_m[thorax_idx] - (root_relative_m[3] + root_relative_m[6]) / 2
+    ))
+    if pixel_height > 20 and height_3d > 0.1:
+        tz = fy * height_3d / pixel_height
+        tz = float(np.clip(tz, 1.0, 8.0))
+
+    if abs(u_root) > 1.0 or abs(v_root) > 1.0:
+        tx = (u_root - cx) * tz / fx
+        ty = (v_root - cy) * tz / fy
+    else:
+        tx = 0.0
+        ty = 0.0
+
+    # Enforce bone-length constraints before translation
+    root_relative_corrected = _enforce_bone_lengths(
+        root_relative_m, PARENTS, DEFAULT_BONE_LENGTHS, max_ratio=1.3,
     )
+
+    cam_3d = root_relative_corrected.copy()
+    cam_3d[:, 0] += tx
+    cam_3d[:, 1] += ty
+    cam_3d[:, 2] += tz
+    return cam_3d.astype(np.float64)
 ```
 
-Also add printing for the new metric after the existing 2D MPJPE print (around line 260):
+**Important:** The `import cv2` is already present at line 6 of `detect.py`. Also import `PARENTS` and `DEFAULT_BONE_LENGTHS` from skeleton -- check these are already imported in the existing `motionbert_to_camera_space` (they are imported inside the function body at line 826: `from skeleton import PARENTS, DEFAULT_BONE_LENGTHS`). Move this to the top-level imports for cleanliness, or keep it as-is.
 
-```python
-    if "det_2d_det_mpjpe_px" in metrics:
-        print(f"    Det 2D-vs-Det: {metrics['det_2d_det_mpjpe_px']:.1f} px")
-        print(f"    Opt 2D-vs-Det: {metrics['opt_2d_det_mpjpe_px']:.1f} px")
-```
+### Step 5: Remove unused helper functions from detect.py
 
-**In `test_single.py`**, similarly update the call (around line 151):
+Delete these functions which are no longer called:
+- `_enforce_bone_lengths_with_2d()` (lines 582-689)
+- `_reconstruct_from_2d()` (lines 692-788)
 
-```python
-    metrics: dict[str, Any] = compute_comparison_with_optimization(
-        det_cam_positions, optimized_3d, gt_cam,
-        camera=camera,
-        detections_2d=improved_target_2d,
-        visibility=visibility,
-    )
-```
+Keep these functions which are still used:
+- `_iqr_filtered_median()` (used in bone-scale estimation)
+- `_RELIABLE_BONES_FOR_SCALE` (used in bone-scale estimation)
+- `_enforce_bone_lengths()` (used as post-solvePnP safety clamp)
 
-And add printing in the RESULTS section:
+### Step 6: Test on a simple example
 
-```python
-    if "det_2d_det_mpjpe_px" in metrics:
-        print(f"  Det 2D-vs-Det: {metrics['det_2d_det_mpjpe_px']:.1f} px")
-        print(f"  Opt 2D-vs-Det: {metrics['opt_2d_det_mpjpe_px']:.1f} px")
-```
+Run `process_example()` on example 0 (`171204_pose1_sample`, 100 frames):
 
-### Step 3: Create sweep.py
-
-Create `motionbert-pose/sweep.py`. This script:
-
-1. Runs detection once (expensive) and caches results
-2. Re-runs optimization with different parameter configs
-3. Reports all metrics in a table
-
-The script structure:
-
-```python
-"""Parameter sweep for FK optimization hyperparameters.
-
-Runs detection once, then re-optimizes with different parameter configs.
-Reports MPJPE, P-MPJPE, MPJVE, and 2D-vs-detection reprojection error.
-"""
-import json
-import os
-import sys
-import time
-from typing import Any
-
-import numpy as np
-
+```bash
+cd motionbert-pose
+uv run python -c "
+from main import process_example
 import config as cfg
-from camera import Camera
-from detect import detect_poses, motionbert_to_camera_space
-from evaluate import compute_comparison_with_optimization
-from optimize import run_optimization
-from panoptic import (
-    extract_video_frames,
-    get_sequence_dir,
-    get_video_path,
-    load_calibration,
-    load_ground_truth_sequence,
-    world_to_camera,
-)
+import os
+
+run_dir = os.path.join(cfg.TRAINING_RUNS_DIR, 'p1-solvepnp-test')
+os.makedirs(run_dir, exist_ok=True)
+seq, cam, start, nf, pidx = cfg.EXAMPLES[0]
+process_example(seq, cam, start, nf, pidx, run_dir)
+"
 ```
 
-**Core data class for a parameter config:**
+Check the console output for:
+- Root Z range should be in a reasonable range (typically 2-5m for Panoptic)
+- MPJPE and MPJVE values
+- No errors
 
-```python
-from dataclasses import dataclass, field
+### Step 7: Run a second example for comparison
 
-@dataclass
-class SweepConfig:
-    """One parameter configuration to test."""
-    name: str
-    num_steps: int = 20
-    position_penalty_weight: float = 50.0
-    rotation_penalty_scalar: float = 10.0
-    init_anchor_weight: float = 5.0
-    all_joints_smooth_weight: float = 0.0
-    sigma_schedule: list[tuple[float, float]] = field(default_factory=lambda: [(1.0, 80.0)])
-    heatmap_blur_sigma: float = 0.0  # Additional Gaussian blur on SH heatmaps (Phase 1.2)
+Run example 5 (`171204_pose3_4000`, one of the best-performing in round 4):
+
+```bash
+cd motionbert-pose
+uv run python -c "
+from main import process_example
+import config as cfg
+import os
+
+run_dir = os.path.join(cfg.TRAINING_RUNS_DIR, 'p1-solvepnp-test')
+seq, cam, start, nf, pidx = cfg.EXAMPLES[5]
+process_example(seq, cam, start, nf, pidx, run_dir)
+"
 ```
 
-**Detection caching function** -- run detection and camera-space conversion once, return all needed data:
+### Step 8: Compare metrics against the round-4 baseline
 
-```python
-def load_example(example_idx: int = 0) -> dict[str, Any]:
-    """Load and detect poses for one example. Returns cached data dict."""
-    seq_name, camera_name, start_frame, num_frames, person_idx = cfg.EXAMPLES[example_idx]
-    # ... (same as test_single.py steps 1-5: calibration, frame extraction,
-    #      detection, camera-space conversion, GT loading)
-    # Return dict with keys:
-    #   camera, det_cam_positions, kp_2d, visibility, heatmaps, affine,
-    #   improved_target_2d, gt_cam, frames_rgb, frame_indices, name,
-    #   fx, fy, cx, cy
-```
+The round-4 baseline (from `DEVELOPER_REPORT_RUN_ALL.md`) had:
 
-**Sweep function** -- takes cached data and a SweepConfig, runs optimization, returns metrics:
+| Example | Det MPJPE | Opt MPJPE | Det MPJVE | Opt MPJVE |
+|---|---|---|---|---|
+| 171204_pose1_sample_0 | 30.98 | 30.44 | 0.94 | 1.05 |
+| 171204_pose3_4000 | 15.85 | 15.44 | 0.51 | 0.48 |
+| **Mean (10 examples)** | **32.99** | **32.65** | **3.13** | **3.11** |
 
-```python
-def run_sweep_config(data: dict[str, Any], config: SweepConfig) -> dict[str, Any]:
-    """Run optimization with one parameter config, return metrics."""
-    # Temporarily override cfg values
-    orig_pos_weight = cfg.POSITION_PENALTY_WEIGHT
-    orig_rot_scalar = cfg.ROTATION_PENALTY_SCALAR
-    orig_anchor = cfg.INIT_ANCHOR_WEIGHT
-    orig_smooth = cfg.ALL_JOINTS_SMOOTH_WEIGHT
-    orig_sigma_schedule = cfg.SIGMA_SCHEDULE
+The solvePnP change primarily affects the **detector** (pre-optimization) z-value quality. Better initialization should lead to:
+- Similar or better Det MPJPE (better initial depth)
+- Better MPJVE (because the z values are more consistent frame-to-frame when estimated via a global rigid fit rather than noisy pairwise ratios)
+- Similar or better Opt MPJPE (optimizer starts from a better initial point)
 
-    try:
-        cfg.POSITION_PENALTY_WEIGHT = config.position_penalty_weight
-        cfg.INIT_ANCHOR_WEIGHT = config.init_anchor_weight
-        cfg.ALL_JOINTS_SMOOTH_WEIGHT = config.all_joints_smooth_weight
-        cfg.SIGMA_SCHEDULE = config.sigma_schedule
-
-        # Rebuild per-joint rotation weights with new scalar
-        cfg.ROTATION_PENALTY_SCALAR = config.rotation_penalty_scalar
-        cfg.ROTATION_PENALTY_PER_JOINT = np.array([
-            config.rotation_penalty_scalar * m for m in
-            [3.0, 1.0, 0.5, 0.2, 1.0, 0.5, 0.2, 1.0, 1.0, 0.5, 0.5, 0.5, 0.3, 0.1, 0.5, 0.3, 0.1]
-        ], dtype=np.float64)
-
-        # Optionally blur heatmaps
-        heatmaps = data["heatmaps"]
-        if config.heatmap_blur_sigma > 0:
-            import scipy.ndimage
-            heatmaps = [
-                np.stack([
-                    scipy.ndimage.gaussian_filter(hm[c], sigma=config.heatmap_blur_sigma)
-                    for c in range(hm.shape[0])
-                ]) for hm in heatmaps
-            ]
-
-        optimized_3d, bone_lengths_final, loss_history = run_optimization(
-            initial_positions_cam=data["det_cam_positions"],
-            target_2d=data["improved_target_2d"],
-            visibility=data["visibility"],
-            camera=data["camera"],
-            num_steps=config.num_steps,
-            heatmaps=heatmaps,
-            affine=data["affine"],
-        )
-
-        metrics = compute_comparison_with_optimization(
-            detector_3d=data["det_cam_positions"],
-            optimized_3d=optimized_3d,
-            gt_3d=data["gt_cam"],
-            camera=data["camera"],
-            detections_2d=data["improved_target_2d"],
-            visibility=data["visibility"],
-        )
-        metrics["loss_history"] = loss_history
-        return metrics
-
-    finally:
-        # Restore original config
-        cfg.POSITION_PENALTY_WEIGHT = orig_pos_weight
-        cfg.ROTATION_PENALTY_SCALAR = orig_rot_scalar
-        cfg.INIT_ANCHOR_WEIGHT = orig_anchor
-        cfg.ALL_JOINTS_SMOOTH_WEIGHT = orig_smooth
-        cfg.SIGMA_SCHEDULE = orig_sigma_schedule
-        cfg.ROTATION_PENALTY_PER_JOINT = np.array([
-            orig_rot_scalar * m for m in
-            [3.0, 1.0, 0.5, 0.2, 1.0, 0.5, 0.2, 1.0, 1.0, 0.5, 0.5, 0.5, 0.3, 0.1, 0.5, 0.3, 0.1]
-        ], dtype=np.float64)
-```
-
-**Main function** with the sweep configs defined:
-
-```python
-def main() -> None:
-    example_idx = int(sys.argv[1]) if len(sys.argv) > 1 else 0
-
-    print("Loading example data (detection + GT)...")
-    data = load_example(example_idx)
-    print(f"Example: {data['name']}, {len(data['det_cam_positions'])} frames\n")
-
-    # Define sweep configurations -- Phase 1.1
-    configs: list[SweepConfig] = get_phase1_1_configs()
-
-    results: list[tuple[str, dict[str, Any]]] = []
-    for i, config in enumerate(configs):
-        print(f"\n{'='*60}")
-        print(f"  [{i+1}/{len(configs)}] {config.name}")
-        print(f"  pos_w={config.position_penalty_weight}, rot_s={config.rotation_penalty_scalar}, "
-              f"anchor={config.init_anchor_weight}, smooth={config.all_joints_smooth_weight}")
-        print(f"{'='*60}")
-
-        t0 = time.time()
-        metrics = run_sweep_config(data, config)
-        elapsed = time.time() - t0
-
-        results.append((config.name, metrics))
-        print(f"  Time: {elapsed:.1f}s")
-
-    # Print summary table
-    print(f"\n\n{'='*100}")
-    print(f"  SWEEP RESULTS -- {data['name']}")
-    print(f"{'='*100}")
-    header = f"{'Config':<40} {'Det MPJPE':>10} {'Opt MPJPE':>10} {'Improv':>8} {'Opt P-MPJPE':>12} {'Det 2D-Det':>10} {'Opt 2D-Det':>10}"
-    print(header)
-    print("-" * len(header))
-    for name, m in results:
-        det_mpjpe = m.get('det_mpjpe', 0) * 100
-        opt_mpjpe = m.get('opt_mpjpe', 0) * 100
-        improv = m.get('improvement', 0) * 100
-        opt_p = m.get('opt_p_mpjpe', 0) * 100
-        det_2d = m.get('det_2d_det_mpjpe_px', 0)
-        opt_2d = m.get('opt_2d_det_mpjpe_px', 0)
-        print(f"{name:<40} {det_mpjpe:>10.2f} {opt_mpjpe:>10.2f} {improv:>+8.2f} {opt_p:>12.2f} {det_2d:>10.1f} {opt_2d:>10.1f}")
-
-    # Save results to JSON
-    out_dir = os.path.join(cfg.TRAINING_RUNS_DIR, "sweep_results")
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"sweep_{data['name']}.json")
-    save_data = []
-    for name, m in results:
-        save_data.append({
-            "config": name,
-            "det_mpjpe_cm": m.get('det_mpjpe', 0) * 100,
-            "opt_mpjpe_cm": m.get('opt_mpjpe', 0) * 100,
-            "improvement_cm": m.get('improvement', 0) * 100,
-            "opt_p_mpjpe_cm": m.get('opt_p_mpjpe', 0) * 100,
-            "det_2d_det_mpjpe_px": m.get('det_2d_det_mpjpe_px', 0),
-            "opt_2d_det_mpjpe_px": m.get('opt_2d_det_mpjpe_px', 0),
-            "opt_mpjve_cm": m.get('opt_mpjve', 0) * 100 if 'opt_mpjve' in m else None,
-        })
-    with open(out_path, "w") as f:
-        json.dump(save_data, f, indent=2)
-    print(f"\nSaved: {out_path}")
-```
-
-### Step 4: Define Phase 1.1 Sweep Configs
-
-Create a `get_phase1_1_configs()` function in `sweep.py` that returns the configs. The strategy is to test each parameter independently at orders of magnitude up/down, then test combinations of the best settings.
-
-**Baseline** (current params):
-```python
-SweepConfig(name="baseline",
-    position_penalty_weight=50.0, rotation_penalty_scalar=10.0,
-    init_anchor_weight=5.0)
-```
-
-**Position penalty weight sweep** (currently 50.0):
-```python
-SweepConfig(name="pos_w=0", position_penalty_weight=0.0, rotation_penalty_scalar=10.0, init_anchor_weight=5.0)
-SweepConfig(name="pos_w=0.5", position_penalty_weight=0.5, ...)
-SweepConfig(name="pos_w=5", position_penalty_weight=5.0, ...)
-SweepConfig(name="pos_w=50 (baseline)", position_penalty_weight=50.0, ...)
-SweepConfig(name="pos_w=500", position_penalty_weight=500.0, ...)
-SweepConfig(name="pos_w=5000", position_penalty_weight=5000.0, ...)
-```
-
-**Rotation penalty scalar sweep** (currently 10.0):
-```python
-SweepConfig(name="rot_s=0", rotation_penalty_scalar=0.0, ...)
-SweepConfig(name="rot_s=0.1", rotation_penalty_scalar=0.1, ...)
-SweepConfig(name="rot_s=1", rotation_penalty_scalar=1.0, ...)
-SweepConfig(name="rot_s=10 (baseline)", rotation_penalty_scalar=10.0, ...)
-SweepConfig(name="rot_s=100", rotation_penalty_scalar=100.0, ...)
-SweepConfig(name="rot_s=1000", rotation_penalty_scalar=1000.0, ...)
-```
-
-**Init anchor weight sweep** (currently 5.0):
-```python
-SweepConfig(name="anchor=0", init_anchor_weight=0.0, ...)
-SweepConfig(name="anchor=0.05", init_anchor_weight=0.05, ...)
-SweepConfig(name="anchor=0.5", init_anchor_weight=0.5, ...)
-SweepConfig(name="anchor=5 (baseline)", init_anchor_weight=5.0, ...)
-SweepConfig(name="anchor=50", init_anchor_weight=50.0, ...)
-SweepConfig(name="anchor=500", init_anchor_weight=500.0, ...)
-```
-
-**All penalties off** (heatmap only):
-```python
-SweepConfig(name="heatmap_only", position_penalty_weight=0.0, rotation_penalty_scalar=0.0, init_anchor_weight=0.0)
-```
-
-**All penalties very low** (let heatmap dominate):
-```python
-SweepConfig(name="all_low", position_penalty_weight=0.5, rotation_penalty_scalar=0.1, init_anchor_weight=0.05)
-```
-
-**More steps to see if convergence matters:**
-```python
-SweepConfig(name="baseline_100steps", num_steps=100, position_penalty_weight=50.0, rotation_penalty_scalar=10.0, init_anchor_weight=5.0)
-SweepConfig(name="all_low_100steps", num_steps=100, position_penalty_weight=0.5, rotation_penalty_scalar=0.1, init_anchor_weight=0.05)
-```
-
-Total: ~22 configs. At 20 steps each, this should run in a few minutes per example. The 100-step configs will take proportionally longer.
-
-### Step 5: Phase 1.2 Preparation (Heatmap Blur)
-
-After Phase 1.1 identifies good parameter ranges, add blur configs to the sweep:
-
-```python
-SweepConfig(name="best_blur1", ..., heatmap_blur_sigma=1.0)
-SweepConfig(name="best_blur2", ..., heatmap_blur_sigma=2.0)
-SweepConfig(name="best_blur4", ..., heatmap_blur_sigma=4.0)
-SweepConfig(name="best_blur8", ..., heatmap_blur_sigma=8.0)
-```
-
-The `heatmap_blur_sigma` is in 64x64 heatmap coordinates. A sigma of 2.0 at 64x64 corresponds to ~8px at 256x256 crop resolution. This should widen the gradient basin without destroying spatial precision.
-
-The blur is applied via `scipy.ndimage.gaussian_filter` on each channel of the (16, 64, 64) heatmap tensor before passing to optimization. This is done once per config, not per optimization step.
-
-**Important:** The blur is NOT applied to the sigma parameter of the analytical Gaussian fallback (for Hip and Spine joints). Those joints already use the sigma schedule.
+Report: the developer should note in their report the Det MPJPE, Opt MPJPE, Det MPJVE, Opt MPJVE for each tested example, the root Z range, and whether solvePnP succeeded on all frames or fell back to the heuristic.
 
 ## Integration Points
 
-- `sweep.py` imports from the same modules as `test_single.py` and `main.py` -- no new dependencies except `scipy.ndimage` for Phase 1.2 blur (scipy is already a project dependency)
-- The new `detections_2d` and `visibility` parameters to `compute_comparison_with_optimization` are optional with default `None`, so existing callers continue to work without changes (they just won't get the new metric until updated)
-- Config overrides in `sweep.py` use a try/finally block to restore original values, so running the sweep doesn't corrupt the module-level config state
+- `motionbert_to_camera_space()` is called from `main.py` line 173 in a per-frame loop. Its signature and return type do not change.
+- `compute_total_score()` is called from `optimize.py` line 245. The removed parameter `all_joints_smooth_weight` had a default value of 0.0 and was already behaviorally inactive. Removing it is a safe cleanup.
+- The `scoring.py` changes only remove dead code (the weight was already 0.0 in config), so no behavioral change from Steps 2-3 alone.
 
 ## Risks and Edge Cases
 
-1. **Heatmap-only mode might explode**: With all penalties at 0, the optimizer has no regularization. Bone lengths could go to the 0.01 clamp, rotations could diverge. The FK roundtrip may produce wildly wrong poses. This is expected -- we want to see the failure mode to understand the heatmap signal strength.
+### Risk 1: solvePnP rotation estimate may be wrong
+MotionBERT's coordinate frame may not perfectly match camera coordinates. MotionBERT is trained on H3.6M camera-space data, so the coordinates should already be roughly camera-aligned (Y-down, Z-forward). However, solvePnP will estimate a rotation that could include a spurious 180-degree flip if the coordinate axes are mismatched.
 
-2. **Config mutation is not thread-safe**: The `cfg` module is mutated globally. The sweep must run configs sequentially, not in parallel. This is fine since each optimization run uses all CPU/GPU resources anyway.
+**Mitigation:** The safety check `if root_z > 0.5 and root_z < 15.0` catches cases where solvePnP places the skeleton behind the camera or unreasonably far away. If this fires, we fall back to the height heuristic. The developer should print `float(np.linalg.norm(rvec))` (rotation magnitude in radians) to verify it's small (ideally < 0.5 rad). Large rotations suggest a coordinate frame mismatch.
 
-3. **Memory**: With 150 frames of (16, 64, 64) heatmaps, each example uses ~9.4 MB for heatmaps. Blurred copies add the same. This is negligible.
+### Risk 2: solvePnP sensitive to outlier 2D detections
+If some 2D keypoints are badly detected (ankles in particular), solvePnP may produce a poor fit.
 
-4. **The 2D-vs-detection metric will be identical for detector baseline across all configs** since `det_cam_positions` doesn't change. Only `opt_2d_det_mpjpe_px` will vary. This is correct and expected -- the baseline column serves as a reference.
+**Mitigation:** Use the visibility-based filtering already in place. Joints below visibility 0.1 are excluded. The SQPNP method is reasonably robust to moderate outliers. If results are poor, a follow-up iteration could further restrict to reliable joints only (arms + torso, exclude ankles).
 
-5. **Sigma schedule vs penalty weights**: The sigma schedule (currently constant 80.0) affects the analytical Gaussian fallback for Hip and Spine joints, as well as the gradient basin width. Phase 1.1 does not sweep sigma -- it sweeps penalty weights only. Phase 1.2 addresses the gradient basin via heatmap blur instead.
+### Risk 3: Per-frame solvePnP produces jittery z values
+Since solvePnP runs independently per frame, the estimated depth may jump between frames.
+
+**Mitigation:** This is exactly what the FK optimization is designed to fix. The root position penalty and rotation penalties will smooth these values during optimization. The key insight from the spec is that we should let the optimizer handle temporal smoothness in camera coordinates.
+
+### Risk 4: The ALL_JOINTS_SMOOTH_WEIGHT removal could increase MPJVE
+The weight is already 0.0 in config, so removing it has zero behavioral effect. This is purely code cleanup.
+
+## Success Criteria
+
+1. Pipeline runs without errors on at least 2 examples
+2. Z values for root joint are in a reasonable range (1-10m) and roughly match ground truth range
+3. MPJVE should be comparable to or better than baseline (the spec says "MPJVE should be improved for ALL test videos")
+4. MPJPE should not regress significantly (small regression is acceptable if MPJVE improves)
+5. Overlay video looks reasonable -- skeleton placement in the scene should be correct

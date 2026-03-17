@@ -253,7 +253,6 @@ def run_optimization(
             rot_per_joint_weights,
             initial_positions_list=initial_positions_t,
             init_anchor_weight=cfg.INIT_ANCHOR_WEIGHT,
-            all_joints_smooth_weight=cfg.ALL_JOINTS_SMOOTH_WEIGHT,
             heatmaps_list=heatmaps_t,
             affine=affine_t,
             use_real_heatmaps=cfg.USE_REAL_HEATMAPS,

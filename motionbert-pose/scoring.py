@@ -205,23 +205,6 @@ def initialization_penalty(
     return (sq_dist * visibility).sum()
 
 
-def motion_penalty_all_joints(
-    positions_prev: torch.Tensor,
-    positions_curr: torch.Tensor,
-) -> torch.Tensor:
-    """Penalize position jumps for ALL joints between consecutive frames.
-
-    Args:
-        positions_prev: (17, 3) previous frame.
-        positions_curr: (17, 3) current frame.
-
-    Returns:
-        Scalar: sum of squared displacements.
-    """
-    diff: torch.Tensor = positions_curr - positions_prev
-    return (diff ** 2).sum()
-
-
 def compute_total_score(
     all_positions: list[torch.Tensor],
     all_projected_2d: list[torch.Tensor],
@@ -233,7 +216,6 @@ def compute_total_score(
     rotation_per_joint_weights: torch.Tensor,
     initial_positions_list: list[torch.Tensor] | None = None,
     init_anchor_weight: float = 0.0,
-    all_joints_smooth_weight: float = 0.0,
     heatmaps_list: list[torch.Tensor] | None = None,
     affine: torch.Tensor | None = None,
     use_real_heatmaps: bool = False,
@@ -241,7 +223,7 @@ def compute_total_score(
     """Compute total score across all frames.
 
     total = sum(heatmap_scores) - pos_w * sum(pos_penalties) - sum(rot_penalties)
-            - anchor_w * sum(init_penalties) - smooth_w * sum(all_joint_penalties)
+            - anchor_w * sum(init_penalties)
 
     Args:
         all_positions: Per-frame (17, 3) 3D positions.
@@ -254,7 +236,6 @@ def compute_total_score(
         rotation_per_joint_weights: (17,) per-joint rotation penalty weights.
         initial_positions_list: Per-frame (17, 3) initial MotionBERT positions (optional).
         init_anchor_weight: Weight for initialization anchor penalty.
-        all_joints_smooth_weight: Weight for all-joint temporal smoothing penalty.
         heatmaps_list: Per-frame (16, 64, 64) Stacked Hourglass heatmaps (optional).
         affine: (2, 3) affine transform from 256-crop to original pixels (optional).
         use_real_heatmaps: If True and heatmaps are provided, sample from real heatmaps.
@@ -268,7 +249,6 @@ def compute_total_score(
     total_pos_penalty: torch.Tensor = torch.tensor(0.0)
     total_rot_penalty: torch.Tensor = torch.tensor(0.0)
     total_anchor_penalty: torch.Tensor = torch.tensor(0.0)
-    total_all_joints_smooth: torch.Tensor = torch.tensor(0.0)
 
     _use_real: bool = (
         use_real_heatmaps
@@ -298,10 +278,6 @@ def compute_total_score(
                 all_local_rots[i - 1], all_local_rots[i],
                 rotation_per_joint_weights,
             )
-            if all_joints_smooth_weight > 0.0:
-                total_all_joints_smooth = total_all_joints_smooth + motion_penalty_all_joints(
-                    all_positions[i - 1], all_positions[i],
-                )
         if initial_positions_list is not None and init_anchor_weight > 0.0:
             total_anchor_penalty = total_anchor_penalty + initialization_penalty(
                 all_positions[i], initial_positions_list[i], visibility_list[i],
@@ -312,7 +288,6 @@ def compute_total_score(
         - position_penalty_weight * total_pos_penalty
         - total_rot_penalty
         - init_anchor_weight * total_anchor_penalty
-        - all_joints_smooth_weight * total_all_joints_smooth
     )
 
     details: dict[str, float] = {
@@ -320,7 +295,6 @@ def compute_total_score(
         "pos_penalty": float(total_pos_penalty.item()),
         "rot_penalty": float(total_rot_penalty.item()),
         "anchor_penalty": float(total_anchor_penalty.item()),
-        "all_joints_smooth": float(total_all_joints_smooth.item()),
         "total": float(total_score.item()),
     }
     return total_score, details

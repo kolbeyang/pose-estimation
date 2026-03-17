@@ -1,43 +1,48 @@
-# Tester Plan P1-00: Parameter Sweep Verification
+# Tester Plan: Phase 1, Iteration 0 -- solvePnP + Remove ALL_JOINTS_SMOOTH_WEIGHT
 
-## Test Items
+**Date:** 2026-03-17
+**Spec:** Phase 1 of `claude-team/specs/motion-bert-round-5.md`
+**Developer Report:** `claude-team/logs/DEVELOPER_REPORT_P1_00.md`
 
-### T1: Verify test_single.py displays new 2D-vs-Det metric
-- **What**: Run `test_single.py` and confirm it prints `Det 2D-vs-Det` and `Opt 2D-vs-Det` lines
-- **How**: `cd motionbert-pose && uv run python test_single.py 0` -- check stdout for the new metric lines
-- **Pass criteria**: Both `Det 2D-vs-Det: XX.X px` and `Opt 2D-vs-Det: XX.X px` appear in output
+## What to Test
 
-### T2: Verify sweep results JSON exists and is well-formed
-- **What**: Check `training_runs/sweep_results/sweep_171204_pose1_sample_0.json` for completeness
-- **How**: Read the file, verify all 20 configs present, all required fields non-null
-- **Pass criteria**: 20 entries, each with `config`, `det_mpjpe_cm`, `opt_mpjpe_cm`, `improvement_cm`, `opt_p_mpjpe_cm`, `det_2d_det_mpjpe_px`, `opt_2d_det_mpjpe_px`, `opt_mpjve_cm`
+### T1: ALL_JOINTS_SMOOTH_WEIGHT fully removed
+- Verify no references in `config.py`, `scoring.py`, `optimize.py`
+- Verify `motion_penalty_all_joints()` function removed from `scoring.py`
+- Grep entire motionbert-pose/ for stale references
 
-### T3: Verify det_2d_det_mpjpe_px is constant across configs
-- **What**: The detector baseline 2D-vs-Det metric should be identical for all configs (detector doesn't change)
-- **How**: Check that all `det_2d_det_mpjpe_px` values in the JSON are the same
-- **Pass criteria**: All values equal
+### T2: solvePnP implementation code review
+- Code review `detect.py` solvePnP implementation
+- Verify camera matrix K constructed correctly
+- Verify visibility filtering logic
+- Verify fallback path for <4 visible joints or solvePnP failure
+- Verify safety check on root Z range
 
-### T4: Code review -- evaluate.py new metric correctness
-- **What**: Review `reprojection_error_vs_detections()` for correctness
-- **How**: Read code, verify it projects 3D->2D via camera and compares to SH detections (not GT)
-- **Pass criteria**: Uses `camera.world_to_image()` on `positions_3d`, compares to `detections_2d`, visibility masking works
+### T3: Smoke test -- run example 0 end-to-end
+- Run `process_example()` for example 0 (171204_pose1_sample_0, 100 frames)
+- Confirm no errors, predictions JSON produced
 
-### T5: Code review -- sweep.py config restoration
-- **What**: Verify sweep.py properly restores cfg values after each run
-- **How**: Read try/finally block in `run_sweep_config()`
-- **Pass criteria**: All overridden config values are saved and restored in finally block
+### T4: Z-value trajectory analysis
+- Load prediction JSON for example 0
+- Extract root Z values across frames for detection and optimized
+- Check range (should be 1-10m), check smoothness (frame-to-frame std dev)
+- Compare against GT root Z
 
-### T6: Verify sweep.py can import without errors
-- **How**: `cd motionbert-pose && uv run python -c "from sweep import get_phase1_1_configs; configs = get_phase1_1_configs(); print(f'{len(configs)} configs')"`
-- **Pass criteria**: Prints "20 configs" with no errors
+### T5: MPJPE comparison vs round-4 baseline
+- Cross-check developer's reported numbers against actual JSON output
+- Round-4: Ex 0 Det 30.98, Opt 30.44; Ex 5 Det 15.85, Opt 15.44
 
-### T7: Analyze sweep results for Phase 1.1 goals
-- **What**: Evaluate whether the coarse-to-fine parameter tuning produced actionable insights
-- **How**: Analyze the JSON data for trends across parameter sweeps
-- **Pass criteria**: Results are documented with clear interpretation
+### T6: MPJVE comparison -- critical spec requirement
+- Spec requires MPJVE improvement for ALL test videos
+- Round-4: Ex 0 Det MPJVE 0.94, Opt MPJVE 1.05; Ex 5 Det MPJVE 0.51, Opt MPJVE 0.48
+
+### T7: Verify developer claim -- solvePnP produced WORSE results
+- Independent verification by loading prediction JSONs and recomputing metrics
+
+### T8: Unused function removal verification
+- Verify `_enforce_bone_lengths_with_2d()` and `_reconstruct_from_2d()` removed from detect.py
 
 ## Regression Checks
-
-### R1: main.py still imports and has the new metric wired
-- **How**: `cd motionbert-pose && uv run python -c "from main import process_example; print('OK')"`
-- **Pass criteria**: No import errors
+- Pipeline still runs end-to-end without errors
+- `scoring.py` functions work without the removed parameter
+- No import errors from removed functions

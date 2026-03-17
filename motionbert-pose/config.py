@@ -114,9 +114,6 @@ FK_TARGET_CONF_THRESHOLD: float = 0.1
 # Prevents optimizer from drifting away from MotionBERT predictions.
 INIT_ANCHOR_WEIGHT: float = 5.0
 
-# Weight for all-joint temporal smoothing penalty.
-ALL_JOINTS_SMOOTH_WEIGHT: float = 0.0
-
 # TODO: remove this and all associated functionality, unneeded complexity, we should ALWAYS use real heatmaps
 # Use real Stacked Hourglass heatmaps for optimization scoring.
 # When True, the optimizer samples from the actual (16, 64, 64) heatmaps

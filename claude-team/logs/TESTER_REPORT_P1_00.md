@@ -1,102 +1,150 @@
-# Tester Report P1-00: Parameter Sweep Verification
+# Tester Report: Phase 1, Iteration 0 -- solvePnP + Remove ALL_JOINTS_SMOOTH_WEIGHT
+
+**Date:** 2026-03-17
+**Spec:** Phase 1 of `claude-team/specs/motion-bert-round-5.md`
+**Developer Report:** `claude-team/logs/DEVELOPER_REPORT_P1_00.md`
 
 ## Tests Run
 
-### T1: test_single.py displays new 2D-vs-Det metric -- PASS
-- **Command**: `cd motionbert-pose && uv run python test_single.py 0`
-- **Result**: Output contains both lines:
-  ```
-  Det 2D-vs-Det: 38.1 px
-  Opt 2D-vs-Det: 33.8 px
-  ```
-- Values match sweep baseline (38.06 and 33.78 px in JSON, rounded to 38.1 and 33.8).
+### T1: ALL_JOINTS_SMOOTH_WEIGHT fully removed -- PARTIAL FAIL
 
-### T2: Sweep results JSON well-formed -- PASS
-- **File**: `motionbert-pose/training_runs/sweep_results/sweep_171204_pose1_sample_0.json`
-- **Result**: 20 entries present. All required fields (`config`, `det_mpjpe_cm`, `opt_mpjpe_cm`, `improvement_cm`, `opt_p_mpjpe_cm`, `det_2d_det_mpjpe_px`, `opt_2d_det_mpjpe_px`, `opt_mpjve_cm`) are non-null for all entries.
+- **config.py**: No references found. PASS.
+- **scoring.py**: No references to `ALL_JOINTS_SMOOTH_WEIGHT` or `motion_penalty_all_joints`. PASS.
+- **optimize.py**: No references. PASS.
+- **sweep.py**: 3 stale references found at lines 40, 163, 170, 223, and 399:
+  - Line 40: `SweepConfig.all_joints_smooth_weight: float = 0.0`
+  - Line 163: `orig_smooth = cfg.ALL_JOINTS_SMOOTH_WEIGHT` -- will throw `AttributeError` at runtime
+  - Line 170: `cfg.ALL_JOINTS_SMOOTH_WEIGHT = config.all_joints_smooth_weight` -- will throw `AttributeError`
+  - Line 223: `cfg.ALL_JOINTS_SMOOTH_WEIGHT = orig_smooth` -- will throw `AttributeError`
+  - Line 399: display string referencing the field
 
-### T3: det_2d_det_mpjpe_px constant across configs -- PASS
-- All 20 entries have `det_2d_det_mpjpe_px` = 38.059 px (identical to 15 decimal places).
-- This is correct: the detector baseline does not change across sweep configs.
+**Result**: The removal was done in the three core files but `sweep.py` was missed. Running `sweep.py` will crash.
 
-### T4: Code review -- reprojection_error_vs_detections() -- PASS
-- Correctly uses `camera.world_to_image(positions_3d[i])` to project 3D predictions to 2D.
-- Compares against `detections_2d[i]` (SH keypoints), NOT GT projections. This is the correct metric per the spec.
-- Visibility masking at threshold 0.5 correctly excludes low-confidence joints.
-- Edge case: if no joints are visible for a frame, appends 0.0 (not NaN). Acceptable behavior.
+### T2: solvePnP implementation code review -- PASS
 
-### T5: Code review -- sweep.py config restoration -- PASS
-- `run_sweep_config()` saves all 6 config fields before modification and restores them in a `finally` block.
-- `ROTATION_PENALTY_PER_JOINT` is saved via `.copy()` (numpy array), preventing aliasing bugs.
+Reviewed `detect.py` lines 582-722. The implementation follows the architect's plan exactly:
+- Camera matrix K is correctly constructed as `[[fx,0,cx],[0,fy,cy],[0,0,1]]`
+- Visibility filtering: joints with `norm(kp_2d) > 1.0` AND `visibility > 0.1`
+- Requires >= 4 valid joints for solvePnP, otherwise fallback
+- Uses `cv2.SOLVEPNP_SQPNP` (correct choice for general PnP)
+- Safety check: root Z must be in (0.5, 15.0)m, otherwise fallback
+- Fallback uses person-height depth heuristic (thorax-to-ankle pixel height)
+- Bone-length enforcement applied post-solvePnP (max_ratio=1.3)
 
-### T6: sweep.py import -- PASS
-- **Command**: `uv run python -c "from sweep import get_phase1_1_configs; configs = get_phase1_1_configs(); print(f'{len(configs)} configs')"`
-- **Result**: `20 configs`
+No correctness issues found in the code itself. The code is well-structured.
 
-### R1: main.py import regression -- PASS
-- **Command**: `uv run python -c "from main import process_example; print('OK')"`
-- **Result**: `OK`
+### T3: Smoke test -- PASS
+
+Developer's predictions exist at:
+- `motionbert-pose/training_runs/p1-solvepnp-test/predictions/171204_pose1_sample_0.json`
+- `motionbert-pose/training_runs/p1-solvepnp-test/predictions/171204_pose3_4000.json`
+
+Both contain valid metrics and per-frame data. `main.py` imports without errors.
+
+### T4: Z-value trajectory analysis -- FAIL (critical finding)
+
+**Example 0 (171204_pose1_sample_0):**
+| Metric | Detection | Optimized | Ground Truth |
+|--------|-----------|-----------|--------------|
+| Root Z mean | 2.285 m | 2.294 m | 2.588 m |
+| Root Z std | 0.147 m | 0.128 m | 0.016 m |
+| Root Z range | 1.44 - 2.45 m | 1.56 - 2.40 m | 2.57 - 2.63 m |
+| Z velocity std | 0.1067 m/f | 0.0756 m/f | 0.0033 m/f |
+| Z velocity max | 0.898 m/f | 0.638 m/f | 0.018 m/f |
+| Mean |Z error| | 30.28 cm | 29.34 cm | -- |
+
+**Problems:**
+1. Root Z is systematically ~30cm too shallow (2.29 vs 2.59m GT)
+2. Z velocity std is 23x ground truth (0.076 vs 0.003 m/f) -- extremely jittery
+3. Max Z velocity is 0.64 m/f optimized (0.90 m/f detection) vs 0.018 m/f GT -- nearly 1m frame-to-frame jumps
+4. Visual inspection of Hip_Z.png shows a catastrophic ~1m Z drop around frames 40-45 (person extends arms)
+
+**Example 5 (171204_pose3_4000):**
+| Metric | Detection | Optimized | Ground Truth |
+|--------|-----------|-----------|--------------|
+| Root Z mean | 2.307 m | 2.301 m | 2.405 m |
+| Root Z std | 0.016 m | 0.009 m | 0.003 m |
+| Z velocity std | 0.0112 m/f | 0.0022 m/f | 0.0012 m/f |
+| Mean |Z error| | 9.73 cm | 10.40 cm | -- |
+
+Example 5 is much better -- Z std is only 3x GT (vs 23x for Example 0). The optimizer does successfully smooth Z here. However, there is still a systematic 10cm depth bias.
+
+### T5: MPJPE comparison vs round-4 baseline -- CONFIRMED REGRESSION
+
+| Metric | Ex 0 Round-4 | Ex 0 Round-5 | Ex 5 Round-4 | Ex 5 Round-5 |
+|--------|-------------|-------------|-------------|-------------|
+| Det MPJPE (cm) | 30.98 | 34.72 | 15.85 | 18.26 |
+| Opt MPJPE (cm) | 30.44 | 34.12 | 15.44 | 18.65 |
+| Det P-MPJPE (cm) | 28.57 | 28.57 | 20.33 | 20.33 |
+| Opt P-MPJPE (cm) | 28.42 | 28.30 | 20.22 | 20.52 |
+
+MPJPE regressed by 3.7 cm (ex 0) and 3.2 cm (ex 5). P-MPJPE is unchanged -- this confirms the regression is purely a global depth/translation issue, not a pose shape issue.
+
+### T6: MPJVE comparison -- FAIL (spec requirement not met)
+
+| Metric | Ex 0 Round-4 | Ex 0 Round-5 | Ex 5 Round-4 | Ex 5 Round-5 |
+|--------|-------------|-------------|-------------|-------------|
+| Det MPJVE (cm/f) | 0.94 | 3.69 | 0.51 | 0.93 |
+| Opt MPJVE (cm/f) | 1.05 | 3.38 | 0.48 | 0.54 |
+
+**MPJVE is significantly worse for both examples.**
+- Example 0 Det MPJVE: 0.94 -> 3.69 (3.9x worse)
+- Example 0 Opt MPJVE: 1.05 -> 3.38 (3.2x worse)
+- Example 5 Det MPJVE: 0.51 -> 0.93 (1.8x worse)
+- Example 5 Opt MPJVE: 0.48 -> 0.54 (1.1x worse)
+
+The spec explicitly requires "MPJVE should be improved for ALL test videos." This requirement is not met for either example.
+
+### T7: Developer claim verification -- CONFIRMED
+
+The developer reported that solvePnP produced worse MPJPE and MPJVE. My independent analysis of the prediction JSONs confirms the exact same numbers. The developer's report is accurate.
+
+### T8: Heatmap/overlay video frame analysis -- PASS (informational)
+
+Extracted frames 0 and 41 from the overlay video for Example 0:
+- Frame 0: Skeletons project onto the person reasonably. Green/red/blue all roughly aligned on the torso; arm estimation has notable errors.
+- Frame 41: Person has arms outstretched. Detector and optimized skeletons show significant arm projection errors. This correlates with the catastrophic Z drop visible in the Hip_Z trajectory plot -- solvePnP produces a bad depth estimate when the pose is unusual.
+
+Artifacts saved to:
+- `/Users/kolbeyang/Documents/School/spring_2026/capstone/pose-estimation/artifacts/overlay_frame_ex0_f0.png`
+- `/Users/kolbeyang/Documents/School/spring_2026/capstone/pose-estimation/artifacts/overlay_frame_ex0_f41.png`
 
 ## Bugs Found
 
-None. All code is correct and functional.
+### BUG-1: sweep.py crashes due to stale ALL_JOINTS_SMOOTH_WEIGHT references (Severity: Medium)
+- **Description:** `sweep.py` lines 163, 170, 223 reference `cfg.ALL_JOINTS_SMOOTH_WEIGHT` which was removed from `config.py`. Calling `run_sweep_config()` will throw `AttributeError`.
+- **How observed:** Grep of entire `motionbert-pose/` for `ALL_JOINTS_SMOOTH`.
+- **Severity:** Medium -- sweep is not part of the main pipeline but is a development tool that will crash if used.
+- **Fix direction:** Remove the `all_joints_smooth_weight` field from `SweepConfig`, and remove lines 163, 170, 223 from `run_sweep_config()`. Remove the display reference at line 399.
+
+### BUG-2: solvePnP produces worse MPJPE and MPJVE than the previous pairwise method (Severity: HIGH -- blocks spec)
+- **Description:** solvePnP's per-frame independent depth estimation produces noisier Z values than the old pairwise separation method. Example 0 shows a catastrophic ~1m Z drop around frame 40-45 and MPJVE degrades 3.2x. Both tested examples show worse MPJPE (3-4cm regression) and worse MPJVE.
+- **How observed:** Z trajectory analysis (T4), MPJVE comparison (T6).
+- **Severity:** HIGH -- the spec requires MPJVE improvement for ALL test videos, and this change makes it significantly worse.
+- **Root cause analysis:** solvePnP runs independently per frame with no temporal context. The old pairwise method, while theoretically less principled, was more stable because it estimated depth from multiple joint pair ratios with IQR filtering. solvePnP is sensitive to the exact 2D-3D correspondences and can produce large depth errors when the pose changes (e.g., arm extension at frame 40-45).
+- **Contributing factor:** The ~20-degree rotation from solvePnP suggests MotionBERT's coordinate frame is not perfectly camera-aligned. The rotation correction may be introducing additional noise.
+- **Fix direction options (for architect):**
+  1. Restrict solvePnP to translation-only (fix rotation to identity) since MotionBERT output is already approximately camera-aligned
+  2. Apply temporal median filtering to solvePnP depth estimates before optimization
+  3. Revert to the pairwise method and address smoothing through other means
+  4. Use solvePnP depth as an additional optimization constraint rather than as initialization
 
 ## Code Review Findings
 
-### CR-1: Sweep uses `improved_target_2d` as the "detections" reference (Minor, not a bug)
-The 2D-vs-Det metric compares against `improved_target_2d`, which is SH keypoints for high-confidence joints but MotionBERT-projected 2D for low-confidence joints (below `FK_TARGET_CONF_THRESHOLD`). This means the metric is not purely "distance from SH detections" -- for low-confidence joints, it measures distance from the MotionBERT projection (which is also the optimization's initial target for those joints). This is **consistent** with how the optimization target works, so it's a reasonable choice, but the user should be aware that this is not a pure "SH 2D distance" metric.
+### CR-1: solvePnP allows full rotation, which may be unnecessary (Minor/Informational)
+The architect's plan noted the ~20-degree rotation as a risk. MotionBERT is trained on H3.6M camera-space data, so the output should already be roughly camera-aligned. Allowing solvePnP to estimate rotation may be adding noise rather than correcting misalignment. A translation-only variant (fixing R=I) might produce more stable results.
 
-### CR-2: MPJVE not printed in sweep table (Minor)
-The sweep summary table header includes only MPJPE, P-MPJPE, and 2D-vs-Det columns. MPJVE is saved to JSON (`opt_mpjve_cm`) but not printed in the console table. The spec lists MPVPE (velocity error) as a required test metric. Data is captured in JSON, so this is a display-only gap.
-
-## Phase 1.1 Results Analysis
-
-### Sweep Data Summary (20-step configs)
-
-| Parameter | Range Tested | Opt MPJPE Range (cm) | Effect |
-|-----------|-------------|---------------------|--------|
-| pos_w | 0 -- 5000 | 30.39 -- 30.45 | 0.06 cm spread |
-| rot_s | 0 -- 1000 | 30.39 -- 30.45 | 0.06 cm spread |
-| anchor | 0 -- 500 | 30.43 -- 30.55 | 0.12 cm spread |
-| heatmap_only | all=0 | 30.44 | Same as baseline |
-| all_low | 0.5/0.1/0.05 | 30.44 | Same as baseline |
-
-### Key Finding: Penalties are irrelevant at 20 steps
-At 20 optimization steps, every parameter configuration produces nearly the same result (30.39--30.55 cm). The maximum spread is 0.16 cm. Even `heatmap_only` (all penalties = 0) matches the baseline. **This means 20 steps is insufficient for penalty terms to meaningfully influence the optimization trajectory.**
-
-### Key Finding: More steps improve 2D fit but hurt 3D accuracy
-
-| Config | Steps | Opt MPJPE (cm) | Opt P-MPJPE (cm) | Opt 2D-vs-Det (px) | MPJVE (cm/f) |
-|--------|-------|----------------|-------------------|---------------------|--------------|
-| baseline | 20 | 30.44 | 28.42 | 33.8 | 1.05 |
-| baseline_100steps | 100 | 31.10 | 28.30 | 28.2 | 1.36 |
-| all_low_100steps | 100 | 31.42 | 28.29 | 27.2 | 1.84 |
-
-At 100 steps:
-- **3D MPJPE gets WORSE** (+0.66 to +0.98 cm)
-- **2D alignment gets BETTER** (-5.6 to -6.6 px)
-- **P-MPJPE slightly improves** (-0.12 to -0.13 cm) -- the pose shape is better, just worse positioned
-- **MPJVE gets WORSE** (+0.31 to +0.79 cm/f) -- temporal jitter increases significantly
-
-This is the classic depth-ambiguity problem: the optimizer fits 2D detections well but sacrifices depth accuracy. Low penalties (`all_low_100steps`) exacerbate this -- without regularization, the optimizer overfits to noisy 2D targets, causing both worse absolute 3D error AND worse temporal smoothness.
-
-### Phase 1.1 Goal Assessment
-**Goal: Coarse-to-fine parameter tuning to understand how parameters affect output.**
-- **Met**: The sweep comprehensively demonstrated that penalty weights have negligible effect at 20 steps, and that increasing steps creates a 2D-vs-3D accuracy tradeoff.
-- **Actionable insight**: The core problem is not penalty weight tuning -- it's that heatmap-based optimization inherently sacrifices depth for 2D alignment. More steps = better 2D fit but worse depth.
-
-## Recommendations for Phase 1.2 (Heatmap Blur)
-
-1. **Heatmap blur should be tested at moderate step counts (50-100 steps)**. At 20 steps nothing matters. The interesting regime is where optimization has enough steps to move but needs a wider gradient basin.
-
-2. **Blur may help the 2D-3D tradeoff**. The hypothesis is that blurred heatmaps provide gentler gradients that guide joints toward the right region without demanding pixel-perfect 2D alignment. This could reduce the "overfitting to noisy 2D" problem seen at 100 steps.
-
-3. **Include MPJVE in the sweep console output**. The velocity error is critical for understanding temporal stability and is already saved in JSON. The 100-step results show dramatically worse MPJVE (1.84 vs 1.05 cm/f), which is important context.
-
-4. **Test blur sigma values of 1, 2, 4, 8 at both 50 and 100 steps**. The architect's plan already includes this. Prioritize the 50-step + blur={2,4} regime as the most likely sweet spot.
-
-5. **Consider a depth regularization strategy**. The data shows the fundamental issue: optimizing toward 2D heatmaps hurts depth. Phase 1.2 blur alone may not solve this. If blur helps 2D alignment without hurting 3D as much, that's a win. If not, a depth-preserving constraint (e.g., penalizing Z deviation from MotionBERT's depth estimate) may be needed.
+### CR-2: No temporal filtering of solvePnP output (Informational)
+The architect's Risk 3 acknowledged that per-frame solvePnP would produce jittery Z values and noted that the optimizer should handle smoothing. However, the data shows the optimizer cannot fully compensate -- Example 0 still has 0.638 m/f max Z velocity after optimization vs 0.018 m/f for GT. A temporal filter (e.g., median over a small window) on the solvePnP output before optimization could help.
 
 ## Verdict
 
-**YES** -- Phase 1.1 goals are met. The sweep infrastructure works correctly, the new 2D-vs-detection metric is properly implemented, and the results provide clear, actionable insights. The code is clean, correctly restores config state, and saves all required metrics. Ready to proceed to Phase 1.2 (heatmap blur).
+**NO** -- Phase 1 goals are NOT met.
+
+1. **ALL_JOINTS_SMOOTH_WEIGHT removal**: Partially done. Core files are clean, but `sweep.py` has 3 stale references that will crash at runtime. (BUG-1)
+
+2. **solvePnP for depth estimation**: Implemented correctly per the architect's plan, but produces significantly worse results than the previous method. MPJPE regressed 3-4cm on both examples. MPJVE regressed 3.2x on Example 0. (BUG-2)
+
+3. **MPJVE improvement requirement**: The spec explicitly requires "MPJVE should be improved for ALL test videos." Both tested examples show WORSE MPJVE. This is a blocking failure.
+
+The developer followed the architect's plan faithfully. The issue is that solvePnP is fundamentally noisier per-frame than the old pairwise method for this application. The next iteration should either add temporal stabilization to solvePnP output or consider a hybrid approach.
