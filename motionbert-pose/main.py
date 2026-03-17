@@ -42,7 +42,7 @@ from panoptic import (
     load_ground_truth_sequence,
     world_to_camera,
 )
-from skeleton import JOINT_NAMES, EVAL_JOINT_NAMES, NUM_JOINTS
+from skeleton import JOINT_NAMES, EVAL_JOINT_NAMES
 
 
 def _example_name(seq: str, start: int) -> str:
@@ -167,9 +167,9 @@ def process_example(
     # --- 4. Convert to camera coordinates ---
     print("\n  [4/5] Converting to camera coordinates...")
     scale: float = cs_params["scale"]
+    dist_coeffs: np.ndarray | None = cam_calib.get("distCoef")
     det_cam_positions: list[np.ndarray] = []
     for i in range(len(frames_rgb)):
-        dist_coeffs: np.ndarray | None = cam_calib.get("distCoef")
         pos_cam: np.ndarray = motionbert_to_camera_space(
             positions_3d_norm[i], kp_2d[i], scale, fx, fy, cx, cy,
             dist_coeffs=dist_coeffs,
@@ -206,23 +206,12 @@ def process_example(
     # --- 5. Optimize (Phase 2) ---
     print(f"\n  [5/7] Running FK optimization...")
 
-    # For joints where Stacked Hourglass is unreliable (below confidence threshold),
-    # use MotionBERT's projected 2D as the optimization target instead of garbage 2D.
-    improved_target_2d: list[np.ndarray] = []
-    for i in range(len(frames_rgb)):
-        target: np.ndarray = kp_2d[i].copy()
-        mb_projected: np.ndarray = camera.world_to_image(det_cam_positions[i])
-        for j in range(NUM_JOINTS):
-            if visibility[i][j] < cfg.FK_TARGET_CONF_THRESHOLD:
-                target[j] = mb_projected[j]
-        improved_target_2d.append(target)
-
     optimized_3d: list[np.ndarray]
     bone_lengths_final: np.ndarray
     loss_history: list[float]
     optimized_3d, bone_lengths_final, loss_history = run_optimization(
         initial_positions_cam=det_cam_positions,
-        target_2d=improved_target_2d,
+        target_2d=kp_2d,
         visibility=visibility,
         camera=camera,
         heatmaps=heatmaps,
@@ -236,7 +225,7 @@ def process_example(
         optimized_3d=optimized_3d,
         gt_3d=gt_cam,
         camera=camera,
-        detections_2d=improved_target_2d,
+        detections_2d=kp_2d,
         visibility=visibility,
     )
     metrics["name"] = name

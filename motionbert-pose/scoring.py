@@ -1,10 +1,10 @@
 """Scoring functions for FK optimization.
 
-Supports both analytical Gaussian scoring and real Stacked Hourglass heatmap
-sampling. When USE_REAL_HEATMAPS is enabled, the optimizer samples directly
-from the (16, 64, 64) heatmaps produced by Stacked Hourglass, preserving
-the spatial uncertainty encoded in the heatmaps rather than collapsing to
-point estimates.
+Always uses real Stacked Hourglass heatmap sampling when heatmaps and affine
+are available. The optimizer samples directly from the (16, 64, 64) heatmaps
+produced by Stacked Hourglass, preserving the spatial uncertainty encoded in
+the heatmaps. For joints without a dedicated MPII heatmap (Hip, Spine), falls
+back to analytical Gaussian scoring.
 """
 
 import torch
@@ -218,7 +218,6 @@ def compute_total_score(
     init_anchor_weight: float = 0.0,
     heatmaps_list: list[torch.Tensor] | None = None,
     affine: torch.Tensor | None = None,
-    use_real_heatmaps: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Compute total score across all frames.
 
@@ -238,7 +237,6 @@ def compute_total_score(
         init_anchor_weight: Weight for initialization anchor penalty.
         heatmaps_list: Per-frame (16, 64, 64) Stacked Hourglass heatmaps (optional).
         affine: (2, 3) affine transform from 256-crop to original pixels (optional).
-        use_real_heatmaps: If True and heatmaps are provided, sample from real heatmaps.
 
     Returns:
         (total_score, details_dict)
@@ -251,8 +249,7 @@ def compute_total_score(
     total_anchor_penalty: torch.Tensor = torch.tensor(0.0)
 
     _use_real: bool = (
-        use_real_heatmaps
-        and heatmaps_list is not None
+        heatmaps_list is not None
         and affine is not None
     )
 

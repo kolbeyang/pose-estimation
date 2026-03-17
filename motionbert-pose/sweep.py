@@ -6,9 +6,8 @@ Reports MPJPE, P-MPJPE, MPJVE, and 2D-vs-detection reprojection error.
 
 import json
 import os
-import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -37,18 +36,15 @@ class SweepConfig:
     position_penalty_weight: float = 50.0
     rotation_penalty_scalar: float = 10.0
     init_anchor_weight: float = 5.0
-    all_joints_smooth_weight: float = 0.0
-    sigma_schedule: list[tuple[float, float]] = field(
-        default_factory=lambda: [(1.0, 80.0)]
-    )
-    heatmap_blur_sigma: float = 0.0  # Fixed blur (applied before optimization)
+    heatmap_blur_sigma: float = 0.0  # Fixed blur (applied inside run_optimization via cfg override)
     heatmap_blur_schedule: list[tuple[float, float]] | None = None  # Coarse-to-fine blur
 
 
 # Per-joint rotation multipliers (same as config.py)
 _ROT_MULTIPLIERS: list[float] = [
-    3.0, 1.0, 0.5, 0.2, 1.0, 0.5, 0.2,
-    1.0, 1.0, 0.5, 0.5, 0.5, 0.3, 0.1, 0.5, 0.3, 0.1,
+    3.0, 1.0, 0.5, 0.2, 1.0, 0.5, 0.2,  # Hip, RHip, RKnee, RAnkle, LHip, LKnee, LAnkle
+    1.0, 1.0, 0.5,                         # Spine, Thorax, Neck
+    0.5, 0.3, 0.1, 0.5, 0.3, 0.1,         # LShoulder, LElbow, LWrist, RShoulder, RElbow, RWrist
 ]
 
 
@@ -96,35 +92,19 @@ def load_example(example_idx: int = 0) -> dict[str, Any]:
         detect_poses(frames_rgb)
     )
 
-    # 4. Camera-space conversion
+    # 4. Camera-space conversion (per-frame pairwise depth estimation)
     scale = cs_params["scale"]
+    dist_coeffs = cam_calib.get("distCoef")
     det_cam_positions: list[np.ndarray] = []
     for i in range(len(frames_rgb)):
-        dist_coeffs = cam_calib.get("distCoef")
         pos_cam = motionbert_to_camera_space(
-            positions_3d_norm[i],
-            kp_2d[i],
-            scale,
-            fx,
-            fy,
-            cx,
-            cy,
+            positions_3d_norm[i], kp_2d[i], scale, fx, fy, cx, cy,
             dist_coeffs=dist_coeffs,
             visibility=visibility[i],
         )
         det_cam_positions.append(pos_cam)
 
-    # 5. Build improved 2D targets
-    improved_target_2d: list[np.ndarray] = []
-    for i in range(len(frames_rgb)):
-        target = kp_2d[i].copy()
-        mb_projected = camera.world_to_image(det_cam_positions[i])
-        for j in range(17):
-            if visibility[i][j] < cfg.FK_TARGET_CONF_THRESHOLD:
-                target[j] = mb_projected[j]
-        improved_target_2d.append(target)
-
-    # 6. Ground truth
+    # 5. Ground truth
     gt_world = load_ground_truth_sequence(seq_dir, frame_indices, person_idx)
     gt_cam: list[np.ndarray | None] = []
     for gt in gt_world:
@@ -138,10 +118,10 @@ def load_example(example_idx: int = 0) -> dict[str, Any]:
         "camera": camera,
         "det_cam_positions": det_cam_positions,
         "kp_2d": kp_2d,
+        "target_2d": kp_2d,
         "visibility": visibility,
         "heatmaps": heatmaps,
         "affine": affine,
-        "improved_target_2d": improved_target_2d,
         "gt_cam": gt_cam,
         "frames_rgb": frames_rgb,
         "frame_indices": frame_indices,
@@ -160,15 +140,13 @@ def run_sweep_config(data: dict[str, Any], config: SweepConfig) -> dict[str, Any
     orig_rot_scalar = cfg.ROTATION_PENALTY_SCALAR
     orig_rot_per_joint = cfg.ROTATION_PENALTY_PER_JOINT.copy()
     orig_anchor = cfg.INIT_ANCHOR_WEIGHT
-    orig_smooth = cfg.ALL_JOINTS_SMOOTH_WEIGHT
-    orig_sigma_schedule = cfg.SIGMA_SCHEDULE
+    orig_blur_sigma = cfg.HEATMAP_BLUR_SIGMA
 
     try:
         cfg.POSITION_PENALTY_WEIGHT = config.position_penalty_weight
         cfg.ROTATION_PENALTY_SCALAR = config.rotation_penalty_scalar
         cfg.INIT_ANCHOR_WEIGHT = config.init_anchor_weight
-        cfg.ALL_JOINTS_SMOOTH_WEIGHT = config.all_joints_smooth_weight
-        cfg.SIGMA_SCHEDULE = config.sigma_schedule
+        cfg.HEATMAP_BLUR_SIGMA = config.heatmap_blur_sigma
 
         # Rebuild per-joint rotation weights with new scalar
         cfg.ROTATION_PENALTY_PER_JOINT = np.array(
@@ -176,29 +154,13 @@ def run_sweep_config(data: dict[str, Any], config: SweepConfig) -> dict[str, Any
             dtype=np.float64,
         )
 
-        # Optionally blur heatmaps (fixed, pre-optimization)
-        heatmaps = data["heatmaps"]
-        if config.heatmap_blur_sigma > 0 and config.heatmap_blur_schedule is None:
-            # Fixed blur only if no dynamic schedule
-            import scipy.ndimage
-
-            heatmaps = [
-                np.stack(
-                    [
-                        scipy.ndimage.gaussian_filter(hm[c], sigma=config.heatmap_blur_sigma)
-                        for c in range(hm.shape[0])
-                    ]
-                )
-                for hm in heatmaps
-            ]
-
         optimized_3d, bone_lengths_final, loss_history = run_optimization(
             initial_positions_cam=data["det_cam_positions"],
-            target_2d=data["improved_target_2d"],
+            target_2d=data["target_2d"],
             visibility=data["visibility"],
             camera=data["camera"],
             num_steps=config.num_steps,
-            heatmaps=heatmaps,
+            heatmaps=data["heatmaps"],
             affine=data["affine"],
             heatmap_blur_schedule=config.heatmap_blur_schedule,
         )
@@ -208,7 +170,7 @@ def run_sweep_config(data: dict[str, Any], config: SweepConfig) -> dict[str, Any
             optimized_3d=optimized_3d,
             gt_3d=data["gt_cam"],
             camera=data["camera"],
-            detections_2d=data["improved_target_2d"],
+            detections_2d=data["target_2d"],
             visibility=data["visibility"],
         )
         metrics["loss_history"] = loss_history
@@ -220,8 +182,7 @@ def run_sweep_config(data: dict[str, Any], config: SweepConfig) -> dict[str, Any
         cfg.ROTATION_PENALTY_SCALAR = orig_rot_scalar
         cfg.ROTATION_PENALTY_PER_JOINT = orig_rot_per_joint
         cfg.INIT_ANCHOR_WEIGHT = orig_anchor
-        cfg.ALL_JOINTS_SMOOTH_WEIGHT = orig_smooth
-        cfg.SIGMA_SCHEDULE = orig_sigma_schedule
+        cfg.HEATMAP_BLUR_SIGMA = orig_blur_sigma
 
 
 def get_phase1_1_configs() -> list[SweepConfig]:
@@ -293,18 +254,16 @@ def get_phase1_2_configs() -> list[SweepConfig]:
     configs: list[SweepConfig] = []
 
     # Common penalty settings (baseline -- Phase 1.1 showed these don't matter much)
-    base = dict(
-        position_penalty_weight=50.0,
-        rotation_penalty_scalar=10.0,
-        init_anchor_weight=5.0,
-    )
+    pw = 50.0
+    rs = 10.0
+    aw = 5.0
 
     # --- Baseline (no blur) at multiple step counts ---
     for steps in [20, 50, 100]:
         configs.append(SweepConfig(
             name=f"no_blur_{steps}s",
             num_steps=steps,
-            **base,
+            position_penalty_weight=pw, rotation_penalty_scalar=rs, init_anchor_weight=aw,
         ))
 
     # --- Fixed blur sweep at 50 steps ---
@@ -313,7 +272,7 @@ def get_phase1_2_configs() -> list[SweepConfig]:
             name=f"blur{sigma:.0f}_{50}s",
             num_steps=50,
             heatmap_blur_sigma=sigma,
-            **base,
+            position_penalty_weight=pw, rotation_penalty_scalar=rs, init_anchor_weight=aw,
         ))
 
     # --- Fixed blur sweep at 100 steps ---
@@ -322,7 +281,7 @@ def get_phase1_2_configs() -> list[SweepConfig]:
             name=f"blur{sigma:.0f}_{100}s",
             num_steps=100,
             heatmap_blur_sigma=sigma,
-            **base,
+            position_penalty_weight=pw, rotation_penalty_scalar=rs, init_anchor_weight=aw,
         ))
 
     # --- Coarse-to-fine blur schedules at 100 steps ---
@@ -330,25 +289,25 @@ def get_phase1_2_configs() -> list[SweepConfig]:
         name="c2f_8to0_100s",
         num_steps=100,
         heatmap_blur_schedule=[(0.3, 8.0), (0.7, 4.0), (1.0, 0.0)],
-        **base,
+        position_penalty_weight=pw, rotation_penalty_scalar=rs, init_anchor_weight=aw,
     ))
     configs.append(SweepConfig(
         name="c2f_4to0_100s",
         num_steps=100,
         heatmap_blur_schedule=[(0.3, 4.0), (0.7, 2.0), (1.0, 0.0)],
-        **base,
+        position_penalty_weight=pw, rotation_penalty_scalar=rs, init_anchor_weight=aw,
     ))
     configs.append(SweepConfig(
         name="c2f_4to1_100s",
         num_steps=100,
         heatmap_blur_schedule=[(0.3, 4.0), (0.7, 2.0), (1.0, 1.0)],
-        **base,
+        position_penalty_weight=pw, rotation_penalty_scalar=rs, init_anchor_weight=aw,
     ))
     configs.append(SweepConfig(
         name="c2f_8to2_100s",
         num_steps=100,
         heatmap_blur_schedule=[(0.3, 8.0), (0.7, 4.0), (1.0, 2.0)],
-        **base,
+        position_penalty_weight=pw, rotation_penalty_scalar=rs, init_anchor_weight=aw,
     ))
 
     # --- Coarse-to-fine blur at 50 steps ---
@@ -356,14 +315,77 @@ def get_phase1_2_configs() -> list[SweepConfig]:
         name="c2f_4to0_50s",
         num_steps=50,
         heatmap_blur_schedule=[(0.4, 4.0), (0.8, 2.0), (1.0, 0.0)],
-        **base,
+        position_penalty_weight=pw, rotation_penalty_scalar=rs, init_anchor_weight=aw,
     ))
     configs.append(SweepConfig(
         name="c2f_8to0_50s",
         num_steps=50,
         heatmap_blur_schedule=[(0.4, 8.0), (0.8, 4.0), (1.0, 0.0)],
-        **base,
+        position_penalty_weight=pw, rotation_penalty_scalar=rs, init_anchor_weight=aw,
     ))
+
+    return configs
+
+
+def get_round6_configs() -> list[SweepConfig]:
+    """Round 6: coarse sweep of rotation penalty scalar."""
+    configs: list[SweepConfig] = []
+    for rot_s in [1.0, 5.0, 10.0, 50.0, 100.0, 200.0, 500.0, 1000.0]:
+        configs.append(SweepConfig(
+            name=f"rot_s={int(rot_s)}",
+            num_steps=50,
+            position_penalty_weight=50.0,
+            rotation_penalty_scalar=rot_s,
+            init_anchor_weight=5.0,
+            heatmap_blur_sigma=4.0,
+        ))
+    return configs
+
+
+def get_round6_fine_configs() -> list[SweepConfig]:
+    """Round 6 fine: sweep around best rotation scalar + position weight combos.
+
+    The developer should update BEST_ROT_S based on coarse sweep results.
+    """
+    BEST_ROT_S: float = 100.0  # UPDATE after coarse sweep
+
+    configs: list[SweepConfig] = []
+
+    # Fine rotation sweep: 0.5x, 0.7x, 1.0x, 1.5x, 2.0x, 3.0x of best
+    for mult in [0.5, 0.7, 1.0, 1.5, 2.0, 3.0]:
+        rot_s = BEST_ROT_S * mult
+        configs.append(SweepConfig(
+            name=f"rot_s={rot_s:.0f}_pos=50",
+            num_steps=50,
+            position_penalty_weight=50.0,
+            rotation_penalty_scalar=rot_s,
+            init_anchor_weight=5.0,
+            heatmap_blur_sigma=4.0,
+        ))
+
+    # Position weight sweep at best rotation scalar
+    for pos_w in [10.0, 25.0, 50.0, 100.0, 200.0, 500.0]:
+        configs.append(SweepConfig(
+            name=f"rot_s={BEST_ROT_S:.0f}_pos={int(pos_w)}",
+            num_steps=50,
+            position_penalty_weight=pos_w,
+            rotation_penalty_scalar=BEST_ROT_S,
+            init_anchor_weight=5.0,
+            heatmap_blur_sigma=4.0,
+        ))
+
+    # Combo: best rotation * {0.5x, 2.0x} with best-ish position weights
+    for rot_mult in [0.5, 2.0]:
+        for pos_w in [25.0, 100.0, 200.0]:
+            rot_s = BEST_ROT_S * rot_mult
+            configs.append(SweepConfig(
+                name=f"rot_s={rot_s:.0f}_pos={int(pos_w)}",
+                num_steps=50,
+                position_penalty_weight=pos_w,
+                rotation_penalty_scalar=rot_s,
+                init_anchor_weight=5.0,
+                heatmap_blur_sigma=4.0,
+            ))
 
     return configs
 
@@ -372,91 +394,102 @@ def main() -> None:
     """Run the parameter sweep."""
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("example_idx", type=int, nargs="?", default=0)
-    parser.add_argument("--phase", choices=["1.1", "1.2"], default="1.2",
+    parser.add_argument("--examples", type=str, default="0",
+                        help="Comma-separated example indices (e.g., '0,5')")
+    parser.add_argument("--phase", choices=["1.1", "1.2", "round6", "round6-fine"],
+                        default="round6",
                         help="Which config set to run")
     args = parser.parse_args()
 
-    example_idx: int = args.example_idx
-
-    print("Loading example data (detection + GT)...")
-    data = load_example(example_idx)
-    print(f"Example: {data['name']}, {len(data['det_cam_positions'])} frames\n")
+    example_indices: list[int] = [int(x.strip()) for x in args.examples.split(",")]
 
     if args.phase == "1.1":
         configs: list[SweepConfig] = get_phase1_1_configs()
-    else:
+    elif args.phase == "1.2":
         configs = get_phase1_2_configs()
+    elif args.phase == "round6":
+        configs = get_round6_configs()
+    else:
+        configs = get_round6_fine_configs()
 
-    results: list[tuple[str, dict[str, Any], SweepConfig]] = []
-    for i, config in enumerate(configs):
-        print(f"\n{'='*60}")
-        print(
-            f"  [{i+1}/{len(configs)}] {config.name}"
+    for example_idx in example_indices:
+        print(f"\n{'#'*70}")
+        print(f"  Loading example {example_idx} (detection + GT)...")
+        print(f"{'#'*70}")
+        data = load_example(example_idx)
+        print(f"Example: {data['name']}, {len(data['det_cam_positions'])} frames\n")
+
+        results: list[tuple[str, dict[str, Any], SweepConfig]] = []
+        for i, config in enumerate(configs):
+            print(f"\n{'='*60}")
+            print(
+                f"  [{i+1}/{len(configs)}] {config.name}"
+            )
+            print(
+                f"  pos_w={config.position_penalty_weight}, rot_s={config.rotation_penalty_scalar}, "
+                f"anchor={config.init_anchor_weight}, "
+                f"blur={config.heatmap_blur_sigma}, blur_sched={config.heatmap_blur_schedule}"
+            )
+            print(f"{'='*60}")
+
+            t0 = time.time()
+            metrics = run_sweep_config(data, config)
+            elapsed = time.time() - t0
+
+            results.append((config.name, metrics, config))
+            print(f"  Time: {elapsed:.1f}s")
+
+        # Print summary table
+        print(f"\n\n{'='*125}")
+        print(f"  SWEEP RESULTS -- {data['name']}")
+        print(f"{'='*125}")
+        header = (
+            f"{'Config':<40} {'Det MPJPE':>10} {'Opt MPJPE':>10} {'Improv':>8} "
+            f"{'Opt P-MPJPE':>12} {'Det MPJVE':>10} {'Opt MPJVE':>10} {'Det 2D-Det':>10} {'Opt 2D-Det':>10}"
         )
-        print(
-            f"  pos_w={config.position_penalty_weight}, rot_s={config.rotation_penalty_scalar}, "
-            f"anchor={config.init_anchor_weight}, smooth={config.all_joints_smooth_weight}, "
-            f"blur={config.heatmap_blur_sigma}, blur_sched={config.heatmap_blur_schedule}"
-        )
-        print(f"{'='*60}")
+        print(header)
+        print("-" * len(header))
+        for name, m, config in results:
+            det_mpjpe = m.get("det_mpjpe", 0) * 100
+            opt_mpjpe = m.get("opt_mpjpe", 0) * 100
+            improv = m.get("improvement", 0) * 100
+            opt_p = m.get("opt_p_mpjpe", 0) * 100
+            det_mpjve = m.get("det_mpjve", 0) * 100 if m.get("det_mpjve") is not None else 0.0
+            opt_mpjve = m.get("opt_mpjve", 0) * 100 if m.get("opt_mpjve") is not None else 0.0
+            det_2d = m.get("det_2d_det_mpjpe_px", 0)
+            opt_2d = m.get("opt_2d_det_mpjpe_px", 0)
+            print(
+                f"{name:<40} {det_mpjpe:>10.2f} {opt_mpjpe:>10.2f} {improv:>+8.2f} "
+                f"{opt_p:>12.2f} {det_mpjve:>10.2f} {opt_mpjve:>10.2f} {det_2d:>10.1f} {opt_2d:>10.1f}"
+            )
 
-        t0 = time.time()
-        metrics = run_sweep_config(data, config)
-        elapsed = time.time() - t0
-
-        results.append((config.name, metrics, config))
-        print(f"  Time: {elapsed:.1f}s")
-
-    # Print summary table
-    print(f"\n\n{'='*110}")
-    print(f"  SWEEP RESULTS -- {data['name']}")
-    print(f"{'='*110}")
-    header = (
-        f"{'Config':<40} {'Det MPJPE':>10} {'Opt MPJPE':>10} {'Improv':>8} "
-        f"{'Opt P-MPJPE':>12} {'Opt MPJVE':>10} {'Det 2D-Det':>10} {'Opt 2D-Det':>10}"
-    )
-    print(header)
-    print("-" * len(header))
-    for name, m, config in results:
-        det_mpjpe = m.get("det_mpjpe", 0) * 100
-        opt_mpjpe = m.get("opt_mpjpe", 0) * 100
-        improv = m.get("improvement", 0) * 100
-        opt_p = m.get("opt_p_mpjpe", 0) * 100
-        opt_mpjve = m.get("opt_mpjve", 0) * 100 if m.get("opt_mpjve") is not None else 0.0
-        det_2d = m.get("det_2d_det_mpjpe_px", 0)
-        opt_2d = m.get("opt_2d_det_mpjpe_px", 0)
-        print(
-            f"{name:<40} {det_mpjpe:>10.2f} {opt_mpjpe:>10.2f} {improv:>+8.2f} "
-            f"{opt_p:>12.2f} {opt_mpjve:>10.2f} {det_2d:>10.1f} {opt_2d:>10.1f}"
-        )
-
-    # Save results to JSON
-    out_dir = os.path.join(cfg.TRAINING_RUNS_DIR, "sweep_results")
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"sweep_{data['name']}.json")
-    save_data = []
-    for name, m, config in results:
-        save_data.append(
-            {
-                "config": name,
-                "det_mpjpe_cm": m.get("det_mpjpe", 0) * 100,
-                "opt_mpjpe_cm": m.get("opt_mpjpe", 0) * 100,
-                "improvement_cm": m.get("improvement", 0) * 100,
-                "opt_p_mpjpe_cm": m.get("opt_p_mpjpe", 0) * 100,
-                "det_2d_det_mpjpe_px": m.get("det_2d_det_mpjpe_px", 0),
-                "opt_2d_det_mpjpe_px": m.get("opt_2d_det_mpjpe_px", 0),
-                "opt_mpjve_cm": m.get("opt_mpjve", 0) * 100
-                if "opt_mpjve" in m
-                else None,
-                "num_steps": config.num_steps,
-                "heatmap_blur_sigma": config.heatmap_blur_sigma,
-                "heatmap_blur_schedule": config.heatmap_blur_schedule,
-            }
-        )
-    with open(out_path, "w") as f:
-        json.dump(save_data, f, indent=2)
-    print(f"\nSaved: {out_path}")
+        # Save results to JSON
+        out_dir = os.path.join(cfg.TRAINING_RUNS_DIR, "sweep_results")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"sweep_{data['name']}.json")
+        save_data = []
+        for name, m, config in results:
+            save_data.append(
+                {
+                    "config": name,
+                    "det_mpjpe_cm": m.get("det_mpjpe", 0) * 100,
+                    "opt_mpjpe_cm": m.get("opt_mpjpe", 0) * 100,
+                    "improvement_cm": m.get("improvement", 0) * 100,
+                    "opt_p_mpjpe_cm": m.get("opt_p_mpjpe", 0) * 100,
+                    "det_2d_det_mpjpe_px": m.get("det_2d_det_mpjpe_px", 0),
+                    "opt_2d_det_mpjpe_px": m.get("opt_2d_det_mpjpe_px", 0),
+                    "opt_mpjve_cm": m.get("opt_mpjve", 0) * 100
+                    if "opt_mpjve" in m
+                    else None,
+                    "det_mpjve_cm": m.get("det_mpjve", 0) * 100 if "det_mpjve" in m else None,
+                    "num_steps": config.num_steps,
+                    "heatmap_blur_sigma": config.heatmap_blur_sigma,
+                    "heatmap_blur_schedule": config.heatmap_blur_schedule,
+                }
+            )
+        with open(out_path, "w") as f:
+            json.dump(save_data, f, indent=2)
+        print(f"\nSaved: {out_path}")
 
 
 if __name__ == "__main__":

@@ -46,25 +46,10 @@ BONE_LENGTH_LR: float = 0.0001
 # Gaussian sigma for heatmap scoring (pixels)
 SIGMA: float = 50.0
 
-# TODO: remove we don't want a sigma scheduler
-# Coarse-to-fine sigma schedule: (fraction_of_steps, sigma)
-SIGMA_SCHEDULE: list[tuple[float, float]] = [
-    (1.0, 80.0),  # Constant coarse sigma -- prevents overfitting to noisy 2D targets
-]
-
 # Gaussian blur sigma applied to Stacked Hourglass heatmaps before optimization.
 # Applied in 64x64 heatmap space. sigma=2 at 64x64 ~ 8px at 256x256 crop.
 # 0 = no blur. Widens gradient basin for optimization.
-HEATMAP_BLUR_SIGMA: float = 0.0
-
-# TODO: remove this we don't want a heatmap blur schedule
-# Coarse-to-fine heatmap blur schedule: (fraction_of_steps, blur_sigma)
-# Starts with wide blur for coarse alignment, narrows for precision.
-# Set to None to use fixed HEATMAP_BLUR_SIGMA instead.
-HEATMAP_BLUR_SCHEDULE: list[tuple[float, float]] | None = [
-    (0.5, 8.0),  # First 50%: wide blur for coarse alignment
-    (1.0, 2.0),  # Last 50%: narrow blur for precision
-]
+HEATMAP_BLUR_SIGMA: float = 4.0
 
 # Motion penalty weights
 POSITION_PENALTY_WEIGHT: float = 50.0
@@ -103,23 +88,9 @@ VISIBILITY_THRESHOLD: float = 0.5
 # telling MotionBERT to treat them as missing and infer from context.
 MOTIONBERT_CONF_THRESHOLD: float = 0.0
 
-# TODO: remove this and all associated functionality, unneeded complexity
-# Confidence threshold for replacing FK optimization 2D targets.
-# For joints below this threshold, use MotionBERT's projected 2D
-# instead of (potentially garbage) Stacked Hourglass detections.
-# This does NOT affect MotionBERT's input (MOTIONBERT_CONF_THRESHOLD controls that).
-FK_TARGET_CONF_THRESHOLD: float = 0.1
-
 # Weight for initialization anchor penalty.
 # Prevents optimizer from drifting away from MotionBERT predictions.
 INIT_ANCHOR_WEIGHT: float = 5.0
-
-# TODO: remove this and all associated functionality, unneeded complexity, we should ALWAYS use real heatmaps
-# Use real Stacked Hourglass heatmaps for optimization scoring.
-# When True, the optimizer samples from the actual (16, 64, 64) heatmaps
-# produced by Stacked Hourglass instead of analytical Gaussian approximations.
-# When False, uses the old analytical Gaussian approach.
-USE_REAL_HEATMAPS: bool = True
 
 # --- Overlay video ---
 OVERLAY_HEATMAP_INTENSITY: float = 200.0

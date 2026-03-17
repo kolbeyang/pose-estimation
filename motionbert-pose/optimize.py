@@ -14,15 +14,6 @@ from skeleton import NUM_JOINTS
 import config as cfg
 
 
-def _get_sigma(step: int, num_steps: int) -> float:
-    """Get sigma for current step from coarse-to-fine schedule."""
-    progress: float = step / max(num_steps - 1, 1)
-    for frac, sigma in cfg.SIGMA_SCHEDULE:
-        if progress <= frac:
-            return sigma
-    return cfg.SIGMA_SCHEDULE[-1][1]
-
-
 def _get_blur_sigma(step: int, num_steps: int, schedule: list[tuple[float, float]]) -> float:
     """Get heatmap blur sigma for current step from schedule."""
     progress: float = step / max(num_steps - 1, 1)
@@ -157,15 +148,17 @@ def run_optimization(
     # Convert heatmaps to torch tensors (once, not per step)
     heatmaps_t: list[torch.Tensor] | None = None
     affine_t: torch.Tensor | None = None
-    if heatmaps is not None and cfg.USE_REAL_HEATMAPS:
+    if heatmaps is not None:
         heatmaps_t = [
             torch.tensor(hm, dtype=torch.float32) for hm in heatmaps
         ]
         if affine is not None:
             affine_t = torch.tensor(affine, dtype=torch.float32)
         print(f"    Using real Stacked Hourglass heatmaps for scoring")
-    else:
-        print(f"    Using analytical Gaussian heatmaps for scoring")
+
+    # Apply fixed blur from config (if no dynamic schedule is provided)
+    if heatmaps_t is not None and heatmap_blur_schedule is None and cfg.HEATMAP_BLUR_SIGMA > 0:
+        heatmaps_t = _apply_blur_torch(heatmaps_t, cfg.HEATMAP_BLUR_SIGMA)
 
     # Store originals for re-blurring during coarse-to-fine schedule
     heatmaps_t_orig: list[torch.Tensor] | None = None
@@ -238,8 +231,8 @@ def run_optimization(
                 current_blur_sigma = new_blur
                 print(f"    [Step {step}] Heatmap blur sigma changed to {new_blur:.1f}")
 
-        # Compute score with coarse-to-fine sigma
-        sigma: float = _get_sigma(step, num_steps)
+        # Compute score with fixed sigma
+        sigma: float = cfg.SIGMA
         total_score: torch.Tensor
         details: dict[str, float]
         total_score, details = compute_total_score(
@@ -255,7 +248,6 @@ def run_optimization(
             init_anchor_weight=cfg.INIT_ANCHOR_WEIGHT,
             heatmaps_list=heatmaps_t,
             affine=affine_t,
-            use_real_heatmaps=cfg.USE_REAL_HEATMAPS,
         )
 
         loss: torch.Tensor = -total_score
@@ -274,7 +266,6 @@ def run_optimization(
                 f"loss={loss.item():.1f}  "
                 f"heatmap={details['heatmap']:.1f}  "
                 f"sigma={sigma:.0f}  "
-                f"blur={current_blur_sigma:.1f}  "
                 f"pos_p={details['pos_penalty']:.4f}  "
                 f"rot_p={details['rot_penalty']:.4f}"
             )
