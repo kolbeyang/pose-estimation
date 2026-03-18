@@ -155,25 +155,19 @@ def process_example(
     # --- 3. Run MotionBERT ---
     print(f"\n  [3/5] Running MotionBERT on {len(frames_rgb)} frames...")
     kp_2d: list[np.ndarray]
-    kp_3d: list[np.ndarray]
     visibility: list[np.ndarray]
     heatmaps: list[np.ndarray]
     affine: np.ndarray
     positions_3d_norm: np.ndarray
-    cs_params: dict[str, float]
     mpii_kp_2d: list[np.ndarray]
-    kp_2d, kp_3d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm, cs_params = detect_poses(frames_rgb)
+    kp_2d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm = detect_poses(frames_rgb)
 
     # --- 4. Convert to camera coordinates ---
     print("\n  [4/5] Converting to camera coordinates...")
-    scale: float = cs_params["scale"]
-    dist_coeffs: np.ndarray | None = cam_calib.get("distCoef")
     det_cam_positions: list[np.ndarray] = []
     for i in range(len(frames_rgb)):
         pos_cam: np.ndarray = motionbert_to_camera_space(
-            positions_3d_norm[i], kp_2d[i], scale, fx, fy, cx, cy,
-            dist_coeffs=dist_coeffs,
-            visibility=visibility[i],
+            positions_3d_norm[i], kp_2d[i], fx, fy, cx, cy,
         )
         det_cam_positions.append(pos_cam)
 

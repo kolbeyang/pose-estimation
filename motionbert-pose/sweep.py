@@ -88,19 +88,13 @@ def load_example(example_idx: int = 0) -> dict[str, Any]:
     frame_indices = frame_indices[: len(frames_rgb)]
 
     # 3. Detect
-    kp_2d, kp_3d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm, cs_params = (
-        detect_poses(frames_rgb)
-    )
+    kp_2d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm = detect_poses(frames_rgb)
 
     # 4. Camera-space conversion (per-frame pairwise depth estimation)
-    scale = cs_params["scale"]
-    dist_coeffs = cam_calib.get("distCoef")
     det_cam_positions: list[np.ndarray] = []
     for i in range(len(frames_rgb)):
         pos_cam = motionbert_to_camera_space(
-            positions_3d_norm[i], kp_2d[i], scale, fx, fy, cx, cy,
-            dist_coeffs=dist_coeffs,
-            visibility=visibility[i],
+            positions_3d_norm[i], kp_2d[i], fx, fy, cx, cy,
         )
         det_cam_positions.append(pos_cam)
 

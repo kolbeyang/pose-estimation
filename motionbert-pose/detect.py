@@ -23,13 +23,19 @@ CHECKPOINTS_DIR: str = os.path.join(SCRIPT_DIR, "checkpoints")
 
 # --- MPII flip pairs for horizontal flip augmentation ---
 MPII_FLIP_PAIRS: list[tuple[int, int]] = [
-    (0, 5), (1, 4), (2, 3), (10, 15), (11, 14), (12, 13)
+    (0, 5),
+    (1, 4),
+    (2, 3),
+    (10, 15),
+    (11, 14),
+    (12, 13),
 ]
 
 
 # ---------------------------------------------------------------------------
 # YOLO Person Detection
 # ---------------------------------------------------------------------------
+
 
 def detect_person_bbox(frames_rgb: list[np.ndarray]) -> np.ndarray:
     """Detect persons with YOLOv8, return union bounding box.
@@ -55,27 +61,33 @@ def detect_person_bbox(frames_rgb: list[np.ndarray]) -> np.ndarray:
         detections = results[0].boxes
 
         if len(detections) > 0:
-            areas: torch.Tensor = (
-                (detections.xyxy[:, 2] - detections.xyxy[:, 0])
-                * (detections.xyxy[:, 3] - detections.xyxy[:, 1])
+            areas: torch.Tensor = (detections.xyxy[:, 2] - detections.xyxy[:, 0]) * (
+                detections.xyxy[:, 3] - detections.xyxy[:, 1]
             )
             best_idx: int = areas.argmax().item()
-            bbox: np.ndarray = detections.xyxy[best_idx].cpu().numpy().astype(np.float32)
+            bbox: np.ndarray = (
+                detections.xyxy[best_idx].cpu().numpy().astype(np.float32)
+            )
             bboxes.append(bbox)
         else:
             bboxes.append(np.array([0, 0, w, h], dtype=np.float32))
 
     # Union (max) bounding box across all frames
     all_bboxes: np.ndarray = np.array(bboxes)
-    union_bbox: np.ndarray = np.array([
-        all_bboxes[:, 0].min(),
-        all_bboxes[:, 1].min(),
-        all_bboxes[:, 2].max(),
-        all_bboxes[:, 3].max(),
-    ], dtype=np.float32)
+    union_bbox: np.ndarray = np.array(
+        [
+            all_bboxes[:, 0].min(),
+            all_bboxes[:, 1].min(),
+            all_bboxes[:, 2].max(),
+            all_bboxes[:, 3].max(),
+        ],
+        dtype=np.float32,
+    )
 
-    print(f"  Union bbox: ({union_bbox[0]:.0f}, {union_bbox[1]:.0f}) - "
-          f"({union_bbox[2]:.0f}, {union_bbox[3]:.0f})")
+    print(
+        f"  Union bbox: ({union_bbox[0]:.0f}, {union_bbox[1]:.0f}) - "
+        f"({union_bbox[2]:.0f}, {union_bbox[3]:.0f})"
+    )
 
     return union_bbox
 
@@ -83,6 +95,7 @@ def detect_person_bbox(frames_rgb: list[np.ndarray]) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Crop and Resize
 # ---------------------------------------------------------------------------
+
 
 def crop_and_resize(
     frame: np.ndarray,
@@ -142,10 +155,17 @@ def crop_and_resize(
     # Affine: maps from target_size coords to original frame coords
     scale_x: float = (crop_x2 - crop_x1) / target_size
     scale_y: float = (crop_y2 - crop_y1) / target_size
-    affine: np.ndarray = np.array([
-        scale_x, 0, orig_crop_x1,
-        0, scale_y, orig_crop_y1,
-    ], dtype=np.float32).reshape(2, 3)
+    affine: np.ndarray = np.array(
+        [
+            scale_x,
+            0,
+            orig_crop_x1,
+            0,
+            scale_y,
+            orig_crop_y1,
+        ],
+        dtype=np.float32,
+    ).reshape(2, 3)
 
     return resized, affine
 
@@ -153,6 +173,7 @@ def crop_and_resize(
 # ---------------------------------------------------------------------------
 # Stacked Hourglass 2D Pose
 # ---------------------------------------------------------------------------
+
 
 def _flip_heatmaps(heatmaps: np.ndarray) -> np.ndarray:
     """Horizontally flip heatmaps and swap symmetric joints.
@@ -300,6 +321,7 @@ def run_hourglass(
 # MotionBERT 3D Lifting
 # ---------------------------------------------------------------------------
 
+
 def load_motionbert_model() -> torch.nn.Module:
     """Load pretrained MotionBERT-Lite model for 3D pose estimation.
 
@@ -324,10 +346,15 @@ def load_motionbert_model() -> torch.nn.Module:
     lite_ckpt: str = os.path.join(CHECKPOINTS_DIR, "motionbert_lite_h36m.bin")
 
     model: torch.nn.Module = DSTformer(
-        dim_in=3, dim_out=3,
-        dim_feat=256, dim_rep=512,
-        depth=5, num_heads=8, mlp_ratio=4,
-        num_joints=17, maxlen=243,
+        dim_in=3,
+        dim_out=3,
+        dim_feat=256,
+        dim_rep=512,
+        depth=5,
+        num_heads=8,
+        mlp_ratio=4,
+        num_joints=17,
+        maxlen=243,
         norm_layer=partial(nn.LayerNorm, eps=1e-6),
     )
 
@@ -363,7 +390,9 @@ def crop_scale(motion: np.ndarray) -> tuple[np.ndarray, dict[str, float]]:
     valid_coords: np.ndarray = motion[motion[..., 2] != 0][:, :2]
     if len(valid_coords) < 4:
         return np.zeros(motion.shape, dtype=motion.dtype), {
-            "xs": 0.0, "ys": 0.0, "scale": 1.0
+            "xs": 0.0,
+            "ys": 0.0,
+            "scale": 1.0,
         }
     xmin: float = float(valid_coords[:, 0].min())
     xmax: float = float(valid_coords[:, 0].max())
@@ -372,7 +401,9 @@ def crop_scale(motion: np.ndarray) -> tuple[np.ndarray, dict[str, float]]:
     scale: float = max(xmax - xmin, ymax - ymin)
     if scale == 0:
         return np.zeros(motion.shape, dtype=motion.dtype), {
-            "xs": 0.0, "ys": 0.0, "scale": 1.0
+            "xs": 0.0,
+            "ys": 0.0,
+            "scale": 1.0,
         }
     xs: float = (xmin + xmax - scale) / 2
     ys: float = (ymin + ymax - scale) / 2
@@ -395,27 +426,22 @@ def flip_data(data: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
     right_joints: list[int] = [1, 2, 3, 14, 15, 16]
     flipped_data = copy.deepcopy(data)
     flipped_data[..., 0] *= -1
-    flipped_data[..., left_joints + right_joints, :] = (
-        flipped_data[..., right_joints + left_joints, :]
-    )
+    flipped_data[..., left_joints + right_joints, :] = flipped_data[
+        ..., right_joints + left_joints, :
+    ]
     return flipped_data
 
 
 def run_motionbert(
     keypoints_2d_list: list[np.ndarray],
-    image_size: tuple[int, int],
-) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
+) -> np.ndarray:
     """Lift 2D keypoints to 3D using MotionBERT.
 
     Args:
         keypoints_2d_list: List of (16, 3) MPII keypoints per frame (x, y, conf).
-        image_size: (height, width) of original frames.
 
     Returns:
-        Tuple of:
-            positions_3d_pixel: (N, 16, 3) pixel-aligned 3D joint positions (H36M, Head removed).
-            positions_3d_norm: (N, 16, 3) normalized 3D output (before denorm, Head removed).
-            cs_params: crop_scale parameters dict with keys xs, ys, scale.
+        positions_3d_norm: (N, 16, 3) normalized MotionBERT output (Head removed).
     """
     model: torch.nn.Module = load_motionbert_model()
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -423,7 +449,7 @@ def run_motionbert(
 
     n_frames: int = len(keypoints_2d_list)
 
-    # Convert MPII 16-joint to H36M 17-joint
+    # Convert MPII 16-joint to H36M 17-joint for MotionBERT input
     keypoints_h36m: np.ndarray = np.zeros((n_frames, 17, 3), dtype=np.float32)
     for i, kp_mpii in enumerate(keypoints_2d_list):
         keypoints_h36m[i] = mpii_to_h36m(kp_mpii)
@@ -441,17 +467,21 @@ def run_motionbert(
                     keypoints_h36m[i, j, :] = 0.0
                     n_zeroed += 1
     n_total: int = n_frames * 17
-    print(f"  Confidence threshold={cfg.MOTIONBERT_CONF_THRESHOLD}: "
-          f"zeroed {n_zeroed}/{n_total} joint-frames "
-          f"({100*n_zeroed/n_total:.1f}%)")
+    print(
+        f"  Confidence threshold={cfg.MOTIONBERT_CONF_THRESHOLD}: "
+        f"zeroed {n_zeroed}/{n_total} joint-frames "
+        f"({100*n_zeroed/n_total:.1f}%)"
+    )
 
     # Official MotionBERT preprocessing: crop_scale normalization
     keypoints_norm: np.ndarray
     cs_params: dict[str, float]
     keypoints_norm, cs_params = crop_scale(keypoints_h36m)
 
-    print(f"  crop_scale: scale={cs_params['scale']:.1f} "
-          f"offset=({cs_params['xs']:.1f}, {cs_params['ys']:.1f})")
+    print(
+        f"  crop_scale: scale={cs_params['scale']:.1f} "
+        f"offset=({cs_params['xs']:.1f}, {cs_params['ys']:.1f})"
+    )
 
     # MotionBERT handles variable-length input natively
     clip_len: int = 243
@@ -463,14 +493,10 @@ def run_motionbert(
         torch.from_numpy(keypoints_norm).unsqueeze(0).to(device)
     )
 
-    print(f"  Running MotionBERT on {n_frames} frames (with flip augmentation)...")
+    print(f"  Running MotionBERT on {n_frames} frames...")
 
     with torch.no_grad():
-        predicted_3d_pos_1: torch.Tensor = model(input_tensor)
-        input_flip: torch.Tensor = flip_data(input_tensor)
-        predicted_3d_pos_flip: torch.Tensor = model(input_flip)
-        predicted_3d_pos_2: torch.Tensor = flip_data(predicted_3d_pos_flip)
-        output_3d: torch.Tensor = (predicted_3d_pos_1 + predicted_3d_pos_2) / 2.0
+        output_3d: torch.Tensor = model(input_tensor)
 
     positions_3d: np.ndarray = output_3d.cpu().numpy()[0]  # (N, 17, 3)
 
@@ -478,31 +504,23 @@ def run_motionbert(
     positions_3d[0, 0, 2] = 0
 
     print(f"  MotionBERT raw output: {positions_3d.shape}")
-    print(f"  Root Z range (norm): {positions_3d[:, 0, 2].min():.4f} to "
-          f"{positions_3d[:, 0, 2].max():.4f}")
+    print(
+        f"  Root Z range (norm): {positions_3d[:, 0, 2].min():.4f} to "
+        f"{positions_3d[:, 0, 2].max():.4f}"
+    )
 
-    # Save normalized positions BEFORE denormalization
-    positions_3d_norm: np.ndarray = positions_3d.copy()
-
-    # Denormalize from crop_scale to pixel-aligned coordinates
-    scale: float = cs_params["scale"]
-    xs: float = cs_params["xs"]
-    ys: float = cs_params["ys"]
-
-    positions_3d *= (scale / 2.0)
-    positions_3d[:, :, 0] += xs + scale / 2.0
-    positions_3d[:, :, 1] += ys + scale / 2.0
-
-    # Strip Head joint (index 10) from 17-joint MotionBERT output -> 16 joints
+    # Strip Head joint (index 10) from 17-joint H36M output -> 16 joints
+    # MotionBERT outputs H36M-17; Stacked Hourglass outputs MPII-16 (no head_top).
+    # To keep joint sets consistent throughout the pipeline we drop the head.
     positions_3d = h36m_17_to_16(positions_3d)
-    positions_3d_norm = h36m_17_to_16(positions_3d_norm)
 
-    return positions_3d, positions_3d_norm, cs_params
+    return positions_3d
 
 
 # ---------------------------------------------------------------------------
 # Denormalization to Camera-Space Meters
 # ---------------------------------------------------------------------------
+
 
 def _iqr_filtered_median(values: np.ndarray, k: float = 1.5) -> float:
     """Compute median after removing IQR outliers.
@@ -541,85 +559,38 @@ _RELIABLE_BONES_FOR_SCALE: set[int] = {
 }
 
 
-def _enforce_bone_lengths(
-    positions: np.ndarray,
-    parents: np.ndarray,
-    default_lengths: np.ndarray,
-    max_ratio: float = 1.5,
-) -> np.ndarray:
-    """Enforce bone-length constraints by clamping extreme bones.
-
-    For each bone in kinematic chain order, if the bone length deviates by
-    more than max_ratio from the default, the child joint is projected to
-    be at the default distance from its parent, preserving the bone direction.
-
-    Args:
-        positions: (17, 3) root-relative joint positions in meters.
-        parents: (17,) parent index array.
-        default_lengths: (17,) default bone lengths in meters.
-        max_ratio: Maximum allowed ratio (detected / default). Bones outside
-            [1/max_ratio, max_ratio] are corrected.
-
-    Returns:
-        (17, 3) corrected positions.
-    """
-    result: np.ndarray = positions.copy()
-    for j in range(1, NUM_JOINTS):
-        p: int = int(parents[j])
-        bone_vec: np.ndarray = result[j] - result[p]
-        bone_len: float = float(np.linalg.norm(bone_vec))
-        ref_len: float = float(default_lengths[j])
-        if bone_len < 1e-6 or ref_len < 1e-6:
-            continue
-        ratio: float = bone_len / ref_len
-        if ratio > max_ratio or ratio < 1.0 / max_ratio:
-            # Clamp to default length while preserving direction
-            direction: np.ndarray = bone_vec / bone_len
-            result[j] = result[p] + direction * ref_len
-    return result
-
-
 def motionbert_to_camera_space(
     positions_3d_norm: np.ndarray,
     kp_2d: np.ndarray,
-    scale: float,
     fx: float,
     fy: float,
     cx: float,
     cy: float,
-    dist_coeffs: np.ndarray | None = None,
-    visibility: np.ndarray | None = None,
 ) -> np.ndarray:
     """Convert MotionBERT normalized output to camera-space meters.
 
-    Uses a two-step approach:
-    1. Scale the root-relative 3D structure using bone length matching against
-       known anatomical reference lengths, with IQR outlier filtering and
-       preference for reliable upper-body bones.
-    2. Estimate depth (tz) using pairwise joint vertical separation ratios:
-       for each pair (i, j), if the projected vertical pixel separation is
-       large enough (>5 px), compute tz = fy * dy_3d / dv_2d. Collect all
-       candidates and take an IQR-filtered median.
+    Two-step approach:
+    1. Scale root-relative 3D structure via bone-length matching against
+       anatomical reference lengths (IQR-filtered, arm bones preferred).
+    2. Estimate depth (tz) from pairwise vertical joint separation ratios:
+       tz = fy * dy_3d / dv_2d for each joint pair with >5px vertical
+       separation; take IQR-filtered median.
 
     Args:
-        positions_3d_norm: (16, 3) normalized MotionBERT output (before pixel denorm).
+        positions_3d_norm: (16, 3) normalized MotionBERT output.
         kp_2d: (16, 2) 2D detections in pixel coordinates.
-        scale: crop_scale scale parameter.
         fx, fy, cx, cy: Camera intrinsics.
-        dist_coeffs: Optional distortion coefficients (kept for interface
-            compatibility but not used in pairwise approach).
-        visibility: Optional (16,) confidence scores for each joint.
 
     Returns:
         (16, 3) camera-space meters.
     """
     from skeleton import PARENTS, DEFAULT_BONE_LENGTHS
 
-    # Step 1: Get root-relative structure in meters via bone-length matching
+    # Step 1: Figure out scale. MotionBERT outputs 3D positions in arbitrary
+    # units. Compute ratio (reference_bone_length / detected_bone_length) for
+    # each bone, prefer arm bones, IQR-filter outliers, and multiply the whole
+    # skeleton by the median ratio to get meters.
     root_relative: np.ndarray = positions_3d_norm - positions_3d_norm[0:1]
-
-    # Compute scale factor using reliable arm bones with IQR filtering.
-    # Fall back to all bones if not enough reliable arm bones available.
     reliable_ratios: list[float] = []
     all_ratios: list[float] = []
     for j in range(1, NUM_JOINTS):
@@ -641,7 +612,9 @@ def motionbert_to_camera_space(
 
     root_relative_m: np.ndarray = root_relative * bone_scale
 
-    # Step 2: Estimate tz from pairwise vertical joint separations
+    # Step 2: Estimate depth (tz) via similar triangles. For each joint pair
+    # with enough vertical separation: tz = fy * dy_3d / dv_2d. IQR-filter
+    # the candidates and clamp to [1m, 8m].
     tz_candidates: list[float] = []
     for i in range(NUM_JOINTS):
         for j in range(NUM_JOINTS):
@@ -651,7 +624,9 @@ def motionbert_to_camera_space(
             if np.linalg.norm(kp_2d[i]) <= 1.0 or np.linalg.norm(kp_2d[j]) <= 1.0:
                 continue
             # Require sufficient 3D vertical separation (>1 mm)
-            dy_3d: float = abs(float(root_relative_m[i, 1]) - float(root_relative_m[j, 1]))
+            dy_3d: float = abs(
+                float(root_relative_m[i, 1]) - float(root_relative_m[j, 1])
+            )
             if dy_3d < 0.001:
                 continue
             # Require sufficient projected vertical pixel separation (>5 px)
@@ -665,19 +640,17 @@ def motionbert_to_camera_space(
     else:
         tz = 3.0
 
-    # Step 3: Solve for tx, ty from root joint 2D projection
+    # TODO: Shouldn't back projection occur using the camera parameters that we know from the ground truth data? We don't need to make unnecessary pinhole assumptions.
+    # Step 3: Back-project root joint's 2D pixel location to get tx, ty in
+    # camera space using pinhole model: tx = (u - cx) * tz / fx.
     u_root: float = float(kp_2d[0, 0])
     v_root: float = float(kp_2d[0, 1])
     tx: float = (u_root - cx) * tz / fx
     ty: float = (v_root - cy) * tz / fy
 
-    # Step 4: Enforce bone-length constraints
-    root_relative_corrected: np.ndarray = _enforce_bone_lengths(
-        root_relative_m, PARENTS, DEFAULT_BONE_LENGTHS, max_ratio=1.3,
-    )
-
-    # Step 5: Translate to camera space
-    cam_3d: np.ndarray = root_relative_corrected.copy()
+    # Step 4: Assemble camera-space position by adding (tx, ty, tz) to the
+    # root-relative skeleton.
+    cam_3d: np.ndarray = root_relative_m.copy()
     cam_3d[:, 0] += tx
     cam_3d[:, 1] += ty
     cam_3d[:, 2] += tz
@@ -688,15 +661,23 @@ def motionbert_to_camera_space(
 # Pipeline Wrapper
 # ---------------------------------------------------------------------------
 
+
 def detect_poses(
     frames_rgb: list[np.ndarray],
-) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], np.ndarray, np.ndarray, dict[str, float]]:
+) -> tuple[
+    list[np.ndarray],
+    list[np.ndarray],
+    list[np.ndarray],
+    list[np.ndarray],
+    np.ndarray,
+    np.ndarray,
+]:
     """Full detection pipeline.
 
     Pipeline:
       1. YOLOv8 person detection -> union bounding box
       2. Stacked Hourglass -> MPII (16,3) 2D keypoints + raw heatmaps per frame
-      3. MotionBERT -> H36M (N,17,3) pixel-aligned 3D + normalized output
+      3. MotionBERT -> H36M (N,16,3) normalized 3D output
       4. Convert MPII 2D to H36M 2D
 
     Args:
@@ -704,19 +685,12 @@ def detect_poses(
 
     Returns:
         keypoints_2d: List of (16, 2) pixel coordinates (H36M, Head removed).
-        keypoints_3d: List of (16, 3) pixel-aligned 3D (H36M, Head removed).
         confidence: List of (16,) confidence scores.
         heatmaps: List of (16, 64, 64) raw MPII heatmaps per frame.
-        mpii_keypoints_2d: List of (16, 3) raw MPII keypoints per frame (x, y, conf) in original pixel coords.
+        mpii_keypoints_2d: List of (16, 3) raw MPII keypoints (x, y, conf) in pixel coords.
         affine: (2, 3) affine from 256-crop coords to original pixel coords.
-        positions_3d_norm: (N, 16, 3) normalized MotionBERT output (before denorm, Head removed).
-        cs_params: crop_scale parameters dict with keys xs, ys, scale.
+        positions_3d_norm: (N, 16, 3) normalized MotionBERT output (Head removed).
     """
-    h: int
-    w: int
-    h, w = frames_rgb[0].shape[:2]
-    image_size: tuple[int, int] = (h, w)
-
     # 1. YOLOv8 person detection -> union bounding box
     union_bbox: np.ndarray = detect_person_bbox(frames_rgb)
 
@@ -726,14 +700,12 @@ def detect_poses(
     affine: np.ndarray
     all_keypoints_2d, all_heatmaps, affine = run_hourglass(frames_rgb, union_bbox)
 
-    # 3. MotionBERT -> H36M pixel-aligned 3D + normalized output
-    kp_3d_array: np.ndarray
-    positions_3d_norm: np.ndarray
-    cs_params: dict[str, float]
-    kp_3d_array, positions_3d_norm, cs_params = run_motionbert(all_keypoints_2d, image_size)
+    # 3. MotionBERT -> H36M normalized 3D output
+    positions_3d_norm: np.ndarray = run_motionbert(all_keypoints_2d)
 
     # 4. Convert MPII 2D to H36M 2D + extract visibility
-    # mpii_to_h36m produces 17 joints; strip Head (index 10) to get 16.
+    # MPII uses a different 16-joint ordering than H36M. mpii_to_h36m() remaps
+    # to H36M-17; we then strip Head (index 10) to get the 16 joints we use.
     kp_2d_list: list[np.ndarray] = []
     visibility_list: list[np.ndarray] = []
     for kp_mpii in all_keypoints_2d:
@@ -742,8 +714,11 @@ def detect_poses(
         kp_2d_list.append(kp_h36m_16[:, :2])  # (16, 2)
         visibility_list.append(kp_h36m_16[:, 2])  # (16,)
 
-    kp_3d_list: list[np.ndarray] = [
-        kp_3d_array[i] for i in range(kp_3d_array.shape[0])
-    ]
-
-    return kp_2d_list, kp_3d_list, visibility_list, all_heatmaps, all_keypoints_2d, affine, positions_3d_norm, cs_params
+    return (
+        kp_2d_list,
+        visibility_list,
+        all_heatmaps,
+        all_keypoints_2d,
+        affine,
+        positions_3d_norm,
+    )
