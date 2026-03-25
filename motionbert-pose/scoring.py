@@ -1,10 +1,10 @@
 """Scoring functions for FK optimization.
 
-Always uses real Stacked Hourglass heatmap sampling when heatmaps and affine
-are available. The optimizer samples directly from the (16, 64, 64) heatmaps
-produced by Stacked Hourglass, preserving the spatial uncertainty encoded in
-the heatmaps. For joints without a dedicated MPII heatmap (Hip, Spine), falls
-back to analytical Gaussian scoring.
+Uses real Stacked Hourglass heatmap sampling: the optimizer samples directly
+from the (16, 64, 64) heatmaps produced by Stacked Hourglass, preserving
+the spatial uncertainty encoded in the heatmaps. Only the 14 joints with
+a dedicated MPII heatmap are scored (Hip and Spine are synthetic midpoints
+with no heatmap and are excluded from evaluation).
 """
 
 import torch
@@ -32,8 +32,7 @@ H36M_TO_MPII_HEATMAP: list[int | None] = [
     10,    # 15: RWrist
 ]
 
-# Precomputed indices for vectorized scoring
-_FALLBACK_JOINTS: list[int] = [j for j, m in enumerate(H36M_TO_MPII_HEATMAP) if m is None]
+# Precomputed indices for vectorized scoring (14 joints with real heatmaps)
 _HM_H36M_INDICES: list[int] = [j for j, m in enumerate(H36M_TO_MPII_HEATMAP) if m is not None]
 _HM_MPII_INDICES: list[int] = [m for m in H36M_TO_MPII_HEATMAP if m is not None]
 
@@ -43,15 +42,13 @@ def heatmap_score(
     heatmaps: torch.Tensor,
     affine: torch.Tensor,
     visibility: torch.Tensor,
-    target_2d: torch.Tensor,
-    sigma: float,
     confidence_epsilon: float = 1e-4,
     eps: float = 1e-8,
 ) -> torch.Tensor:
     """Score by sampling real Stacked Hourglass heatmaps at projected positions.
 
     Vectorized: samples all 14 heatmap joints in a single grid_sample call.
-    For Hip (0) and Spine (7) without heatmaps, uses analytical Gaussian.
+    Joints without a dedicated MPII heatmap (Hip=0, Spine=7) are skipped.
 
     Uses confidence-weighted scoring:
         log_val = log(value * conf + confidence_epsilon * (1 - conf))
@@ -61,8 +58,6 @@ def heatmap_score(
         heatmaps: (16, 64, 64) Stacked Hourglass heatmaps (MPII joints).
         affine: (2, 3) affine transform from 256-crop coords to original pixels.
         visibility: (J,) confidence scores from Stacked Hourglass.
-        target_2d: (J, 2) target 2D positions (for fallback on joints without heatmaps).
-        sigma: Gaussian sigma for fallback joints.
         confidence_epsilon: Floor for low-confidence joints (prevents log(0)).
         eps: Floor value to avoid log(0).
 
@@ -75,20 +70,7 @@ def heatmap_score(
     tx: torch.Tensor = affine[0, 2]
     ty: torch.Tensor = affine[1, 2]
 
-    # Fallback joints (Hip=0, Spine=7): analytical Gaussian
-    fallback_score: torch.Tensor = torch.tensor(0.0)
-    for j in _FALLBACK_JOINTS:
-        conf: torch.Tensor = visibility[j]
-        diff: torch.Tensor = projected_2d[j] - target_2d[j]
-        sq_dist: torch.Tensor = (diff ** 2).sum()
-        value: torch.Tensor = torch.exp(-sq_dist / (2.0 * sigma ** 2))
-        log_val: torch.Tensor = torch.log(torch.clamp(
-            value * conf + confidence_epsilon * (1.0 - conf), min=eps,
-        ))
-        fallback_score = fallback_score + log_val
-
     # Vectorized heatmap joints (14 joints): single grid_sample call
-    # Gather projected positions for heatmap joints
     hm_proj: torch.Tensor = projected_2d[_HM_H36M_INDICES]  # (14, 2)
     hm_conf: torch.Tensor = visibility[_HM_H36M_INDICES]    # (14,)
 
@@ -98,15 +80,8 @@ def heatmap_score(
     grid_x: torch.Tensor = x_256 / 4.0 / 63.0 * 2.0 - 1.0  # (14,)
     grid_y: torch.Tensor = y_256 / 4.0 / 63.0 * 2.0 - 1.0  # (14,)
 
-    # Build grid: (1, 1, 14, 2)
-    grid: torch.Tensor = torch.stack([grid_x, grid_y], dim=-1).reshape(1, 1, 14, 2)
-
-    # Build heatmap input: (1, 14, 64, 64) -- each "channel" is one joint's heatmap
-    hm_input: torch.Tensor = heatmaps[_HM_MPII_INDICES].unsqueeze(0)  # (1, 14, 64, 64)
-
-    # grid_sample: samples each channel at the SAME spatial location
-    # But we need each channel sampled at a DIFFERENT location.
     # Use (14, 1, 64, 64) as batch dim, (14, 1, 1, 2) as grid
+    # so each joint's heatmap is sampled at its own location
     hm_batch: torch.Tensor = heatmaps[_HM_MPII_INDICES].unsqueeze(1)  # (14, 1, 64, 64)
     grid_batch: torch.Tensor = torch.stack([grid_x, grid_y], dim=-1).reshape(14, 1, 1, 2)
 
@@ -118,9 +93,7 @@ def heatmap_score(
     # Confidence-weighted log-likelihood (vectorized)
     weighted: torch.Tensor = values * hm_conf + confidence_epsilon * (1.0 - hm_conf)
     log_vals: torch.Tensor = torch.log(torch.clamp(weighted, min=eps))
-    hm_score: torch.Tensor = log_vals.sum()
-
-    return fallback_score + hm_score
+    return log_vals.sum()
 
 
 def heatmap_score_batch(
@@ -128,20 +101,18 @@ def heatmap_score_batch(
     heatmaps_batch: torch.Tensor,
     affine: torch.Tensor,
     visibility_batch: torch.Tensor,
-    target_2d_batch: torch.Tensor,
-    sigma: float,
     confidence_epsilon: float = 1e-4,
     eps: float = 1e-8,
 ) -> torch.Tensor:
     """Batched heatmap scoring across all frames at once.
+
+    Scores only the 14 joints with dedicated MPII heatmaps.
 
     Args:
         projected_2d_batch: (F, J, 2) projected positions.
         heatmaps_batch: (F, 16, 64, 64) heatmaps per frame.
         affine: (2, 3) shared affine transform.
         visibility_batch: (F, J) confidence scores.
-        target_2d_batch: (F, J, 2) target positions.
-        sigma: Gaussian sigma for fallback joints.
         confidence_epsilon: Floor for low-confidence joints.
         eps: Floor to avoid log(0).
 
@@ -155,18 +126,7 @@ def heatmap_score_batch(
     tx: torch.Tensor = affine[0, 2]
     ty: torch.Tensor = affine[1, 2]
 
-    # --- Fallback joints (Hip=0, Spine=7) ---
-    fb_proj: torch.Tensor = projected_2d_batch[:, _FALLBACK_JOINTS, :]  # (F, 2, 2)
-    fb_tgt: torch.Tensor = target_2d_batch[:, _FALLBACK_JOINTS, :]     # (F, 2, 2)
-    fb_conf: torch.Tensor = visibility_batch[:, _FALLBACK_JOINTS]      # (F, 2)
-    fb_diff: torch.Tensor = fb_proj - fb_tgt                           # (F, 2, 2)
-    fb_sq_dist: torch.Tensor = (fb_diff ** 2).sum(dim=-1)              # (F, 2)
-    fb_val: torch.Tensor = torch.exp(-fb_sq_dist / (2.0 * sigma ** 2))
-    fb_weighted: torch.Tensor = fb_val * fb_conf + confidence_epsilon * (1.0 - fb_conf)
-    fb_log: torch.Tensor = torch.log(torch.clamp(fb_weighted, min=eps))
-    fallback_total: torch.Tensor = fb_log.sum()
-
-    # --- Heatmap joints (14 joints, batched across frames) ---
+    # Heatmap joints (14 joints, batched across frames)
     hm_proj: torch.Tensor = projected_2d_batch[:, _HM_H36M_INDICES, :]  # (F, 14, 2)
     hm_conf: torch.Tensor = visibility_batch[:, _HM_H36M_INDICES]       # (F, 14)
 
@@ -176,7 +136,6 @@ def heatmap_score_batch(
     grid_x: torch.Tensor = x_256 / 4.0 / 63.0 * 2.0 - 1.0
     grid_y: torch.Tensor = y_256 / 4.0 / 63.0 * 2.0 - 1.0
 
-    # Each frame has 14 heatmaps sampled at 14 different locations
     # Reshape to (F*14, 1, 64, 64) batch and (F*14, 1, 1, 2) grid
     hm_selected: torch.Tensor = heatmaps_batch[:, _HM_MPII_INDICES, :, :]  # (F, 14, 64, 64)
     hm_flat: torch.Tensor = hm_selected.reshape(-1, 1, 64, 64)  # (F*14, 1, 64, 64)
@@ -191,9 +150,7 @@ def heatmap_score_batch(
 
     weighted: torch.Tensor = values * hm_conf + confidence_epsilon * (1.0 - hm_conf)
     log_vals: torch.Tensor = torch.log(torch.clamp(weighted, min=eps))
-    hm_total: torch.Tensor = log_vals.sum()
-
-    return fallback_total + hm_total
+    return log_vals.sum()
 
 
 def motion_penalty_position(
@@ -265,9 +222,7 @@ def compute_total_score(
     all_positions: list[torch.Tensor],
     all_projected_2d: list[torch.Tensor],
     all_local_rots: list[torch.Tensor],
-    target_2d_list: list[torch.Tensor],
     visibility_list: list[torch.Tensor],
-    sigma: float,
     position_penalty_weight: float,
     rotation_per_joint_weights: torch.Tensor,
     initial_positions_list: list[torch.Tensor] | None = None,
@@ -285,9 +240,7 @@ def compute_total_score(
         all_positions: Per-frame (17, 3) 3D positions.
         all_projected_2d: Per-frame (17, 2) projected 2D.
         all_local_rots: Per-frame (17, 3) local rotations.
-        target_2d_list: Per-frame (17, 2) target 2D positions.
         visibility_list: Per-frame (17,) visibility weights.
-        sigma: Gaussian sigma in pixels.
         position_penalty_weight: Weight for position penalty.
         rotation_per_joint_weights: (17,) per-joint rotation penalty weights.
         initial_positions_list: Per-frame (17, 3) initial MotionBERT positions (optional).
@@ -314,8 +267,6 @@ def compute_total_score(
             heatmaps_list[i],
             affine,
             visibility_list[i],
-            target_2d_list[i],
-            sigma,
             confidence_epsilon=confidence_epsilon,
         )
         if i > 0:
@@ -352,9 +303,7 @@ def compute_total_score_batch(
     all_positions: torch.Tensor,
     all_projected_2d: torch.Tensor,
     all_local_rots: torch.Tensor,
-    target_2d: torch.Tensor,
     visibility: torch.Tensor,
-    sigma: float,
     position_penalty_weight: float,
     rotation_per_joint_weights: torch.Tensor,
     heatmaps: torch.Tensor | None = None,
@@ -367,9 +316,7 @@ def compute_total_score_batch(
         all_positions: (F, J, 3) 3D positions.
         all_projected_2d: (F, J, 2) projected 2D.
         all_local_rots: (F, J, 3) local rotations.
-        target_2d: (F, J, 2) target 2D positions.
         visibility: (F, J) visibility weights.
-        sigma: Gaussian sigma.
         position_penalty_weight: Weight for position penalty.
         rotation_per_joint_weights: (J,) per-joint rotation penalty weights.
         heatmaps: (F, 16, 64, 64) heatmaps.
@@ -384,8 +331,8 @@ def compute_total_score_batch(
 
     # Heatmap score (batched across all frames)
     total_heatmap: torch.Tensor = heatmap_score_batch(
-        all_projected_2d, heatmaps, affine, visibility, target_2d,
-        sigma, confidence_epsilon=confidence_epsilon,
+        all_projected_2d, heatmaps, affine, visibility,
+        confidence_epsilon=confidence_epsilon,
     )
 
     # Position penalty: root joint distance between consecutive frames

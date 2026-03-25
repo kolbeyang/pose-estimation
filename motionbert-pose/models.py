@@ -38,7 +38,6 @@ class EvaluationResult(BaseModel):
     """Evaluation metrics for one example."""
 
     mpjpe: float  # meters
-    p_mpjpe: float  # meters
     per_joint_mpjpe: list[float]  # 12 eval joints
     per_frame_mpjpe: list[float]
     num_frames: int
@@ -60,9 +59,7 @@ class ComparisonResult(BaseModel):
     """Comparison of detector vs optimized vs ground truth."""
 
     det_mpjpe: float | None = None
-    det_p_mpjpe: float | None = None
     opt_mpjpe: float | None = None
-    opt_p_mpjpe: float | None = None
     det_mpjpe_cm: float | None = None
     opt_mpjpe_cm: float | None = None
     improvement_cm: float | None = None  # positive = improved
@@ -78,11 +75,7 @@ class ExampleResult(BaseModel):
     num_frames: int
     camera_params: CameraParams
     mpjpe: float | None = None
-    p_mpjpe: float | None = None
     mpjpe_cm: float | None = None
-    p_mpjpe_cm: float | None = None
     opt_mpjpe: float | None = None
-    opt_p_mpjpe: float | None = None
     opt_mpjpe_cm: float | None = None
-    opt_p_mpjpe_cm: float | None = None
     improvement_cm: float | None = None  # positive = improved

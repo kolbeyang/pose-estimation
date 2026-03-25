@@ -94,7 +94,7 @@ def main() -> None:
     affine: np.ndarray
     positions_3d_norm: np.ndarray
     mpii_kp_2d: list[np.ndarray]
-    kp_2d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm = detect_poses(frames_rgb)
+    kp_2d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm, _ = detect_poses(frames_rgb)
 
     # 4. Camera-space conversion
     det_cam_positions: list[np.ndarray] = []
@@ -124,7 +124,6 @@ def main() -> None:
     loss_history: list[float]
     optimized_3d, bone_lengths_final, loss_history, _ = run_optimization(
         initial_positions_cam=det_cam_positions,
-        target_2d=kp_2d,
         visibility=visibility,
         camera=camera,
         heatmaps=heatmaps,
@@ -142,22 +141,18 @@ def main() -> None:
     print(f"\n=== RESULTS ===")
     if "det_mpjpe" in metrics:
         print(f"  Det MPJPE:   {metrics['det_mpjpe']*100:.2f} cm")
-        print(f"  Det P-MPJPE: {metrics['det_p_mpjpe']*100:.2f} cm")
     if "det_szi_mpjpe" in metrics:
         print(f"  Det SZI-MPJPE: {metrics['det_szi_mpjpe']*100:.2f} cm (scale={metrics['det_szi_scale']:.4f})")
     if "det_mpjpe_no_ankles" in metrics:
         print(f"  Det MPJPE (no ankles):   {metrics['det_mpjpe_no_ankles']*100:.2f} cm")
-        print(f"  Det P-MPJPE (no ankles): {metrics['det_p_mpjpe_no_ankles']*100:.2f} cm")
     if "det_szi_mpjpe_no_ankles" in metrics:
         print(f"  Det SZI-MPJPE (no ankles): {metrics['det_szi_mpjpe_no_ankles']*100:.2f} cm")
     if "opt_mpjpe" in metrics:
         print(f"  Opt MPJPE:   {metrics['opt_mpjpe']*100:.2f} cm")
-        print(f"  Opt P-MPJPE: {metrics['opt_p_mpjpe']*100:.2f} cm")
     if "opt_szi_mpjpe" in metrics:
         print(f"  Opt SZI-MPJPE: {metrics['opt_szi_mpjpe']*100:.2f} cm (scale={metrics['opt_szi_scale']:.4f})")
     if "opt_mpjpe_no_ankles" in metrics:
         print(f"  Opt MPJPE (no ankles):   {metrics['opt_mpjpe_no_ankles']*100:.2f} cm")
-        print(f"  Opt P-MPJPE (no ankles): {metrics['opt_p_mpjpe_no_ankles']*100:.2f} cm")
     if "opt_szi_mpjpe_no_ankles" in metrics:
         print(f"  Opt SZI-MPJPE (no ankles): {metrics['opt_szi_mpjpe_no_ankles']*100:.2f} cm")
     if "improvement" in metrics:

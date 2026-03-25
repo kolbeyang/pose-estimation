@@ -123,14 +123,7 @@ def benchmark_example(
             print(f"    ERROR: Need at least 2 frames for {name}. Skipping.")
             return result
 
-        detection_result = detect_poses(frames_rgb, return_timing=True)
-        kp_2d = detection_result[0]
-        visibility = detection_result[1]
-        heatmaps = detection_result[2]
-        mpii_kp_2d = detection_result[3]
-        affine = detection_result[4]
-        positions_3d_norm = detection_result[5]
-        detection_timing: dict[str, float] = detection_result[6]
+        kp_2d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm, detection_timing = detect_poses(frames_rgb, return_timing=True)
 
         det_cam_positions: list[np.ndarray] = []
         for i in range(len(frames_rgb)):
@@ -156,7 +149,6 @@ def benchmark_example(
         opt_fn = run_optimization_batched if use_batched else run_optimization
         optimized_3d, bone_lengths_final, loss_history, profile_data = opt_fn(
             initial_positions_cam=det_cam_positions,
-            target_2d=kp_2d,
             visibility=visibility,
             camera=camera,
             heatmaps=heatmaps,
@@ -195,11 +187,9 @@ def benchmark_example(
             "total_time_s": round(total_time, 3),
             "latency_per_frame_s": round(total_time / n_frames, 3),
             "det_mpjpe": metrics.get("det_mpjpe"),
-            "det_p_mpjpe": metrics.get("det_p_mpjpe"),
             "det_szi_mpjpe": metrics.get("det_szi_mpjpe"),
             "det_mpjve": metrics.get("det_mpjve"),
             "opt_mpjpe": metrics.get("opt_mpjpe"),
-            "opt_p_mpjpe": metrics.get("opt_p_mpjpe"),
             "opt_szi_mpjpe": metrics.get("opt_szi_mpjpe"),
             "opt_mpjve": metrics.get("opt_mpjve"),
             "improvement": metrics.get("improvement"),
@@ -313,8 +303,6 @@ def run_benchmark(
             "n_examples": len(valid),
             "mean_det_mpjpe": float(np.mean([e["det_mpjpe"] for e in valid])),
             "mean_opt_mpjpe": float(np.mean([e["opt_mpjpe"] for e in valid])),
-            "mean_det_p_mpjpe": float(np.mean([e["det_p_mpjpe"] for e in valid])),
-            "mean_opt_p_mpjpe": float(np.mean([e["opt_p_mpjpe"] for e in valid])),
             "mean_det_mpjve": float(np.mean([e.get("det_mpjve", 0) for e in valid])),
             "mean_opt_mpjve": float(np.mean([e.get("opt_mpjve", 0) for e in valid])),
             "mean_detection_time_s": float(np.mean([e["detection_time_s"] for e in valid])),
@@ -334,8 +322,6 @@ def run_benchmark(
         agg = results["aggregate"]
         print(f"  Mean Det MPJPE:  {agg['mean_det_mpjpe']*100:.2f} cm")
         print(f"  Mean Opt MPJPE:  {agg['mean_opt_mpjpe']*100:.2f} cm")
-        print(f"  Mean Det P-MPJPE: {agg['mean_det_p_mpjpe']*100:.2f} cm")
-        print(f"  Mean Opt P-MPJPE: {agg['mean_opt_p_mpjpe']*100:.2f} cm")
         print(f"  Mean Improvement: {agg['mean_improvement']*100:+.2f} cm")
         print(f"  Mean Detection:   {agg['mean_detection_time_s']:.1f}s "
               f"(YOLO={agg['mean_yolo_time_s']:.1f}s, "

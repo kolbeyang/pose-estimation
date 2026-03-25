@@ -1,7 +1,7 @@
 """Parameter sweep for FK optimization hyperparameters.
 
 Runs detection once, then re-optimizes with different parameter configs.
-Reports MPJPE, P-MPJPE, MPJVE, and 2D-vs-detection reprojection error.
+Reports MPJPE, MPJVE, and 2D-vs-detection reprojection error.
 """
 
 import json
@@ -88,7 +88,7 @@ def load_example(example_idx: int = 0) -> dict[str, Any]:
     frame_indices = frame_indices[: len(frames_rgb)]
 
     # 3. Detect
-    kp_2d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm = detect_poses(frames_rgb)
+    kp_2d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm, _ = detect_poses(frames_rgb)
 
     # 4. Camera-space conversion (per-frame pairwise depth estimation)
     det_cam_positions: list[np.ndarray] = []
@@ -150,7 +150,6 @@ def run_sweep_config(data: dict[str, Any], config: SweepConfig) -> dict[str, Any
 
         optimized_3d, bone_lengths_final, loss_history, _ = run_optimization(
             initial_positions_cam=data["det_cam_positions"],
-            target_2d=data["target_2d"],
             visibility=data["visibility"],
             camera=data["camera"],
             num_steps=config.num_steps,
@@ -439,7 +438,7 @@ def main() -> None:
         print(f"{'='*125}")
         header = (
             f"{'Config':<40} {'Det MPJPE':>10} {'Opt MPJPE':>10} {'Improv':>8} "
-            f"{'Opt P-MPJPE':>12} {'Det MPJVE':>10} {'Opt MPJVE':>10} {'Det 2D-Det':>10} {'Opt 2D-Det':>10}"
+            f"{'Det MPJVE':>10} {'Opt MPJVE':>10} {'Det 2D-Det':>10} {'Opt 2D-Det':>10}"
         )
         print(header)
         print("-" * len(header))
@@ -447,14 +446,13 @@ def main() -> None:
             det_mpjpe = m.get("det_mpjpe", 0) * 100
             opt_mpjpe = m.get("opt_mpjpe", 0) * 100
             improv = m.get("improvement", 0) * 100
-            opt_p = m.get("opt_p_mpjpe", 0) * 100
             det_mpjve = m.get("det_mpjve", 0) * 100 if m.get("det_mpjve") is not None else 0.0
             opt_mpjve = m.get("opt_mpjve", 0) * 100 if m.get("opt_mpjve") is not None else 0.0
             det_2d = m.get("det_2d_det_mpjpe_px", 0)
             opt_2d = m.get("opt_2d_det_mpjpe_px", 0)
             print(
                 f"{name:<40} {det_mpjpe:>10.2f} {opt_mpjpe:>10.2f} {improv:>+8.2f} "
-                f"{opt_p:>12.2f} {det_mpjve:>10.2f} {opt_mpjve:>10.2f} {det_2d:>10.1f} {opt_2d:>10.1f}"
+                f"{det_mpjve:>10.2f} {opt_mpjve:>10.2f} {det_2d:>10.1f} {opt_2d:>10.1f}"
             )
 
         # Save results to JSON
@@ -469,7 +467,6 @@ def main() -> None:
                     "det_mpjpe_cm": m.get("det_mpjpe", 0) * 100,
                     "opt_mpjpe_cm": m.get("opt_mpjpe", 0) * 100,
                     "improvement_cm": m.get("improvement", 0) * 100,
-                    "opt_p_mpjpe_cm": m.get("opt_p_mpjpe", 0) * 100,
                     "det_2d_det_mpjpe_px": m.get("det_2d_det_mpjpe_px", 0),
                     "opt_2d_det_mpjpe_px": m.get("opt_2d_det_mpjpe_px", 0),
                     "opt_mpjve_cm": m.get("opt_mpjve", 0) * 100

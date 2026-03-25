@@ -12,8 +12,14 @@ PANOPTIC_ROOT: str = os.path.normpath(
 TRAINING_RUNS_DIR: str = os.path.join(_THIS_DIR, "training_runs")
 
 # --- CMU Panoptic examples ---
-# Each tuple: (sequence_name, hd_camera, start_frame, num_frames, person_idx)
-EXAMPLES: list[tuple[str, str, int, int, int]] = [
+# Each tuple: (sequence_name, hd_camera, start_frame, num_frames, person_idx,
+#              [video_override], [name_suffix])
+# Optional 6th element: path to an alternative video file (e.g. occluded version).
+#   When set, frames are read from this file starting at index 0,
+#   but ground truth still uses start_frame from the original sequence.
+# Optional 7th element: suffix appended to the example name for display/output.
+_OCC_DIR: str = os.path.join(_THIS_DIR, "occlusion_test_videos")
+EXAMPLES: list[tuple] = [
     ("171204_pose1_sample", "00_00", 0, 100, 0),
     ("171204_pose2", "00_00", 200, 150, 0),
     ("171204_pose2", "00_00", 5000, 150, 0),
@@ -33,6 +39,13 @@ EXAMPLES: list[tuple[str, str, int, int, int]] = [
     ("160906_pizza1", "00_00", 2000, 150, 0),
     ("160906_pizza1", "00_00", 4500, 150, 0),
     ("female_example_01", "00_00", 350, 150, 0),
+    # --- Occlusion tests (16 visible, 16 black) ---
+    ("171204_pose1_sample", "00_00", 0, 100, 0,
+     os.path.join(_OCC_DIR, "171204_pose1_sample_0_occ16v16b.mp4"), "_occ16v16b"),
+    ("171204_pose2", "00_00", 15000, 150, 0,
+     os.path.join(_OCC_DIR, "171204_pose2_15000_occ16v16b.mp4"), "_occ16v16b"),
+    ("171204_pose3", "00_00", 4000, 150, 0,
+     os.path.join(_OCC_DIR, "171204_pose3_4000_occ16v16b.mp4"), "_occ16v16b"),
 ]
 
 # --- Video processing ---

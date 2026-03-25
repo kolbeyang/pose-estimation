@@ -32,6 +32,29 @@ MPII_FLIP_PAIRS: list[tuple[int, int]] = [
     (12, 13),
 ]
 
+# RGB channel means for Stacked Hourglass normalization (from MPII training set).
+_SH_RGB_MEAN: np.ndarray = np.array([0.4404, 0.4440, 0.4327], dtype=np.float32)
+
+
+def _normalize_for_sh(cropped: np.ndarray) -> np.ndarray:
+    """Normalize a cropped HWC uint8 image for Stacked Hourglass inference.
+
+    Converts to float32, scales to [0,1], transposes to CHW, and subtracts
+    the RGB channel means used during MPII training.
+
+    Args:
+        cropped: (H, W, 3) uint8 image.
+
+    Returns:
+        (3, H, W) float32 normalized image.
+    """
+    img: np.ndarray = cropped.astype(np.float32) / 255.0
+    img = np.transpose(img, (2, 0, 1))  # CHW
+    img[0] -= _SH_RGB_MEAN[0]
+    img[1] -= _SH_RGB_MEAN[1]
+    img[2] -= _SH_RGB_MEAN[2]
+    return img
+
 
 def _get_device() -> torch.device:
     """Select best available device: CUDA > MPS > CPU."""
@@ -278,21 +301,11 @@ def run_hourglass(
             shared_affine = affine
 
         # Normalize: [0,1], HWC->CHW, subtract RGB means
-        img: np.ndarray = cropped.astype(np.float32) / 255.0
-        img = np.transpose(img, (2, 0, 1))  # CHW
-        img[0] -= 0.4404
-        img[1] -= 0.4440
-        img[2] -= 0.4327
-        preprocessed.append(img)
+        preprocessed.append(_normalize_for_sh(cropped))
 
         # Flipped version
         cropped_flip: np.ndarray = cropped[:, ::-1].copy()
-        img_flip: np.ndarray = cropped_flip.astype(np.float32) / 255.0
-        img_flip = np.transpose(img_flip, (2, 0, 1))
-        img_flip[0] -= 0.4404
-        img_flip[1] -= 0.4440
-        img_flip[2] -= 0.4327
-        preprocessed_flip.append(img_flip)
+        preprocessed_flip.append(_normalize_for_sh(cropped_flip))
 
     assert shared_affine is not None
     n_frames: int = len(frames_rgb)
@@ -690,9 +703,9 @@ def motionbert_to_camera_space(
     else:
         tz = 3.0
 
-    # TODO: Shouldn't back projection occur using the camera parameters that we know from the ground truth data? We don't need to make unnecessary pinhole assumptions.
     # Step 3: Back-project root joint's 2D pixel location to get tx, ty in
-    # camera space using pinhole model: tx = (u - cx) * tz / fx.
+    # camera space using the known camera intrinsics (fx, fy, cx, cy) and
+    # the estimated depth tz via standard pinhole projection inversion.
     u_root: float = float(kp_2d[0, 0])
     v_root: float = float(kp_2d[0, 1])
     tx: float = (u_root - cx) * tz / fx
@@ -722,14 +735,7 @@ def detect_poses(
     list[np.ndarray],
     np.ndarray,
     np.ndarray,
-] | tuple[
-    list[np.ndarray],
-    list[np.ndarray],
-    list[np.ndarray],
-    list[np.ndarray],
-    np.ndarray,
-    np.ndarray,
-    dict[str, float],
+    dict[str, float] | None,
 ]:
     """Full detection pipeline.
 
@@ -750,7 +756,7 @@ def detect_poses(
         mpii_keypoints_2d: List of (16, 3) raw MPII keypoints (x, y, conf) in pixel coords.
         affine: (2, 3) affine from 256-crop coords to original pixel coords.
         positions_3d_norm: (N, 16, 3) normalized MotionBERT output (Head removed).
-        timing: (only if return_timing=True) Dict with sub-stage timings.
+        timing: Dict with sub-stage timings when return_timing=True, else None.
     """
     # 1. YOLOv8 person detection -> union bounding box
     t0: float = time.perf_counter()
@@ -781,8 +787,9 @@ def detect_poses(
 
     t4: float = time.perf_counter()
 
+    timing: dict[str, float] | None = None
     if return_timing:
-        timing: dict[str, float] = {
+        timing = {
             "yolo_s": round(t1 - t0, 3),
             "stacked_hourglass_s": round(t2 - t1, 3),
             "motionbert_s": round(t3 - t2, 3),
@@ -792,15 +799,6 @@ def detect_poses(
               f"SH={timing['stacked_hourglass_s']:.1f}s, "
               f"MB={timing['motionbert_s']:.1f}s, "
               f"post={timing['postprocess_s']:.3f}s")
-        return (
-            kp_2d_list,
-            visibility_list,
-            all_heatmaps,
-            all_keypoints_2d,
-            affine,
-            positions_3d_norm,
-            timing,
-        )
 
     return (
         kp_2d_list,
@@ -809,4 +807,5 @@ def detect_poses(
         all_keypoints_2d,
         affine,
         positions_3d_norm,
+        timing,
     )

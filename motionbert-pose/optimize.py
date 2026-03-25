@@ -41,7 +41,6 @@ def _apply_blur_torch(
 
 def run_optimization(
     initial_positions_cam: list[np.ndarray],
-    target_2d: list[np.ndarray],
     visibility: list[np.ndarray],
     camera: Camera,
     num_steps: int | None = None,
@@ -54,7 +53,6 @@ def run_optimization(
 
     Args:
         initial_positions_cam: Per-frame (17, 3) camera-space positions from detector.
-        target_2d: Per-frame (17, 2) pixel target positions.
         visibility: Per-frame (17,) visibility weights.
         camera: Camera for 3D->2D projection.
         num_steps: Override for cfg.NUM_STEPS.
@@ -142,9 +140,6 @@ def run_optimization(
     ]
 
     # Target tensors (not learnable)
-    target_2d_t: list[torch.Tensor] = [
-        torch.tensor(t, dtype=torch.float32) for t in target_2d
-    ]
     visibility_t: list[torch.Tensor] = [
         torch.tensor(v, dtype=torch.float32) for v in visibility
     ]
@@ -241,18 +236,15 @@ def run_optimization(
                 current_blur_sigma = new_blur
                 print(f"    [Step {step}] Heatmap blur sigma changed to {new_blur:.1f}")
 
-        # Compute score with fixed sigma
+        # Compute score
         scoring_t0: float = _time.perf_counter() if profile else 0.0
-        sigma: float = cfg.SIGMA
         total_score: torch.Tensor
         details: dict[str, float]
         total_score, details = compute_total_score(
             all_positions,
             all_projected_2d,
             all_local_rots_current,
-            target_2d_t,
             visibility_t,
-            sigma,
             cfg.POSITION_PENALTY_WEIGHT,
             rot_per_joint_weights,
             initial_positions_list=initial_positions_t,
@@ -290,7 +282,6 @@ def run_optimization(
                 f"    Step {step:4d}/{num_steps}  "
                 f"loss={loss.item():.1f}  "
                 f"heatmap={details['heatmap']:.1f}  "
-                f"sigma={sigma:.0f}  "
                 f"pos_p={details['pos_penalty']:.4f}  "
                 f"rot_p={details['rot_penalty']:.4f}"
             )
@@ -323,7 +314,6 @@ def run_optimization(
 
 def run_optimization_batched(
     initial_positions_cam: list[np.ndarray],
-    target_2d: list[np.ndarray],
     visibility: list[np.ndarray],
     camera: Camera,
     num_steps: int | None = None,
@@ -398,9 +388,6 @@ def run_optimization_batched(
     )
 
     # Non-learnable tensors (stacked)
-    target_2d_t: torch.Tensor = torch.tensor(
-        np.array(target_2d), dtype=torch.float32,
-    )  # (F, J, 2)
     visibility_t: torch.Tensor = torch.tensor(
         np.array(visibility), dtype=torch.float32,
     )  # (F, J)
@@ -461,10 +448,9 @@ def run_optimization_batched(
 
         # Batched scoring
         scoring_t0: float = _time.perf_counter() if profile else 0.0
-        sigma: float = cfg.SIGMA
         total_score, details = compute_total_score_batch(
             all_positions, all_projected_2d, param_local_rots,
-            target_2d_t, visibility_t, sigma,
+            visibility_t,
             cfg.POSITION_PENALTY_WEIGHT, rot_per_joint_weights,
             heatmaps=heatmaps_t,
             affine=affine_t,
@@ -497,7 +483,6 @@ def run_optimization_batched(
                 f"    Step {step:4d}/{num_steps}  "
                 f"loss={loss.item():.1f}  "
                 f"heatmap={details['heatmap']:.1f}  "
-                f"sigma={sigma:.0f}  "
                 f"pos_p={details['pos_penalty']:.4f}  "
                 f"rot_p={details['rot_penalty']:.4f}"
             )

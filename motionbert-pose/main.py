@@ -31,6 +31,7 @@ from graphs import (
     generate_per_frame_mpjve,
     generate_per_joint_error_bar,
     generate_per_joint_mpjve_bar,
+    generate_per_joint_szi_error_bar,
     generate_summary,
     generate_trajectory_graphs,
 )
@@ -93,29 +94,38 @@ def process_example(
     num_frames: int,
     person_idx: int,
     run_dir: str,
+    video_override: str | None = None,
+    name_suffix: str = "",
 ) -> dict[str, Any]:
     """Process one CMU Panoptic example end-to-end.
 
     Args:
         seq_name: Sequence name.
         camera_name: Camera identifier.
-        start_frame: Start frame index.
+        start_frame: Start frame index in the source Panoptic video (also used for GT).
         num_frames: Number of frames.
         person_idx: Person index.
         run_dir: Output directory for this run.
+        video_override: If set, read frames from this video file instead of the
+            Panoptic HD video.  Frames are read starting at index 0 in the
+            override file, but GT is still loaded using *start_frame* from the
+            original sequence.
+        name_suffix: Appended to the example name for display / output dirs.
 
     Returns:
         Metrics dict.
     """
-    name: str = _example_name(seq_name, start_frame)
+    name: str = _example_name(seq_name, start_frame) + name_suffix
     print(f"\n{'='*60}")
     print(f"  Processing: {name}")
     print(f"  Sequence: {seq_name}, Camera: {camera_name}")
     print(f"  Frames: {start_frame}-{start_frame + num_frames - 1}, Person: {person_idx}")
+    if video_override:
+        print(f"  Video override: {video_override}")
     print(f"{'='*60}")
 
     seq_dir: str = get_sequence_dir(cfg.PANOPTIC_ROOT, seq_name)
-    video_path: str = get_video_path(cfg.PANOPTIC_ROOT, seq_name, camera_name)
+    video_path: str = video_override or get_video_path(cfg.PANOPTIC_ROOT, seq_name, camera_name)
 
     # --- 1. Load camera calibration ---
     print("\n  [1/5] Loading camera calibration...")
@@ -143,10 +153,16 @@ def process_example(
     print("\n  [2/5] Extracting video frames...")
     video_fps: float = 30.0
     frame_step: int = max(1, int(round(video_fps / cfg.TARGET_FPS)))
+    # GT frame indices always reference the original Panoptic sequence
     frame_indices: list[int] = list(range(start_frame, start_frame + num_frames, frame_step))
+    # Video frame indices: start at 0 for override videos, else same as GT
+    if video_override:
+        video_frame_indices: list[int] = list(range(0, num_frames, frame_step))
+    else:
+        video_frame_indices = frame_indices
     print(f"    {len(frame_indices)} frames (step={frame_step}, target {cfg.TARGET_FPS} fps)")
 
-    frames_rgb: list[np.ndarray] = extract_video_frames(video_path, frame_indices)
+    frames_rgb: list[np.ndarray] = extract_video_frames(video_path, video_frame_indices)
     if len(frames_rgb) < len(frame_indices):
         print(f"    WARNING: Only got {len(frames_rgb)}/{len(frame_indices)} frames from video")
         frame_indices = frame_indices[:len(frames_rgb)]
@@ -162,7 +178,7 @@ def process_example(
     affine: np.ndarray
     positions_3d_norm: np.ndarray
     mpii_kp_2d: list[np.ndarray]
-    kp_2d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm = detect_poses(frames_rgb)
+    kp_2d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm, _ = detect_poses(frames_rgb)
 
     # --- 4. Convert to camera coordinates ---
     print("\n  [4/5] Converting to camera coordinates...")
@@ -207,7 +223,6 @@ def process_example(
     loss_history: list[float]
     optimized_3d, bone_lengths_final, loss_history, _ = run_optimization_batched(
         initial_positions_cam=det_cam_positions,
-        target_2d=kp_2d,
         visibility=visibility,
         camera=camera,
         heatmaps=heatmaps,
@@ -228,14 +243,12 @@ def process_example(
 
     if "det_mpjpe" in metrics:
         print(f"    Det MPJPE:   {metrics['det_mpjpe']*100:.2f} cm")
-        print(f"    Det P-MPJPE: {metrics['det_p_mpjpe']*100:.2f} cm")
     if "det_szi_mpjpe" in metrics:
         print(f"    Det SZI-MPJPE: {metrics['det_szi_mpjpe']*100:.2f} cm (scale={metrics['det_szi_scale']:.4f})")
     if "det_mpjpe_no_ankles" in metrics:
         print(f"    Det MPJPE (no ankles): {metrics['det_mpjpe_no_ankles']*100:.2f} cm")
     if "opt_mpjpe" in metrics:
         print(f"    Opt MPJPE:   {metrics['opt_mpjpe']*100:.2f} cm")
-        print(f"    Opt P-MPJPE: {metrics['opt_p_mpjpe']*100:.2f} cm")
     if "opt_szi_mpjpe" in metrics:
         print(f"    Opt SZI-MPJPE: {metrics['opt_szi_mpjpe']*100:.2f} cm (scale={metrics['opt_szi_scale']:.4f})")
     if "opt_mpjpe_no_ankles" in metrics:
@@ -301,6 +314,14 @@ def process_example(
             metrics["det_per_joint"],
             example_graph_dir,
             opt_per_joint=metrics.get("opt_per_joint"),
+        )
+    if "det_szi_per_joint" in metrics and "det_per_joint" in metrics:
+        generate_per_joint_szi_error_bar(
+            metrics["det_per_joint"],
+            metrics["det_szi_per_joint"],
+            example_graph_dir,
+            opt_per_joint=metrics.get("opt_per_joint"),
+            opt_szi_per_joint=metrics.get("opt_szi_per_joint"),
         )
     if "det_per_frame_mpjpe" in metrics:
         generate_per_frame_mpjpe(
@@ -370,13 +391,9 @@ def process_example(
         num_frames=len(frames_rgb),
         camera_params=camera_params,
         mpjpe=metrics.get("det_mpjpe"),
-        p_mpjpe=metrics.get("det_p_mpjpe"),
         mpjpe_cm=metrics.get("det_mpjpe", 0) * 100 if "det_mpjpe" in metrics else None,
-        p_mpjpe_cm=metrics.get("det_p_mpjpe", 0) * 100 if "det_p_mpjpe" in metrics else None,
         opt_mpjpe=metrics.get("opt_mpjpe"),
-        opt_p_mpjpe=metrics.get("opt_p_mpjpe"),
         opt_mpjpe_cm=metrics.get("opt_mpjpe", 0) * 100 if "opt_mpjpe" in metrics else None,
-        opt_p_mpjpe_cm=metrics.get("opt_p_mpjpe", 0) * 100 if "opt_p_mpjpe" in metrics else None,
         improvement_cm=metrics.get("improvement", 0) * 100 if "improvement" in metrics else None,
     )
     print(f"    {example_result.model_dump_json(indent=2)}")
@@ -398,16 +415,19 @@ def main() -> None:
 
     all_metrics: list[dict[str, Any]] = []
     for example in cfg.EXAMPLES:
-        seq_name: str
-        camera_name: str
-        start_frame: int
-        num_frames: int
-        person_idx: int
-        seq_name, camera_name, start_frame, num_frames, person_idx = example
+        seq_name: str = example[0]
+        camera_name: str = example[1]
+        start_frame: int = example[2]
+        num_frames: int = example[3]
+        person_idx: int = example[4]
+        video_override: str | None = example[5] if len(example) > 5 else None
+        name_suffix: str = example[6] if len(example) > 6 else ""
         try:
             metrics: dict[str, Any] = process_example(
                 seq_name, camera_name, start_frame, num_frames, person_idx,
                 run_dir,
+                video_override=video_override,
+                name_suffix=name_suffix,
             )
             if metrics:
                 all_metrics.append(metrics)

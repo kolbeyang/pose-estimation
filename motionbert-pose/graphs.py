@@ -133,6 +133,56 @@ def generate_per_joint_error_bar(
     _save(fig, os.path.join(output_dir, "per_joint_error.png"))
 
 
+def generate_per_joint_szi_error_bar(
+    det_per_joint: list[float],
+    det_szi_per_joint: list[float],
+    output_dir: str,
+    opt_per_joint: list[float] | None = None,
+    opt_szi_per_joint: list[float] | None = None,
+) -> None:
+    """Combined 4-bar chart: MPJPE + SZI-MPJPE per joint (12 eval joints).
+
+    Args:
+        det_per_joint: 12 per-joint MPJPE values in meters (detector).
+        det_szi_per_joint: 12 per-joint SZI-MPJPE values in meters (detector).
+        output_dir: Directory to save the graph.
+        opt_per_joint: Optional 12 per-joint MPJPE values (optimized).
+        opt_szi_per_joint: Optional 12 per-joint SZI-MPJPE values (optimized).
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    x: np.ndarray = np.arange(NUM_EVAL_JOINTS)
+
+    fig: plt.Figure
+    ax: plt.Axes
+    fig, ax = plt.subplots(figsize=(14, 6))
+
+    if opt_per_joint is not None and opt_szi_per_joint is not None:
+        bw: float = 0.2
+        ax.bar(x - 1.5 * bw, [v * 100 for v in det_per_joint], bw,
+               color="green", alpha=0.7, label="Det MPJPE")
+        ax.bar(x - 0.5 * bw, [v * 100 for v in opt_per_joint], bw,
+               color="red", alpha=0.7, label="Opt MPJPE")
+        ax.bar(x + 0.5 * bw, [v * 100 for v in det_szi_per_joint], bw,
+               color="lightgreen", alpha=0.7, label="Det SZI-MPJPE")
+        ax.bar(x + 1.5 * bw, [v * 100 for v in opt_szi_per_joint], bw,
+               color="lightcoral", alpha=0.7, label="Opt SZI-MPJPE")
+        ax.legend()
+        ax.set_title("Per-Joint MPJPE & SZI-MPJPE (12 eval joints)")
+    else:
+        ax.bar(x - 0.2, [v * 100 for v in det_per_joint], 0.4,
+               color="green", alpha=0.7, label="Det MPJPE")
+        ax.bar(x + 0.2, [v * 100 for v in det_szi_per_joint], 0.4,
+               color="lightgreen", alpha=0.7, label="Det SZI-MPJPE")
+        ax.legend()
+        ax.set_title("Per-Joint MPJPE & SZI-MPJPE (Detector, 12 eval joints)")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel("MPJPE (cm)")
+    ax.grid(True, alpha=0.3, axis="y")
+    _save(fig, os.path.join(output_dir, "per_joint_szi_mpjpe.png"))
+
+
 def generate_per_frame_mpjpe(
     per_frame: list[float],
     output_dir: str,
@@ -479,35 +529,36 @@ def generate_summary(
     ax.legend(fontsize=7)
     ax.grid(True, alpha=0.2)
 
-    # Row 2, Col 1: Per-joint MPJPE bar (12 eval joints)
+    # Row 2, Col 1: Per-joint MPJPE + SZI-MPJPE bar (12 eval joints, 4 bars)
     ax = axes[2, 1]
     if "det_per_joint" in metrics:
         x_ej: np.ndarray = np.arange(NUM_EVAL_JOINTS)
-        ax.bar(x_ej - 0.2, [v * 100 for v in metrics["det_per_joint"]], 0.4,
-               label="Detector", color="green", alpha=0.6)
-        if "opt_per_joint" in metrics:
-            ax.bar(x_ej + 0.2, [v * 100 for v in metrics["opt_per_joint"]], 0.4,
-                   label="Optimized", color="red", alpha=0.6)
+        has_szi_pj: bool = "det_szi_per_joint" in metrics and "opt_szi_per_joint" in metrics
+        if has_szi_pj and "opt_per_joint" in metrics:
+            bw: float = 0.2
+            ax.bar(x_ej - 1.5 * bw, [v * 100 for v in metrics["det_per_joint"]], bw,
+                   label="Det MPJPE", color="green", alpha=0.7)
+            ax.bar(x_ej - 0.5 * bw, [v * 100 for v in metrics["opt_per_joint"]], bw,
+                   label="Opt MPJPE", color="red", alpha=0.7)
+            ax.bar(x_ej + 0.5 * bw, [v * 100 for v in metrics["det_szi_per_joint"]], bw,
+                   label="Det SZI", color="lightgreen", alpha=0.7)
+            ax.bar(x_ej + 1.5 * bw, [v * 100 for v in metrics["opt_szi_per_joint"]], bw,
+                   label="Opt SZI", color="lightcoral", alpha=0.7)
+        else:
+            ax.bar(x_ej - 0.2, [v * 100 for v in metrics["det_per_joint"]], 0.4,
+                   label="Detector", color="green", alpha=0.6)
+            if "opt_per_joint" in metrics:
+                ax.bar(x_ej + 0.2, [v * 100 for v in metrics["opt_per_joint"]], 0.4,
+                       label="Optimized", color="red", alpha=0.6)
         ax.set_xticks(x_ej)
         ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=90, fontsize=5)
-        ax.legend(fontsize=7)
-    ax.set_title("Per-Joint MPJPE (cm)", fontsize=9)
+        ax.legend(fontsize=5)
+    ax.set_title("Per-Joint MPJPE & SZI (cm)", fontsize=9)
     ax.grid(True, alpha=0.2, axis="y")
 
-    # Row 2, Col 2: Per-joint P-MPJPE bar (12 eval joints)
+    # Row 2, Col 2: (empty panel)
     ax = axes[2, 2]
-    if "det_p_per_joint" in metrics:
-        x_ej = np.arange(NUM_EVAL_JOINTS)
-        ax.bar(x_ej - 0.2, [v * 100 for v in metrics["det_p_per_joint"]], 0.4,
-               label="Detector", color="green", alpha=0.6)
-        if "opt_p_per_joint" in metrics:
-            ax.bar(x_ej + 0.2, [v * 100 for v in metrics["opt_p_per_joint"]], 0.4,
-                   label="Optimized", color="red", alpha=0.6)
-        ax.set_xticks(x_ej)
-        ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=90, fontsize=5)
-        ax.legend(fontsize=7)
-    ax.set_title("Per-Joint P-MPJPE (cm)", fontsize=9)
-    ax.grid(True, alpha=0.2, axis="y")
+    ax.axis("off")
 
     # Row 2, Col 3: Bone lengths (GT / Detector / Optimized)
     ax = axes[2, 3]
@@ -607,8 +658,11 @@ def generate_summary(
         metric_str = (
             f"  |  Det MPJPE: {metrics['det_mpjpe']*100:.1f}cm"
             f"  Opt MPJPE: {metrics['opt_mpjpe']*100:.1f}cm"
-            f"  |  Det P-MPJPE: {metrics['det_p_mpjpe']*100:.1f}cm"
-            f"  Opt P-MPJPE: {metrics['opt_p_mpjpe']*100:.1f}cm"
+        )
+    if "det_szi_mpjpe" in metrics:
+        metric_str += (
+            f"  |  Det SZI: {metrics['det_szi_mpjpe']*100:.1f}cm"
+            f"  Opt SZI: {metrics['opt_szi_mpjpe']*100:.1f}cm"
         )
     if "det_mpjve" in metrics:
         metric_str += (
@@ -648,32 +702,48 @@ def generate_aggregate_summary(
 
     names: list[str] = [m.get("name", f"Ex{i}") for i, m in enumerate(with_gt)]
     det_mpjpe_cm: list[float] = [m["det_mpjpe"] * 100 for m in with_gt]
-    det_p_mpjpe_cm: list[float] = [m["det_p_mpjpe"] * 100 for m in with_gt]
 
     has_opt: bool = all("opt_mpjpe" in m for m in with_gt)
     opt_mpjpe_cm: list[float] = []
-    opt_p_mpjpe_cm: list[float] = []
     if has_opt:
         opt_mpjpe_cm = [m["opt_mpjpe"] * 100 for m in with_gt]
-        opt_p_mpjpe_cm = [m["opt_p_mpjpe"] * 100 for m in with_gt]
 
-    # MPJPE bar chart
+    # MPJPE + SZI-MPJPE combined bar chart (4 bars per example)
     fig: plt.Figure
     ax: plt.Axes
     x: np.ndarray = np.arange(len(names))
-    width: float = 0.35
 
-    if has_opt:
+    has_szi: bool = all("det_szi_mpjpe" in m for m in with_gt)
+    has_opt_szi: bool = has_szi and all("opt_szi_mpjpe" in m for m in with_gt)
+
+    if has_opt and has_opt_szi:
+        det_szi_mpjpe_cm: list[float] = [m["det_szi_mpjpe"] * 100 for m in with_gt]
+        opt_szi_mpjpe_cm: list[float] = [m["opt_szi_mpjpe"] * 100 for m in with_gt]
+        width: float = 0.2
+        fig, ax = plt.subplots(figsize=(max(12, len(names) * 2.0), 6))
+        ax.bar(x - 1.5 * width, det_mpjpe_cm, width,
+               color="green", alpha=0.7, label="Det MPJPE")
+        ax.bar(x - 0.5 * width, opt_mpjpe_cm, width,
+               color="red", alpha=0.7, label="Opt MPJPE")
+        ax.bar(x + 0.5 * width, det_szi_mpjpe_cm, width,
+               color="lightgreen", alpha=0.7, label="Det SZI-MPJPE")
+        ax.bar(x + 1.5 * width, opt_szi_mpjpe_cm, width,
+               color="lightcoral", alpha=0.7, label="Opt SZI-MPJPE")
+        ax.legend()
+        ax.set_title("MPJPE & SZI-MPJPE Across Examples")
+    elif has_opt:
+        width = 0.35
         fig, ax = plt.subplots(figsize=(max(10, len(names) * 1.5), 5))
         ax.bar(x - width / 2, det_mpjpe_cm, width,
-               color="steelblue", alpha=0.7, label="Detector")
+               color="green", alpha=0.7, label="Detector")
         ax.bar(x + width / 2, opt_mpjpe_cm, width,
-               color="forestgreen", alpha=0.7, label="Optimized")
+               color="red", alpha=0.7, label="Optimized")
         ax.legend()
         ax.set_title("MPJPE Across Examples (Detector vs Optimized)")
     else:
+        width = 0.35
         fig, ax = plt.subplots(figsize=(max(8, len(names) * 1.2), 5))
-        ax.bar(x, det_mpjpe_cm, color="steelblue", alpha=0.7)
+        ax.bar(x, det_mpjpe_cm, color="green", alpha=0.7)
         ax.set_title("MPJPE Across Examples (Detector)")
 
     ax.set_xticks(x)
@@ -682,44 +752,21 @@ def generate_aggregate_summary(
     ax.grid(True, alpha=0.3, axis="y")
     _save(fig, os.path.join(output_dir, "aggregate_mpjpe.png"))
 
-    # P-MPJPE bar chart
-    if has_opt:
-        fig, ax = plt.subplots(figsize=(max(10, len(names) * 1.5), 5))
-        ax.bar(x - width / 2, det_p_mpjpe_cm, width,
-               color="darkorange", alpha=0.7, label="Detector")
-        ax.bar(x + width / 2, opt_p_mpjpe_cm, width,
-               color="forestgreen", alpha=0.7, label="Optimized")
-        ax.legend()
-        ax.set_title("Procrustes-Aligned MPJPE Across Examples (Detector vs Optimized)")
-    else:
-        fig, ax = plt.subplots(figsize=(max(8, len(names) * 1.2), 5))
-        ax.bar(x, det_p_mpjpe_cm, color="darkorange", alpha=0.7)
-        ax.set_title("Procrustes-Aligned MPJPE Across Examples (Detector)")
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(names, rotation=45, ha="right", fontsize=8)
-    ax.set_ylabel("P-MPJPE (cm)")
-    ax.grid(True, alpha=0.3, axis="y")
-    _save(fig, os.path.join(output_dir, "aggregate_p_mpjpe.png"))
-
-    # SZI-MPJPE bar chart
-    has_szi: bool = all("det_szi_mpjpe" in m for m in with_gt)
+    # SZI-MPJPE standalone (kept for backwards compat)
     if has_szi:
-        det_szi_mpjpe_cm: list[float] = [m["det_szi_mpjpe"] * 100 for m in with_gt]
-        has_opt_szi: bool = all("opt_szi_mpjpe" in m for m in with_gt)
-
+        det_szi_cm: list[float] = [m["det_szi_mpjpe"] * 100 for m in with_gt]
         if has_opt_szi:
-            opt_szi_mpjpe_cm: list[float] = [m["opt_szi_mpjpe"] * 100 for m in with_gt]
+            opt_szi_cm: list[float] = [m["opt_szi_mpjpe"] * 100 for m in with_gt]
             fig, ax = plt.subplots(figsize=(max(10, len(names) * 1.5), 5))
-            ax.bar(x - width / 2, det_szi_mpjpe_cm, width,
+            ax.bar(x - 0.175, det_szi_cm, 0.35,
                    color="mediumpurple", alpha=0.7, label="Detector")
-            ax.bar(x + width / 2, opt_szi_mpjpe_cm, width,
-                   color="forestgreen", alpha=0.7, label="Optimized")
+            ax.bar(x + 0.175, opt_szi_cm, 0.35,
+                   color="orchid", alpha=0.7, label="Optimized")
             ax.legend()
             ax.set_title("Scale-Z-Invariant MPJPE Across Examples (Detector vs Optimized)")
         else:
             fig, ax = plt.subplots(figsize=(max(8, len(names) * 1.2), 5))
-            ax.bar(x, det_szi_mpjpe_cm, color="mediumpurple", alpha=0.7)
+            ax.bar(x, det_szi_cm, color="mediumpurple", alpha=0.7)
             ax.set_title("Scale-Z-Invariant MPJPE Across Examples (Detector)")
 
         ax.set_xticks(x)
@@ -760,10 +807,10 @@ def generate_aggregate_summary(
     if has_opt:
         print(
             f"  {'Example':<35} {'Det MPJPE':>10} {'Opt MPJPE':>10} {'Improv':>8} "
-            f"{'Det P-MPJPE':>12} {'Opt P-MPJPE':>12} {'Det MPJVE':>10} {'Opt MPJVE':>10}"
+            f"{'Det MPJVE':>10} {'Opt MPJVE':>10}"
         )
         print(
-            f"  {'-'*35} {'-'*10} {'-'*10} {'-'*8} {'-'*12} {'-'*12} {'-'*10} {'-'*10}"
+            f"  {'-'*35} {'-'*10} {'-'*10} {'-'*8} {'-'*10} {'-'*10}"
         )
         for i, name in enumerate(names):
             improv: float = det_mpjpe_cm[i] - opt_mpjpe_cm[i]
@@ -771,26 +818,23 @@ def generate_aggregate_summary(
             opt_v: float = with_gt[i].get("opt_mpjve", 0) * 100
             print(
                 f"  {name:<35} {det_mpjpe_cm[i]:>10.2f} {opt_mpjpe_cm[i]:>10.2f} "
-                f"{improv:>+8.2f} {det_p_mpjpe_cm[i]:>12.2f} {opt_p_mpjpe_cm[i]:>12.2f} "
+                f"{improv:>+8.2f} "
                 f"{det_v:>10.2f} {opt_v:>10.2f}"
             )
         mean_det: float = float(np.mean(det_mpjpe_cm))
         mean_opt: float = float(np.mean(opt_mpjpe_cm))
         mean_improv: float = mean_det - mean_opt
-        mean_det_p: float = float(np.mean(det_p_mpjpe_cm))
-        mean_opt_p: float = float(np.mean(opt_p_mpjpe_cm))
         mean_det_v: float = float(np.mean([m.get("det_mpjve", 0) * 100 for m in with_gt]))
         mean_opt_v: float = float(np.mean([m.get("opt_mpjve", 0) * 100 for m in with_gt]))
         print(
             f"  {'MEAN':<35} {mean_det:>10.2f} {mean_opt:>10.2f} "
-            f"{mean_improv:>+8.2f} {mean_det_p:>12.2f} {mean_opt_p:>12.2f} "
+            f"{mean_improv:>+8.2f} "
             f"{mean_det_v:>10.2f} {mean_opt_v:>10.2f}"
         )
     else:
-        print(f"  {'Example':<35} {'MPJPE (cm)':>10} {'P-MPJPE (cm)':>12}")
-        print(f"  {'-'*35} {'-'*10} {'-'*12}")
+        print(f"  {'Example':<35} {'MPJPE (cm)':>10}")
+        print(f"  {'-'*35} {'-'*10}")
         for i, name in enumerate(names):
-            print(f"  {name:<35} {det_mpjpe_cm[i]:>10.2f} {det_p_mpjpe_cm[i]:>12.2f}")
+            print(f"  {name:<35} {det_mpjpe_cm[i]:>10.2f}")
         mean_mpjpe: float = float(np.mean(det_mpjpe_cm))
-        mean_p_mpjpe: float = float(np.mean(det_p_mpjpe_cm))
-        print(f"  {'MEAN':<35} {mean_mpjpe:>10.2f} {mean_p_mpjpe:>12.2f}")
+        print(f"  {'MEAN':<35} {mean_mpjpe:>10.2f}")
