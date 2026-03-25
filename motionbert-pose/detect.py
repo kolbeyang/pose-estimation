@@ -6,6 +6,7 @@ Handles person detection (YOLOv8), 2D heatmap extraction, and 2D->3D lifting.
 import copy
 import os
 import sys
+import time
 from functools import partial
 
 import cv2
@@ -30,6 +31,15 @@ MPII_FLIP_PAIRS: list[tuple[int, int]] = [
     (11, 14),
     (12, 13),
 ]
+
+
+def _get_device() -> torch.device:
+    """Select best available device: CUDA > MPS > CPU."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +228,7 @@ def run_hourglass(
     frames_rgb: list[np.ndarray],
     bbox: np.ndarray,
 ) -> tuple[list[np.ndarray], list[np.ndarray], np.ndarray]:
-    """Run HG8 on cropped frames with flip augmentation.
+    """Run HG8 on cropped frames with flip augmentation (batched).
 
     Args:
         frames_rgb: RGB frames (H, W, 3).
@@ -231,7 +241,7 @@ def run_hourglass(
     """
     from stacked_hourglass import hg8
 
-    device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device: torch.device = _get_device()
 
     # Load pretrained model - handle CPU-only machines
     try:
@@ -253,67 +263,96 @@ def run_hourglass(
 
     model = model.to(device)
     model.eval()
-    print("  Loaded Stacked Hourglass (8-stack, pretrained)")
+    print(f"  Loaded Stacked Hourglass (8-stack, pretrained) on {device}")
 
-    all_keypoints_2d: list[np.ndarray] = []
-    all_heatmaps: list[np.ndarray] = []
+    # --- Phase 1: Preprocess all frames ---
+    preprocessed: list[np.ndarray] = []       # normalized CHW arrays
+    preprocessed_flip: list[np.ndarray] = []  # flipped normalized CHW arrays
     shared_affine: np.ndarray | None = None
 
-    print(f"  Running Stacked Hourglass on {len(frames_rgb)} frames...")
+    for frame in frames_rgb:
+        cropped: np.ndarray
+        affine: np.ndarray
+        cropped, affine = crop_and_resize(frame, bbox, target_size=256)
+        if shared_affine is None:
+            shared_affine = affine
 
-    with torch.no_grad():
-        for frame in tqdm(frames_rgb, desc="  2D Pose"):
-            # Crop and resize to 256x256
-            cropped: np.ndarray
-            affine: np.ndarray
-            cropped, affine = crop_and_resize(frame, bbox, target_size=256)
-            if shared_affine is None:
-                shared_affine = affine
+        # Normalize: [0,1], HWC->CHW, subtract RGB means
+        img: np.ndarray = cropped.astype(np.float32) / 255.0
+        img = np.transpose(img, (2, 0, 1))  # CHW
+        img[0] -= 0.4404
+        img[1] -= 0.4440
+        img[2] -= 0.4327
+        preprocessed.append(img)
 
-            # Preprocess: normalize to [0, 1], subtract RGB mean, HWC -> CHW
-            # RGB channel means match the official HumanPosePredictor preprocessing
-            img: np.ndarray = cropped.astype(np.float32) / 255.0
-            img = np.transpose(img, (2, 0, 1))  # HWC -> CHW
-            img[0] -= 0.4404  # R mean
-            img[1] -= 0.4440  # G mean
-            img[2] -= 0.4327  # B mean
-            inp: torch.Tensor = torch.from_numpy(img).unsqueeze(0).to(device)
-
-            # Forward pass - model returns list of heatmaps per stack
-            output: list[torch.Tensor] = model(inp)
-            heatmaps: np.ndarray = output[-1].cpu().numpy()[0]  # (16, 64, 64)
-
-            # Flip augmentation
-            cropped_flip: np.ndarray = cropped[:, ::-1].copy()
-            img_flip: np.ndarray = cropped_flip.astype(np.float32) / 255.0
-            img_flip = np.transpose(img_flip, (2, 0, 1))  # HWC -> CHW
-            img_flip[0] -= 0.4404  # R mean
-            img_flip[1] -= 0.4440  # G mean
-            img_flip[2] -= 0.4327  # B mean
-            inp_flip: torch.Tensor = torch.from_numpy(img_flip).unsqueeze(0).to(device)
-            output_flip: list[torch.Tensor] = model(inp_flip)
-            heatmaps_flip: np.ndarray = output_flip[-1].cpu().numpy()[0]
-            heatmaps_flip = _flip_heatmaps(heatmaps_flip)
-
-            # Average original + flipped
-            heatmaps = (heatmaps + heatmaps_flip) / 2.0
-            all_heatmaps.append(heatmaps)
-
-            # Parse keypoints in 64x64 space
-            keypoints_64: np.ndarray = _parse_heatmaps(heatmaps)  # (16, 3)
-
-            # Scale keypoints: 64 -> 256 -> original image coords
-            keypoints_orig: np.ndarray = keypoints_64.copy()
-            keypoints_orig[:, :2] *= 4  # 64 -> 256
-            for j in range(16):
-                x_256: float = keypoints_orig[j, 0]
-                y_256: float = keypoints_orig[j, 1]
-                keypoints_orig[j, 0] = shared_affine[0, 0] * x_256 + shared_affine[0, 2]
-                keypoints_orig[j, 1] = shared_affine[1, 1] * y_256 + shared_affine[1, 2]
-
-            all_keypoints_2d.append(keypoints_orig)
+        # Flipped version
+        cropped_flip: np.ndarray = cropped[:, ::-1].copy()
+        img_flip: np.ndarray = cropped_flip.astype(np.float32) / 255.0
+        img_flip = np.transpose(img_flip, (2, 0, 1))
+        img_flip[0] -= 0.4404
+        img_flip[1] -= 0.4440
+        img_flip[2] -= 0.4327
+        preprocessed_flip.append(img_flip)
 
     assert shared_affine is not None
+    n_frames: int = len(frames_rgb)
+    batch_size: int = cfg.SH_BATCH_SIZE
+
+    # --- Phase 2: Batched inference ---
+    all_heatmaps: list[np.ndarray] = []
+
+    print(f"  Running Stacked Hourglass on {n_frames} frames (batch_size={batch_size})...")
+
+    with torch.no_grad():
+        for start in tqdm(range(0, n_frames, batch_size), desc="  2D Pose"):
+            end: int = min(start + batch_size, n_frames)
+            batch_imgs: list[np.ndarray] = preprocessed[start:end]
+            batch_flips: list[np.ndarray] = preprocessed_flip[start:end]
+
+            # Stack into tensor and run forward pass
+            try:
+                inp: torch.Tensor = torch.from_numpy(np.stack(batch_imgs)).to(device)
+                output: list[torch.Tensor] = model(inp)
+                heatmaps_batch: np.ndarray = output[-1].cpu().numpy()  # (B, 16, 64, 64)
+
+                # Flipped forward pass
+                inp_flip: torch.Tensor = torch.from_numpy(np.stack(batch_flips)).to(device)
+                output_flip: list[torch.Tensor] = model(inp_flip)
+                heatmaps_flip_batch: np.ndarray = output_flip[-1].cpu().numpy()  # (B, 16, 64, 64)
+            except RuntimeError as e:
+                # MPS fallback: if GPU fails, retry on CPU
+                if device.type != "cpu":
+                    print(f"  WARNING: {device} failed ({e}), falling back to CPU")
+                    model = model.to("cpu")
+                    device = torch.device("cpu")
+                    inp = torch.from_numpy(np.stack(batch_imgs))
+                    output = model(inp)
+                    heatmaps_batch = output[-1].numpy()
+                    inp_flip = torch.from_numpy(np.stack(batch_flips))
+                    output_flip = model(inp_flip)
+                    heatmaps_flip_batch = output_flip[-1].numpy()
+                else:
+                    raise
+
+            # Flip heatmaps and swap joints, then average
+            for i in range(end - start):
+                hm_flip: np.ndarray = _flip_heatmaps(heatmaps_flip_batch[i])
+                hm_avg: np.ndarray = (heatmaps_batch[i] + hm_flip) / 2.0
+                all_heatmaps.append(hm_avg)
+
+    # --- Phase 3: Parse keypoints ---
+    all_keypoints_2d: list[np.ndarray] = []
+    for heatmaps in all_heatmaps:
+        keypoints_64: np.ndarray = _parse_heatmaps(heatmaps)
+        keypoints_orig: np.ndarray = keypoints_64.copy()
+        keypoints_orig[:, :2] *= 4  # 64 -> 256
+        for j in range(16):
+            x_256: float = keypoints_orig[j, 0]
+            y_256: float = keypoints_orig[j, 1]
+            keypoints_orig[j, 0] = shared_affine[0, 0] * x_256 + shared_affine[0, 2]
+            keypoints_orig[j, 1] = shared_affine[1, 1] * y_256 + shared_affine[1, 2]
+        all_keypoints_2d.append(keypoints_orig)
+
     return all_keypoints_2d, all_heatmaps, shared_affine
 
 
@@ -444,8 +483,9 @@ def run_motionbert(
         positions_3d_norm: (N, 16, 3) normalized MotionBERT output (Head removed).
     """
     model: torch.nn.Module = load_motionbert_model()
-    device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device: torch.device = _get_device()
     model = model.to(device)
+    print(f"  MotionBERT on {device}")
 
     n_frames: int = len(keypoints_2d_list)
 
@@ -496,7 +536,17 @@ def run_motionbert(
     print(f"  Running MotionBERT on {n_frames} frames...")
 
     with torch.no_grad():
-        output_3d: torch.Tensor = model(input_tensor)
+        try:
+            output_3d: torch.Tensor = model(input_tensor)
+        except RuntimeError as e:
+            # MPS fallback: if GPU fails, retry on CPU
+            if device.type != "cpu":
+                print(f"  WARNING: {device} failed ({e}), falling back to CPU")
+                model = model.to("cpu")
+                input_tensor = input_tensor.to("cpu")
+                output_3d = model(input_tensor)
+            else:
+                raise
 
     positions_3d: np.ndarray = output_3d.cpu().numpy()[0]  # (N, 17, 3)
 
@@ -664,6 +714,7 @@ def motionbert_to_camera_space(
 
 def detect_poses(
     frames_rgb: list[np.ndarray],
+    return_timing: bool = False,
 ) -> tuple[
     list[np.ndarray],
     list[np.ndarray],
@@ -671,6 +722,14 @@ def detect_poses(
     list[np.ndarray],
     np.ndarray,
     np.ndarray,
+] | tuple[
+    list[np.ndarray],
+    list[np.ndarray],
+    list[np.ndarray],
+    list[np.ndarray],
+    np.ndarray,
+    np.ndarray,
+    dict[str, float],
 ]:
     """Full detection pipeline.
 
@@ -682,6 +741,7 @@ def detect_poses(
 
     Args:
         frames_rgb: List of (H, W, 3) uint8 RGB frames.
+        return_timing: If True, append a timing dict to the return tuple.
 
     Returns:
         keypoints_2d: List of (16, 2) pixel coordinates (H36M, Head removed).
@@ -690,18 +750,23 @@ def detect_poses(
         mpii_keypoints_2d: List of (16, 3) raw MPII keypoints (x, y, conf) in pixel coords.
         affine: (2, 3) affine from 256-crop coords to original pixel coords.
         positions_3d_norm: (N, 16, 3) normalized MotionBERT output (Head removed).
+        timing: (only if return_timing=True) Dict with sub-stage timings.
     """
     # 1. YOLOv8 person detection -> union bounding box
+    t0: float = time.perf_counter()
     union_bbox: np.ndarray = detect_person_bbox(frames_rgb)
+    t1: float = time.perf_counter()
 
     # 2. Stacked Hourglass -> MPII 2D keypoints + raw heatmaps
     all_keypoints_2d: list[np.ndarray]
     all_heatmaps: list[np.ndarray]
     affine: np.ndarray
     all_keypoints_2d, all_heatmaps, affine = run_hourglass(frames_rgb, union_bbox)
+    t2: float = time.perf_counter()
 
     # 3. MotionBERT -> H36M normalized 3D output
     positions_3d_norm: np.ndarray = run_motionbert(all_keypoints_2d)
+    t3: float = time.perf_counter()
 
     # 4. Convert MPII 2D to H36M 2D + extract visibility
     # MPII uses a different 16-joint ordering than H36M. mpii_to_h36m() remaps
@@ -713,6 +778,29 @@ def detect_poses(
         kp_h36m_16: np.ndarray = h36m_17_to_16(kp_h36m)  # (16, 3)
         kp_2d_list.append(kp_h36m_16[:, :2])  # (16, 2)
         visibility_list.append(kp_h36m_16[:, 2])  # (16,)
+
+    t4: float = time.perf_counter()
+
+    if return_timing:
+        timing: dict[str, float] = {
+            "yolo_s": round(t1 - t0, 3),
+            "stacked_hourglass_s": round(t2 - t1, 3),
+            "motionbert_s": round(t3 - t2, 3),
+            "postprocess_s": round(t4 - t3, 3),
+        }
+        print(f"  Detection timing: YOLO={timing['yolo_s']:.1f}s, "
+              f"SH={timing['stacked_hourglass_s']:.1f}s, "
+              f"MB={timing['motionbert_s']:.1f}s, "
+              f"post={timing['postprocess_s']:.3f}s")
+        return (
+            kp_2d_list,
+            visibility_list,
+            all_heatmaps,
+            all_keypoints_2d,
+            affine,
+            positions_3d_norm,
+            timing,
+        )
 
     return (
         kp_2d_list,

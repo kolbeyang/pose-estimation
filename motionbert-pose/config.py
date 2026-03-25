@@ -98,6 +98,12 @@ MOTIONBERT_CONF_THRESHOLD: float = 0.0
 # Prevents optimizer from drifting away from MotionBERT predictions.
 INIT_ANCHOR_WEIGHT: float = 5.0
 
+# Stacked Hourglass batch size for 2D pose inference.
+# Higher = faster but more memory. 256x256x3 float32 = 768KB per frame.
+# Batch of 32: ~25MB GPU memory for input tensor alone.
+# Batch of 150 (max frames): ~115MB. Safe for most GPUs.
+SH_BATCH_SIZE: int = 32
+
 # --- Overlay video ---
 OVERLAY_HEATMAP_INTENSITY: float = 200.0
 OVERLAY_FPS: float = 5.0

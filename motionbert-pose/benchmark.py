@@ -123,7 +123,14 @@ def benchmark_example(
             print(f"    ERROR: Need at least 2 frames for {name}. Skipping.")
             return result
 
-        kp_2d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm = detect_poses(frames_rgb)
+        detection_result = detect_poses(frames_rgb, return_timing=True)
+        kp_2d = detection_result[0]
+        visibility = detection_result[1]
+        heatmaps = detection_result[2]
+        mpii_kp_2d = detection_result[3]
+        affine = detection_result[4]
+        positions_3d_norm = detection_result[5]
+        detection_timing: dict[str, float] = detection_result[6]
 
         det_cam_positions: list[np.ndarray] = []
         for i in range(len(frames_rgb)):
@@ -179,6 +186,10 @@ def benchmark_example(
         result.update({
             "num_frames": n_frames,
             "detection_time_s": round(detection_time, 3),
+            "yolo_time_s": detection_timing.get("yolo_s", 0.0),
+            "stacked_hourglass_time_s": detection_timing.get("stacked_hourglass_s", 0.0),
+            "motionbert_time_s": detection_timing.get("motionbert_s", 0.0),
+            "detection_postprocess_time_s": detection_timing.get("postprocess_s", 0.0),
             "optimization_time_s": round(optimization_time, 3),
             "evaluation_time_s": round(evaluation_time, 3),
             "total_time_s": round(total_time, 3),
@@ -274,7 +285,10 @@ def run_benchmark(
             if ex_result.get("opt_mpjpe") is not None:
                 print(f"  Det MPJPE: {ex_result['det_mpjpe']*100:.2f} cm")
                 print(f"  Opt MPJPE: {ex_result['opt_mpjpe']*100:.2f} cm")
-                print(f"  Detection: {ex_result['detection_time_s']:.1f}s, "
+                print(f"  Detection: {ex_result['detection_time_s']:.1f}s "
+                      f"(YOLO={ex_result.get('yolo_time_s', 0):.1f}s, "
+                      f"SH={ex_result.get('stacked_hourglass_time_s', 0):.1f}s, "
+                      f"MB={ex_result.get('motionbert_time_s', 0):.1f}s), "
                       f"Optimization: {ex_result['optimization_time_s']:.1f}s, "
                       f"Eval: {ex_result['evaluation_time_s']:.1f}s")
 
@@ -304,6 +318,9 @@ def run_benchmark(
             "mean_det_mpjve": float(np.mean([e.get("det_mpjve", 0) for e in valid])),
             "mean_opt_mpjve": float(np.mean([e.get("opt_mpjve", 0) for e in valid])),
             "mean_detection_time_s": float(np.mean([e["detection_time_s"] for e in valid])),
+            "mean_yolo_time_s": float(np.mean([e.get("yolo_time_s", 0) for e in valid])),
+            "mean_stacked_hourglass_time_s": float(np.mean([e.get("stacked_hourglass_time_s", 0) for e in valid])),
+            "mean_motionbert_time_s": float(np.mean([e.get("motionbert_time_s", 0) for e in valid])),
             "mean_optimization_time_s": float(np.mean([e["optimization_time_s"] for e in valid])),
             "mean_evaluation_time_s": float(np.mean([e["evaluation_time_s"] for e in valid])),
             "mean_total_time_s": float(np.mean([e["total_time_s"] for e in valid])),
@@ -320,7 +337,10 @@ def run_benchmark(
         print(f"  Mean Det P-MPJPE: {agg['mean_det_p_mpjpe']*100:.2f} cm")
         print(f"  Mean Opt P-MPJPE: {agg['mean_opt_p_mpjpe']*100:.2f} cm")
         print(f"  Mean Improvement: {agg['mean_improvement']*100:+.2f} cm")
-        print(f"  Mean Detection:   {agg['mean_detection_time_s']:.1f}s")
+        print(f"  Mean Detection:   {agg['mean_detection_time_s']:.1f}s "
+              f"(YOLO={agg['mean_yolo_time_s']:.1f}s, "
+              f"SH={agg['mean_stacked_hourglass_time_s']:.1f}s, "
+              f"MB={agg['mean_motionbert_time_s']:.1f}s)")
         print(f"  Mean Optimization:{agg['mean_optimization_time_s']:.1f}s")
         print(f"  Mean Total:       {agg['mean_total_time_s']:.1f}s")
         print(f"  Mean Latency/Frame: {agg['mean_latency_per_frame_s']:.3f}s")
