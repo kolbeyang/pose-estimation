@@ -270,6 +270,76 @@ def generate_bone_lengths_graph(
     _save(fig, os.path.join(output_dir, "bone_lengths.png"))
 
 
+def generate_limb_length_graph(
+    detector_3d: list[np.ndarray],
+    optimized_3d: list[np.ndarray],
+    gt_3d: list[np.ndarray | None],
+    output_dir: str,
+) -> None:
+    """Line graph of 4 arm limb lengths over time for 3 sources (GT, Det, Opt).
+
+    Plots R Shoulder-Elbow, R Elbow-Wrist, L Shoulder-Elbow, L Elbow-Wrist
+    for ground truth (blue), detector (green), and optimized (red).
+
+    Args:
+        detector_3d: List of (16, 3) detector predictions.
+        optimized_3d: List of (16, 3) optimized predictions.
+        gt_3d: List of (16, 3) or None ground truth.
+        output_dir: Directory to save the graph.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    LIMB_SEGMENTS: list[tuple[int, int, str]] = [
+        (13, 14, "R Shoulder-Elbow"),
+        (14, 15, "R Elbow-Wrist"),
+        (10, 11, "L Shoulder-Elbow"),
+        (11, 12, "L Elbow-Wrist"),
+    ]
+    LINESTYLES: list[str] = ["-", "--", ":", "-."]
+
+    def _limb_length(positions: np.ndarray, j1: int, j2: int) -> float:
+        return float(np.linalg.norm(positions[j2] - positions[j1]))
+
+    n: int = len(detector_3d)
+    frames: list[int] = list(range(n))
+
+    fig: plt.Figure
+    ax: plt.Axes
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for seg_idx, (j1, j2, limb_name) in enumerate(LIMB_SEGMENTS):
+        ls: str = LINESTYLES[seg_idx]
+
+        # Ground truth (blue)
+        gt_lengths: list[float] = [
+            _limb_length(gt_3d[i], j1, j2) if gt_3d[i] is not None else np.nan
+            for i in range(n)
+        ]
+        ax.plot(frames, gt_lengths, color="blue", linestyle=ls,
+                linewidth=1.2, alpha=0.8, label=f"GT: {limb_name}")
+
+        # Detector (green)
+        det_lengths: list[float] = [
+            _limb_length(detector_3d[i], j1, j2) for i in range(n)
+        ]
+        ax.plot(frames, det_lengths, color="green", linestyle=ls,
+                linewidth=1.2, alpha=0.8, label=f"Det: {limb_name}")
+
+        # Optimized (red)
+        opt_lengths: list[float] = [
+            _limb_length(optimized_3d[i], j1, j2) for i in range(n)
+        ]
+        ax.plot(frames, opt_lengths, color="red", linestyle=ls,
+                linewidth=1.2, alpha=0.8, label=f"Opt: {limb_name}")
+
+    ax.set_xlabel("Frame")
+    ax.set_ylabel("Limb Length (m)")
+    ax.set_title("Arm Limb Lengths Over Time")
+    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=7)
+    ax.grid(True, alpha=0.3)
+    _save(fig, os.path.join(output_dir, "limb_lengths.png"))
+
+
 # ---------------------------------------------------------------------------
 # Summary grid (one per example)
 # ---------------------------------------------------------------------------
@@ -463,8 +533,38 @@ def generate_summary(
     ax.set_title("Per-Frame 2D MPJPE (px)", fontsize=9)
     ax.grid(True, alpha=0.2)
 
-    # Row 3, Col 3: empty
-    axes[3, 3].axis("off")
+    # Row 3, Col 3: Arm limb lengths over time
+    ax = axes[3, 3]
+    _LIMB_SEGMENTS: list[tuple[int, int, str]] = [
+        (13, 14, "R Sh-El"),
+        (14, 15, "R El-Wr"),
+        (10, 11, "L Sh-El"),
+        (11, 12, "L El-Wr"),
+    ]
+    _LINESTYLES: list[str] = ["-", "--", ":", "-."]
+    for seg_idx, (j1, j2, lname) in enumerate(_LIMB_SEGMENTS):
+        ls = _LINESTYLES[seg_idx]
+        if has_gt:
+            gt_ll: list[float] = [
+                float(np.linalg.norm(gt_3d[i][j2] - gt_3d[i][j1]))
+                if gt_3d[i] is not None else np.nan
+                for i in range(n)
+            ]
+            ax.plot(frames, gt_ll, color="blue", linestyle=ls,
+                    linewidth=0.8, alpha=0.7, label=f"GT: {lname}")
+        det_ll: list[float] = [
+            float(np.linalg.norm(det[i, j2] - det[i, j1])) for i in range(n)
+        ]
+        ax.plot(frames, det_ll, color="green", linestyle=ls,
+                linewidth=0.8, alpha=0.7, label=f"Det: {lname}")
+        opt_ll: list[float] = [
+            float(np.linalg.norm(opt[i, j2] - opt[i, j1])) for i in range(n)
+        ]
+        ax.plot(frames, opt_ll, color="red", linestyle=ls,
+                linewidth=0.8, alpha=0.7, label=f"Opt: {lname}")
+    ax.set_title("Arm Limb Lengths (m)", fontsize=9)
+    ax.legend(fontsize=5, bbox_to_anchor=(1.0, 1.0), loc="upper left")
+    ax.grid(True, alpha=0.2)
 
     # Overall title with metrics
     metric_str: str = ""

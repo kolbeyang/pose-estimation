@@ -24,6 +24,7 @@ from evaluate import compute_comparison, compute_comparison_with_optimization
 from graphs import (
     generate_aggregate_summary,
     generate_bone_lengths_graph,
+    generate_limb_length_graph,
     generate_loss_curve,
     generate_per_frame_mpjpe,
     generate_per_frame_mpjve,
@@ -323,6 +324,9 @@ def process_example(
             metrics.get("opt_per_frame_mpjve"),
             example_graph_dir,
         )
+    generate_limb_length_graph(
+        det_cam_positions, optimized_3d, gt_cam, example_graph_dir,
+    )
     generate_summary(
         det_cam_positions, optimized_3d, gt_cam,
         loss_history, metrics, bone_lengths_final,
