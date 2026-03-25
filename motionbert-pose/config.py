@@ -96,7 +96,7 @@ MOTIONBERT_CONF_THRESHOLD: float = 0.0
 
 # Weight for initialization anchor penalty.
 # Prevents optimizer from drifting away from MotionBERT predictions.
-INIT_ANCHOR_WEIGHT: float = 5.0
+INIT_ANCHOR_WEIGHT: float = 0.0
 
 # Stacked Hourglass batch size for 2D pose inference.
 # Higher = faster but more memory. 256x256x3 float32 = 768KB per frame.

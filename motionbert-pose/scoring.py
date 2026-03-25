@@ -357,8 +357,6 @@ def compute_total_score_batch(
     sigma: float,
     position_penalty_weight: float,
     rotation_per_joint_weights: torch.Tensor,
-    initial_positions: torch.Tensor | None = None,
-    init_anchor_weight: float = 0.0,
     heatmaps: torch.Tensor | None = None,
     affine: torch.Tensor | None = None,
     confidence_epsilon: float = 1e-4,
@@ -374,8 +372,6 @@ def compute_total_score_batch(
         sigma: Gaussian sigma.
         position_penalty_weight: Weight for position penalty.
         rotation_per_joint_weights: (J,) per-joint rotation penalty weights.
-        initial_positions: (F, J, 3) initial positions (optional).
-        init_anchor_weight: Weight for init anchor penalty.
         heatmaps: (F, 16, 64, 64) heatmaps.
         affine: (2, 3) affine transform.
         confidence_epsilon: Floor for low-confidence joints.
@@ -408,25 +404,17 @@ def compute_total_score_batch(
     else:
         total_rot_penalty = torch.tensor(0.0)
 
-    # Anchor penalty
-    total_anchor_penalty: torch.Tensor = torch.tensor(0.0)
-    if initial_positions is not None and init_anchor_weight > 0.0:
-        diff: torch.Tensor = all_positions - initial_positions  # (F, J, 3)
-        sq_dist: torch.Tensor = (diff ** 2).sum(dim=-1)  # (F, J)
-        total_anchor_penalty = (sq_dist * visibility).sum()
-
     total_score: torch.Tensor = (
         total_heatmap
         - position_penalty_weight * total_pos_penalty
         - total_rot_penalty
-        - init_anchor_weight * total_anchor_penalty
     )
 
     details: dict[str, float] = {
         "heatmap": float(total_heatmap.item()),
         "pos_penalty": float(total_pos_penalty.item()),
         "rot_penalty": float(total_rot_penalty.item()),
-        "anchor_penalty": float(total_anchor_penalty.item()),
+        "anchor_penalty": 0.0,
         "total": float(total_score.item()),
     }
     return total_score, details

@@ -398,9 +398,6 @@ def run_optimization_batched(
     )
 
     # Non-learnable tensors (stacked)
-    initial_positions_t: torch.Tensor = torch.tensor(
-        np.array(initial_positions_cam), dtype=torch.float32,
-    )  # (F, J, 3)
     target_2d_t: torch.Tensor = torch.tensor(
         np.array(target_2d), dtype=torch.float32,
     )  # (F, J, 2)
@@ -469,8 +466,6 @@ def run_optimization_batched(
             all_positions, all_projected_2d, param_local_rots,
             target_2d_t, visibility_t, sigma,
             cfg.POSITION_PENALTY_WEIGHT, rot_per_joint_weights,
-            initial_positions=initial_positions_t,
-            init_anchor_weight=cfg.INIT_ANCHOR_WEIGHT,
             heatmaps=heatmaps_t,
             affine=affine_t,
             confidence_epsilon=cfg.CONFIDENCE_EPSILON,
