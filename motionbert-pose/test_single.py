@@ -122,7 +122,7 @@ def main() -> None:
     optimized_3d: list[np.ndarray]
     bone_lengths_final: np.ndarray
     loss_history: list[float]
-    optimized_3d, bone_lengths_final, loss_history = run_optimization(
+    optimized_3d, bone_lengths_final, loss_history, _ = run_optimization(
         initial_positions_cam=det_cam_positions,
         target_2d=kp_2d,
         visibility=visibility,

@@ -148,7 +148,7 @@ def run_sweep_config(data: dict[str, Any], config: SweepConfig) -> dict[str, Any
             dtype=np.float64,
         )
 
-        optimized_3d, bone_lengths_final, loss_history = run_optimization(
+        optimized_3d, bone_lengths_final, loss_history, _ = run_optimization(
             initial_positions_cam=data["det_cam_positions"],
             target_2d=data["target_2d"],
             visibility=data["visibility"],

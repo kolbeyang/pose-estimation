@@ -39,8 +39,8 @@ EXAMPLES: list[tuple[str, str, int, int, int]] = [
 TARGET_FPS: float = 30.0  # Use native video rate for maximum temporal context
 
 # --- Optimization (Phase 2) ---
-NUM_STEPS: int = 100
-LEARNING_RATE: float = 0.001
+NUM_STEPS: int = 50
+LEARNING_RATE: float = 0.002
 BONE_LENGTH_LR: float = 0.0001
 
 # Gaussian sigma for heatmap scoring (pixels)

@@ -77,6 +77,80 @@ def forward_kinematics(
     return torch.stack(positions)  # (NUM_JOINTS, 3)
 
 
+def _axis_angle_to_matrix_batch(aa: torch.Tensor) -> torch.Tensor:
+    """Batch axis-angle (F, 3) -> (F, 3, 3) rotation matrices via Rodrigues.
+
+    Args:
+        aa: (F, 3) axis-angle vectors.
+
+    Returns:
+        (F, 3, 3) rotation matrices.
+    """
+    F_dim: int = aa.shape[0]
+    angle: torch.Tensor = torch.norm(aa, dim=-1, keepdim=True)  # (F, 1)
+    # Avoid division by zero for small angles
+    safe_angle: torch.Tensor = torch.clamp(angle, min=1e-8)
+    axis: torch.Tensor = aa / safe_angle  # (F, 3)
+
+    # Skew-symmetric matrices (F, 3, 3)
+    zero: torch.Tensor = torch.zeros(F_dim, dtype=aa.dtype)
+    K: torch.Tensor = torch.stack([
+        zero, -axis[:, 2], axis[:, 1],
+        axis[:, 2], zero, -axis[:, 0],
+        -axis[:, 1], axis[:, 0], zero,
+    ], dim=-1).reshape(F_dim, 3, 3)
+
+    eye: torch.Tensor = torch.eye(3, dtype=aa.dtype).unsqueeze(0)  # (1, 3, 3)
+    sin_a: torch.Tensor = torch.sin(angle).unsqueeze(-1)  # (F, 1, 1)
+    cos_a: torch.Tensor = torch.cos(angle).unsqueeze(-1)  # (F, 1, 1)
+
+    R: torch.Tensor = eye + sin_a * K + (1 - cos_a) * (K @ K)
+
+    # For very small angles, return identity
+    small: torch.Tensor = (angle.squeeze(-1) < 1e-8).float()  # (F,)
+    R = R * (1 - small).reshape(F_dim, 1, 1) + eye * small.reshape(F_dim, 1, 1)
+
+    return R
+
+
+def forward_kinematics_batch(
+    root_pos: torch.Tensor,
+    root_rot: torch.Tensor,
+    local_rots: torch.Tensor,
+    bone_lengths: torch.Tensor,
+) -> torch.Tensor:
+    """Batch forward kinematics across frames.
+
+    Args:
+        root_pos: (F, 3) root positions.
+        root_rot: (F, 3) root axis-angle rotations.
+        local_rots: (F, J, 3) local axis-angle rotations per joint.
+        bone_lengths: (J,) shared bone lengths.
+
+    Returns:
+        (F, J, 3) world positions.
+    """
+    F_dim: int = root_pos.shape[0]
+    rest_dirs: torch.Tensor = torch.tensor(REST_DIRECTIONS, dtype=torch.float32)  # (J, 3)
+
+    positions: list[torch.Tensor] = [torch.zeros(F_dim, 3)] * NUM_JOINTS
+    rotations: list[torch.Tensor] = [torch.eye(3).unsqueeze(0).expand(F_dim, -1, -1)] * NUM_JOINTS
+
+    positions[0] = root_pos  # (F, 3)
+    rotations[0] = _axis_angle_to_matrix_batch(root_rot)  # (F, 3, 3)
+
+    for j in range(1, NUM_JOINTS):
+        parent: int = int(PARENTS[j])
+        R_local: torch.Tensor = _axis_angle_to_matrix_batch(local_rots[:, j, :])  # (F, 3, 3)
+        R_world: torch.Tensor = rotations[parent] @ R_local  # (F, 3, 3)
+        rotations[j] = R_world
+
+        direction: torch.Tensor = (R_world @ rest_dirs[j].unsqueeze(-1)).squeeze(-1)  # (F, 3)
+        positions[j] = positions[parent] + bone_lengths[j] * direction
+
+    return torch.stack(positions, dim=1)  # (F, J, 3)
+
+
 # ---------------------------------------------------------------------------
 # Inverse: positions -> FK parameters (for initialization)
 # ---------------------------------------------------------------------------
