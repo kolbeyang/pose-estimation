@@ -142,6 +142,7 @@ def _draw_skeleton_2d(
     pts_2d: np.ndarray,
     color: tuple[int, int, int],
     thickness: int = 2,
+    visible_mask: np.ndarray | None = None,
 ) -> None:
     """Draw skeleton bones + joint circles on frame.
 
@@ -150,16 +151,22 @@ def _draw_skeleton_2d(
         pts_2d: (17, 2) pixel coordinates.
         color: BGR color tuple.
         thickness: Line thickness.
+        visible_mask: Optional (17,) boolean mask. If provided, only draw
+            joints/bones where the mask is True.
     """
     h: int
     w: int
     h, w = frame.shape[:2]
     for parent, child in BONES:
+        if visible_mask is not None and (not visible_mask[parent] or not visible_mask[child]):
+            continue
         p1: tuple[int, int] = (int(pts_2d[parent, 0]), int(pts_2d[parent, 1]))
         p2: tuple[int, int] = (int(pts_2d[child, 0]), int(pts_2d[child, 1]))
         if 0 <= p1[0] < w and 0 <= p1[1] < h and 0 <= p2[0] < w and 0 <= p2[1] < h:
             cv2.line(frame, p1, p2, color, thickness, cv2.LINE_AA)
     for j in range(NUM_JOINTS):
+        if visible_mask is not None and not visible_mask[j]:
+            continue
         pt: tuple[int, int] = (int(pts_2d[j, 0]), int(pts_2d[j, 1]))
         if 0 <= pt[0] < w and 0 <= pt[1] < h:
             cv2.circle(frame, pt, 4, color, -1, cv2.LINE_AA)
@@ -180,6 +187,8 @@ def generate_overlay_video(
     frame_indices: list[int] | None = None,
     gt_3d: list[np.ndarray | None] | None = None,
     intensity: float = 200.0,
+    visibility: list[np.ndarray] | None = None,
+    visibility_threshold: float = 0.3,
 ) -> None:
     """Generate overlay video from in-memory pipeline data.
 
@@ -225,11 +234,16 @@ def generate_overlay_video(
             hm_full: np.ndarray = _resize_heatmap_to_frame(hm_combined, affine, h, w)
             frame_bgr = _blend_heatmap_additive(frame_bgr, hm_full, intensity)
 
+        # Compute visibility mask for this frame
+        vis_mask: np.ndarray | None = None
+        if visibility is not None and i < len(visibility):
+            vis_mask = visibility[i] >= visibility_threshold
+
         # 2. Yellow dots for raw MPII 2D keypoints
         if i < len(mpii_keypoints_2d):
             kp_mpii: np.ndarray = mpii_keypoints_2d[i]
             for j in range(kp_mpii.shape[0]):
-                if kp_mpii[j, 2] < 0.01:
+                if kp_mpii[j, 2] < visibility_threshold:
                     continue
                 pt: tuple[int, int] = (int(kp_mpii[j, 0]), int(kp_mpii[j, 1]))
                 if 0 <= pt[0] < w and 0 <= pt[1] < h:
@@ -240,14 +254,16 @@ def generate_overlay_video(
             det_proj: np.ndarray = _project_3d_to_2d(
                 detector_3d[i], camera_fx, camera_fy, camera_cx, camera_cy
             )
-            _draw_skeleton_2d(frame_bgr, det_proj, color=(0, 255, 0), thickness=2)
+            _draw_skeleton_2d(frame_bgr, det_proj, color=(0, 255, 0), thickness=2,
+                              visible_mask=vis_mask)
 
         # 4. Red skeleton: Optimized 3D projected to 2D
         if i < len(optimized_3d):
             opt_proj: np.ndarray = _project_3d_to_2d(
                 optimized_3d[i], camera_fx, camera_fy, camera_cx, camera_cy
             )
-            _draw_skeleton_2d(frame_bgr, opt_proj, color=(0, 0, 255), thickness=2)
+            _draw_skeleton_2d(frame_bgr, opt_proj, color=(0, 0, 255), thickness=2,
+                              visible_mask=vis_mask)
 
         # 5. Blue skeleton: Ground truth 3D projected to 2D
         if gt_3d is not None and i < len(gt_3d) and gt_3d[i] is not None:

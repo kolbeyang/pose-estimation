@@ -80,8 +80,14 @@ ROTATION_PENALTY_PER_JOINT: np.ndarray = np.array(
     dtype=np.float64,
 )
 
-# Visibility threshold: joints below this are ignored in scoring
-VISIBILITY_THRESHOLD: float = 0.5
+# Confidence epsilon for occlusion-aware scoring.
+# When a joint has low confidence, the score degrades to log(confidence_epsilon),
+# providing no gradient signal. Higher values = less penalty for occluded joints.
+CONFIDENCE_EPSILON: float = 1e-4
+
+# Visibility threshold for overlay video and 3D visualization only.
+# Joints below this threshold are not drawn (but still scored).
+OVERLAY_VISIBILITY_THRESHOLD: float = 0.3
 
 # Confidence threshold for 2D keypoints fed to MotionBERT.
 # Joints below this threshold have their coordinates zeroed out,

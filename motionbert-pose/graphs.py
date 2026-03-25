@@ -340,6 +340,41 @@ def generate_limb_length_graph(
     _save(fig, os.path.join(output_dir, "limb_lengths.png"))
 
 
+def generate_confidence_score_graph(
+    visibility: list[np.ndarray],
+    output_dir: str,
+) -> None:
+    """Line graph of per-keypoint confidence scores across frames.
+
+    Each line is one of the 16 H36M joints, showing how the Stacked Hourglass
+    confidence score varies over time.
+
+    Args:
+        visibility: List of (16,) confidence score arrays, one per frame.
+        output_dir: Directory to save the graph.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    vis_arr: np.ndarray = np.stack(visibility)  # (N, 16)
+    n_frames: int = vis_arr.shape[0]
+    frames: list[int] = list(range(n_frames))
+    colors = plt.cm.tab20(np.linspace(0, 1, NUM_JOINTS))
+
+    fig: plt.Figure
+    ax: plt.Axes
+    fig, ax = plt.subplots(figsize=(14, 6))
+
+    for j in range(NUM_JOINTS):
+        ax.plot(frames, vis_arr[:, j], color=colors[j], linewidth=1.0,
+                alpha=0.8, label=JOINT_NAMES[j])
+
+    ax.set_xlabel("Frame")
+    ax.set_ylabel("Confidence Score")
+    ax.set_title("Per-Keypoint Confidence Scores")
+    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=7)
+    ax.grid(True, alpha=0.3)
+    _save(fig, os.path.join(output_dir, "confidence_scores.png"))
+
+
 # ---------------------------------------------------------------------------
 # Summary grid (one per example)
 # ---------------------------------------------------------------------------

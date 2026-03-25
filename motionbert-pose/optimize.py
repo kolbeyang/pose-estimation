@@ -173,14 +173,6 @@ def run_optimization(
         if heatmap_blur_schedule else 0.0
     )
 
-    # Apply visibility threshold -- zero out low-confidence joints
-    for i in range(len(visibility_t)):
-        visibility_t[i] = torch.where(
-            visibility_t[i] >= cfg.VISIBILITY_THRESHOLD,
-            visibility_t[i],
-            torch.zeros_like(visibility_t[i]),
-        )
-
     # Per-joint rotation penalty weights
     rot_per_joint_weights: torch.Tensor = torch.tensor(
         cfg.ROTATION_PENALTY_PER_JOINT,
@@ -248,6 +240,7 @@ def run_optimization(
             init_anchor_weight=cfg.INIT_ANCHOR_WEIGHT,
             heatmaps_list=heatmaps_t,
             affine=affine_t,
+            confidence_epsilon=cfg.CONFIDENCE_EPSILON,
         )
 
         loss: torch.Tensor = -total_score

@@ -24,6 +24,7 @@ from evaluate import compute_comparison, compute_comparison_with_optimization
 from graphs import (
     generate_aggregate_summary,
     generate_bone_lengths_graph,
+    generate_confidence_score_graph,
     generate_limb_length_graph,
     generate_loss_curve,
     generate_per_frame_mpjpe,
@@ -327,6 +328,7 @@ def process_example(
     generate_limb_length_graph(
         det_cam_positions, optimized_3d, gt_cam, example_graph_dir,
     )
+    generate_confidence_score_graph(visibility, example_graph_dir)
     generate_summary(
         det_cam_positions, optimized_3d, gt_cam,
         loss_history, metrics, bone_lengths_final,
@@ -350,6 +352,8 @@ def process_example(
         affine=affine,
         frame_indices=frame_indices[:len(frames_rgb)],
         gt_3d=gt_cam,
+        visibility=visibility,
+        visibility_threshold=cfg.OVERLAY_VISIBILITY_THRESHOLD,
     )
     print(f"    Saved overlay video: {overlay_path}")
 

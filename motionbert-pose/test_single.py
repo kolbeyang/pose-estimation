@@ -183,7 +183,7 @@ def main() -> None:
     # Bone lengths from detector
     print(f"\n=== BONE LENGTHS (detector, frame 0 vs defaults) ===")
     det_f0: np.ndarray = det_cam_positions[0]
-    for j in range(1, 17):
+    for j in range(1, 16):
         parent: int = int(PARENTS[j])
         det_bl: float = float(np.linalg.norm(det_f0[j] - det_f0[parent]))
         default_bl: float = float(DEFAULT_BONE_LENGTHS[j])
@@ -239,6 +239,8 @@ def main() -> None:
         affine=affine,
         frame_indices=frame_indices,
         gt_3d=gt_cam,
+        visibility=visibility,
+        visibility_threshold=cfg.OVERLAY_VISIBILITY_THRESHOLD,
     )
     print(f"  Saved overlay video: {overlay_path}")
 

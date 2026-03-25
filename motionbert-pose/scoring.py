@@ -35,54 +35,34 @@ H36M_TO_MPII_HEATMAP: list[int | None] = [
 
 def heatmap_score(
     projected_2d: torch.Tensor,
-    target_2d: torch.Tensor,
-    visibility: torch.Tensor,
-    sigma: float,
-) -> torch.Tensor:
-    """Analytical Gaussian heatmap log-likelihood.
-
-    Equivalent to generating a Gaussian blob at each target_2d position and
-    sampling its log-value at the projected position, but computed in closed
-    form -- O(J) instead of O(J * H * W).
-
-    Args:
-        projected_2d: (J, 2) differentiable projected 2D positions.
-        target_2d: (J, 2) target 2D positions from detection.
-        visibility: (J,) weights in [0, 1].
-        sigma: Gaussian sigma in pixels (controls blur / gradient basin).
-
-    Returns:
-        Scalar score (higher = better alignment).
-    """
-    diff: torch.Tensor = projected_2d - target_2d
-    sq_dist: torch.Tensor = (diff ** 2).sum(dim=-1)  # (J,)
-    log_likelihood: torch.Tensor = -sq_dist / (2.0 * sigma ** 2)
-    return (log_likelihood * visibility).sum()
-
-
-def real_heatmap_score(
-    projected_2d: torch.Tensor,
     heatmaps: torch.Tensor,
     affine: torch.Tensor,
     visibility: torch.Tensor,
     target_2d: torch.Tensor,
     sigma: float,
+    confidence_epsilon: float = 1e-4,
     eps: float = 1e-8,
 ) -> torch.Tensor:
     """Score by sampling real Stacked Hourglass heatmaps at projected positions.
 
-    For the 15 H36M joints that have a direct MPII heatmap, uses differentiable
+    For the 14 H36M joints that have a direct MPII heatmap, uses differentiable
     bilinear interpolation (grid_sample) to sample the heatmap value at the
     projected 2D location. For Hip (0) and Spine (7), which are synthetic
     midpoints with no dedicated heatmap, falls back to analytical Gaussian.
+
+    Uses confidence-weighted scoring:
+        log_val = log(value * conf + confidence_epsilon * (1 - conf))
+    When confidence is high, the heatmap signal dominates. When confidence is
+    low, the score degrades to log(confidence_epsilon), providing no gradient.
 
     Args:
         projected_2d: (J, 2) projected positions in original image pixels.
         heatmaps: (16, 64, 64) Stacked Hourglass heatmaps (MPII joints).
         affine: (2, 3) affine transform from 256-crop coords to original pixels.
-        visibility: (J,) visibility weights in [0, 1].
+        visibility: (J,) confidence scores from Stacked Hourglass.
         target_2d: (J, 2) target 2D positions (for fallback on joints without heatmaps).
         sigma: Gaussian sigma for fallback joints.
+        confidence_epsilon: Floor for low-confidence joints (prevents log(0)).
         eps: Floor value to avoid log(0).
 
     Returns:
@@ -100,16 +80,17 @@ def real_heatmap_score(
     ty: torch.Tensor = affine[1, 2]
 
     for j in range(n_joints):
-        if visibility[j] < 1e-6:
-            continue
-
+        conf: torch.Tensor = visibility[j]
         mpii_idx: int | None = H36M_TO_MPII_HEATMAP[j]
         if mpii_idx is None:
             # Fallback: analytical Gaussian for Hip (0) and Spine (7)
             diff: torch.Tensor = projected_2d[j] - target_2d[j]
             sq_dist: torch.Tensor = (diff ** 2).sum()
-            log_likelihood: torch.Tensor = -sq_dist / (2.0 * sigma ** 2)
-            total_score = total_score + log_likelihood * visibility[j]
+            value: torch.Tensor = torch.exp(-sq_dist / (2.0 * sigma ** 2))
+            log_val: torch.Tensor = torch.log(torch.clamp(
+                value * conf + confidence_epsilon * (1.0 - conf), min=eps,
+            ))
+            total_score = total_score + log_val
             continue
 
         # Convert projected position from original pixels to 256-crop coords
@@ -131,11 +112,13 @@ def real_heatmap_score(
         sampled: torch.Tensor = F.grid_sample(
             hm, grid, mode="bilinear", padding_mode="zeros", align_corners=True,
         )  # (1, 1, 1, 1)
-        value: torch.Tensor = sampled.squeeze()  # scalar
+        value = sampled.squeeze()  # scalar
 
-        # Log-likelihood weighted by visibility
-        log_val: torch.Tensor = torch.log(torch.clamp(value, min=eps))
-        total_score = total_score + log_val * visibility[j]
+        # Confidence-weighted log-likelihood
+        log_val = torch.log(torch.clamp(
+            value * conf + confidence_epsilon * (1.0 - conf), min=eps,
+        ))
+        total_score = total_score + log_val
 
     return total_score
 
@@ -218,6 +201,7 @@ def compute_total_score(
     init_anchor_weight: float = 0.0,
     heatmaps_list: list[torch.Tensor] | None = None,
     affine: torch.Tensor | None = None,
+    confidence_epsilon: float = 1e-4,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Compute total score across all frames.
 
@@ -248,25 +232,19 @@ def compute_total_score(
     total_rot_penalty: torch.Tensor = torch.tensor(0.0)
     total_anchor_penalty: torch.Tensor = torch.tensor(0.0)
 
-    _use_real: bool = (
-        heatmaps_list is not None
-        and affine is not None
-    )
+    if heatmaps_list is None or affine is None:
+        raise ValueError("Heatmaps and affine are required for scoring.")
 
     for i in range(n_frames):
-        if _use_real:
-            total_heatmap = total_heatmap + real_heatmap_score(
-                all_projected_2d[i],
-                heatmaps_list[i],  # type: ignore[index]
-                affine,  # type: ignore[arg-type]
-                visibility_list[i],
-                target_2d_list[i],
-                sigma,
-            )
-        else:
-            total_heatmap = total_heatmap + heatmap_score(
-                all_projected_2d[i], target_2d_list[i], visibility_list[i], sigma,
-            )
+        total_heatmap = total_heatmap + heatmap_score(
+            all_projected_2d[i],
+            heatmaps_list[i],
+            affine,
+            visibility_list[i],
+            target_2d_list[i],
+            sigma,
+            confidence_epsilon=confidence_epsilon,
+        )
         if i > 0:
             total_pos_penalty = total_pos_penalty + motion_penalty_position(
                 all_positions[i - 1], all_positions[i],
