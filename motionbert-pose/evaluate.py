@@ -215,6 +215,11 @@ def szi_mpjpe(predicted: np.ndarray, target: np.ndarray) -> tuple[float, float]:
 
     Finds optimal global scale, applies it, then computes MPJPE.
 
+    Note: The optimal scale minimizes sum of squared errors (MSE), not mean of
+    L2 norms (MPJPE). As a result, SZI-MPJPE is NOT guaranteed to be <= MPJPE.
+    When error variance across joints is high, the MSE-optimal scale can increase
+    MPJPE. This is mathematically correct per the spec definition.
+
     Args:
         predicted: (F, J, 3) root-relative positions.
         target: (F, J, 3) root-relative positions.

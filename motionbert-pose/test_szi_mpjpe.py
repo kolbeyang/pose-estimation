@@ -121,16 +121,17 @@ def run_tests() -> None:
     check(np.isclose(s, 2.0, atol=1e-6), "Asymmetric 0.5x: s == 2.0", f"got {s:.8f}")
     check(np.isclose(val, 0.0, atol=1e-6), "Asymmetric 0.5x: SZI-MPJPE == 0.0", f"got {val:.8f}")
 
-    # --- Test 5: SZI-MPJPE <= MPJPE ---
+    # --- Test 5: Optimal scale minimizes SSE (this IS guaranteed by the math) ---
     for trial in range(5):
-        pred_rand: np.ndarray = rng.standard_normal((8, 12, 3))
-        gt_rand: np.ndarray = rng.standard_normal((8, 12, 3))
-        szi_val, _ = szi_mpjpe(pred_rand, gt_rand)
-        mpjpe_val: float = mpjpe(pred_rand, gt_rand)
+        pred_rand: np.ndarray = rng.standard_normal((10, 16, 3))
+        gt_rand: np.ndarray = rng.standard_normal((10, 16, 3))
+        s_opt: float = optimal_scale(pred_rand, gt_rand)
+        sse_unscaled: float = float(np.sum((pred_rand - gt_rand) ** 2))
+        sse_scaled: float = float(np.sum((s_opt * pred_rand - gt_rand) ** 2))
         check(
-            szi_val <= mpjpe_val + 1e-8,
-            f"SZI-MPJPE <= MPJPE (trial {trial})",
-            f"szi={szi_val:.6f} mpjpe={mpjpe_val:.6f}",
+            sse_scaled <= sse_unscaled + 1e-10,
+            f"SSE after scaling <= SSE before scaling (trial {trial})",
+            f"sse_scaled={sse_scaled:.6f} sse_unscaled={sse_unscaled:.6f}",
         )
 
     # --- Test 6: SZI-MPJPE >= P-MPJPE ---
