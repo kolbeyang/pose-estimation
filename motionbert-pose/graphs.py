@@ -702,6 +702,32 @@ def generate_aggregate_summary(
     ax.grid(True, alpha=0.3, axis="y")
     _save(fig, os.path.join(output_dir, "aggregate_p_mpjpe.png"))
 
+    # SZI-MPJPE bar chart
+    has_szi: bool = all("det_szi_mpjpe" in m for m in with_gt)
+    if has_szi:
+        det_szi_mpjpe_cm: list[float] = [m["det_szi_mpjpe"] * 100 for m in with_gt]
+        has_opt_szi: bool = all("opt_szi_mpjpe" in m for m in with_gt)
+
+        if has_opt_szi:
+            opt_szi_mpjpe_cm: list[float] = [m["opt_szi_mpjpe"] * 100 for m in with_gt]
+            fig, ax = plt.subplots(figsize=(max(10, len(names) * 1.5), 5))
+            ax.bar(x - width / 2, det_szi_mpjpe_cm, width,
+                   color="mediumpurple", alpha=0.7, label="Detector")
+            ax.bar(x + width / 2, opt_szi_mpjpe_cm, width,
+                   color="forestgreen", alpha=0.7, label="Optimized")
+            ax.legend()
+            ax.set_title("Scale-Z-Invariant MPJPE Across Examples (Detector vs Optimized)")
+        else:
+            fig, ax = plt.subplots(figsize=(max(8, len(names) * 1.2), 5))
+            ax.bar(x, det_szi_mpjpe_cm, color="mediumpurple", alpha=0.7)
+            ax.set_title("Scale-Z-Invariant MPJPE Across Examples (Detector)")
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(names, rotation=45, ha="right", fontsize=8)
+        ax.set_ylabel("SZI-MPJPE (cm)")
+        ax.grid(True, alpha=0.3, axis="y")
+        _save(fig, os.path.join(output_dir, "aggregate_szi_mpjpe.png"))
+
     # MPJVE bar chart (only examples with velocity data)
     with_mpjve: list[dict[str, Any]] = [m for m in with_gt if "det_mpjve" in m]
     if with_mpjve:

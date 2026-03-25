@@ -191,6 +191,57 @@ def p_mpjpe(predicted: np.ndarray, target: np.ndarray) -> float:
     return float(np.mean(errors))
 
 
+def optimal_scale(predicted: np.ndarray, target: np.ndarray) -> float:
+    """Find the optimal scale s that minimizes ||s * predicted - target||^2.
+
+    Computed across ALL keypoints and ALL frames simultaneously.
+
+    Args:
+        predicted: (F, J, 3) root-relative predicted positions.
+        target: (F, J, 3) root-relative ground truth positions.
+
+    Returns:
+        Optimal scale factor s.
+    """
+    numerator: float = float(np.sum(predicted * target))
+    denominator: float = float(np.sum(predicted * predicted))
+    if denominator < 1e-12:
+        return 1.0
+    return numerator / denominator
+
+
+def szi_mpjpe(predicted: np.ndarray, target: np.ndarray) -> tuple[float, float]:
+    """Scale-Z-Invariant MPJPE.
+
+    Finds optimal global scale, applies it, then computes MPJPE.
+
+    Args:
+        predicted: (F, J, 3) root-relative positions.
+        target: (F, J, 3) root-relative positions.
+
+    Returns:
+        Tuple of (szi_mpjpe_value, optimal_scale_factor).
+    """
+    s: float = optimal_scale(predicted, target)
+    scaled: np.ndarray = s * predicted
+    return mpjpe(scaled, target), s
+
+
+def szi_mpjpe_per_joint(predicted: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """Per-joint SZI-MPJPE (scale determined globally, error computed per joint).
+
+    Args:
+        predicted: (F, J, 3).
+        target: (F, J, 3).
+
+    Returns:
+        (J,) mean error per joint after optimal scaling.
+    """
+    s: float = optimal_scale(predicted, target)
+    scaled: np.ndarray = s * predicted
+    return mpjpe_per_joint(scaled, target)
+
+
 def compute_comparison(
     detector_3d: list[np.ndarray],
     gt_3d: list[np.ndarray | None],
@@ -235,6 +286,12 @@ def compute_comparison(
     results["det_mpjpe"] = mpjpe(det_eval, gt_eval)
     results["det_p_mpjpe"] = p_mpjpe(det_eval, gt_eval)
 
+    # SZI-MPJPE (detector)
+    det_szi_val, det_szi_scale = szi_mpjpe(det_eval, gt_eval)
+    results["det_szi_mpjpe"] = det_szi_val
+    results["det_szi_scale"] = det_szi_scale
+    results["det_szi_per_joint"] = szi_mpjpe_per_joint(det_eval, gt_eval).tolist()
+
     # Per-joint errors (12 eval joints)
     results["det_per_joint"] = mpjpe_per_joint(det_eval, gt_eval).tolist()
 
@@ -258,6 +315,7 @@ def compute_comparison(
     gt_eval_na: np.ndarray = gt_rr[:, ej_na, :]
     results["det_mpjpe_no_ankles"] = mpjpe(det_eval_na, gt_eval_na)
     results["det_p_mpjpe_no_ankles"] = p_mpjpe(det_eval_na, gt_eval_na)
+    results["det_szi_mpjpe_no_ankles"] = szi_mpjpe(det_eval_na, gt_eval_na)[0]
 
     return results
 
@@ -314,6 +372,12 @@ def compute_comparison_with_optimization(
     results["opt_mpjpe"] = mpjpe(opt_eval, gt_eval)
     results["opt_p_mpjpe"] = p_mpjpe(opt_eval, gt_eval)
 
+    # SZI-MPJPE (optimized)
+    opt_szi_val, opt_szi_scale = szi_mpjpe(opt_eval, gt_eval)
+    results["opt_szi_mpjpe"] = opt_szi_val
+    results["opt_szi_scale"] = opt_szi_scale
+    results["opt_szi_per_joint"] = szi_mpjpe_per_joint(opt_eval, gt_eval).tolist()
+
     # Per-joint errors (12 eval joints)
     results["opt_per_joint"] = mpjpe_per_joint(opt_eval, gt_eval).tolist()
 
@@ -337,6 +401,7 @@ def compute_comparison_with_optimization(
     gt_eval_na: np.ndarray = gt_rr[:, ej_na, :]
     results["opt_mpjpe_no_ankles"] = mpjpe(opt_eval_na, gt_eval_na)
     results["opt_p_mpjpe_no_ankles"] = p_mpjpe(opt_eval_na, gt_eval_na)
+    results["opt_szi_mpjpe_no_ankles"] = szi_mpjpe(opt_eval_na, gt_eval_na)[0]
 
     # Improvement (positive = optimized is better)
     if "det_mpjpe" in results:
