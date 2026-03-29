@@ -243,12 +243,25 @@ def process_example(
     os.makedirs(example_dir, exist_ok=True)
     os.makedirs(graphs_dir, exist_ok=True)
 
-    # results.json
+    # results.json -- structured per plan Phase 6 spec
+    _METRIC_KEYS = [
+        "mpjpe", "p_mpjpe", "si_mpjpe", "vw_mpjpe", "vw_si_mpjpe",
+        "mpjve", "si_mpjve", "vw_mpjve", "vw_si_mpjve",
+    ]
     results_data: dict[str, Any] = {
         "model": "mediapipe",
         "example": name,
         "num_frames": len(frames_rgb),
-        "metrics": {k: v for k, v in metrics.items() if k != "name"},
+        "metrics": {k: metrics[f"opt_{k}"] for k in _METRIC_KEYS if f"opt_{k}" in metrics},
+        "raw_metrics": {k: metrics[f"det_{k}"] for k in _METRIC_KEYS if f"det_{k}" in metrics},
+        "per_joint": {
+            "det_per_joint": metrics.get("det_per_joint", []),
+            "opt_per_joint": metrics.get("opt_per_joint", []),
+            "det_per_frame_mpjpe": metrics.get("det_per_frame_mpjpe", []),
+            "opt_per_frame_mpjpe": metrics.get("opt_per_frame_mpjpe", []),
+            "gt_bone_lengths": metrics.get("gt_bone_lengths", []),
+            "det_bone_lengths": metrics.get("det_bone_lengths", []),
+        },
         "config": config.model_dump(),
     }
     results_path = os.path.join(example_dir, "results.json")
