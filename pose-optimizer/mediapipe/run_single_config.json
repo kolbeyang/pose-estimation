@@ -1,0 +1,24 @@
+{
+    "examples": [
+        {
+            "sequence": "171204_pose1_sample",
+            "camera": "00_00",
+            "start_frame": 0,
+            "num_frames": 100,
+            "person_idx": 0
+        }
+    ],
+    "data_root": "../data/panoptic-toolbox",
+    "output_dir": null,
+    "target_fps": 10.0,
+    "gaussian_sigma": 50.0,
+    "optimization": {
+        "num_steps": 50,
+        "learning_rate": 0.002,
+        "bone_length_lr": 0.0001,
+        "position_penalty_weight": 500.0,
+        "rotation_penalty_scalar": 10.0,
+        "heatmap_blur_sigma": 4.0,
+        "heatmap_sigma": 50.0
+    }
+}

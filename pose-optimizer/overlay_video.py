@@ -1,0 +1,290 @@
+"""Unified overlay video generation for both MotionBert and MediaPipe pipelines.
+
+Overlays on original video frames:
+  1. Heatmap overlay (real SH or synthetic Gaussian, HOT colormap)
+  2. Yellow dots at raw 2D detection positions
+  3. Green skeleton: raw 3D projected to 2D
+  4. Red skeleton: optimized 3D projected to 2D
+  5. Blue skeleton: GT 3D projected to 2D (if available)
+"""
+
+import os
+
+import cv2
+import numpy as np
+
+from skeleton import BONES, NUM_JOINTS
+
+
+def _resize_heatmap_to_frame(
+    heatmap_64: np.ndarray,
+    affine: np.ndarray,
+    frame_h: int,
+    frame_w: int,
+) -> np.ndarray:
+    """Resize a heatmap to the full video frame using the affine transform.
+
+    Args:
+        heatmap_64: (H_hm, W_hm) single-channel heatmap.
+        affine: (2, 3) affine transform (crop coords -> original pixel coords).
+        frame_h: Full frame height.
+        frame_w: Full frame width.
+
+    Returns:
+        (frame_h, frame_w) float32 heatmap in original pixel space.
+    """
+    sx = float(affine[0, 0])
+    sy = float(affine[1, 1])
+    tx = float(affine[0, 2])
+    ty = float(affine[1, 2])
+
+    hm_h, hm_w = heatmap_64.shape
+
+    # For SH: affine maps [0..255] crop coords to pixels; heatmap is 64x64 (1/4 crop)
+    # For synthetic: affine maps heatmap coords directly to pixels
+    # Compute crop region size in original pixel space
+    # SH: crop is 256x256, so crop_w = 256 * sx
+    # Synthetic: crop_w = hm_w * sx (since crop == heatmap size)
+    # We detect this by checking if hm_w is much smaller than the effective crop
+    # Actually, the simplest approach: the affine maps from some coord space to pixels.
+    # For SH, that space is 256x256. For synthetic, it's hm_size x hm_size.
+    # In both cases: the heatmap covers the full crop.
+    # For SH: crop pixel extent = 256*sx, heatmap is 64 of those pixels -> upscale 4x
+    # For synthetic: crop pixel extent = hm_w*sx
+
+    # We can just compute: destination size from the affine
+    # For SH: the crop is 256 units wide, affine maps 0..255 to a pixel range
+    # The heatmap covers that entire 256-unit crop at 64px resolution
+    # So we resize the heatmap to the crop's pixel size
+
+    # For SH, affine sx ~= (crop_pixel_size / 256).
+    # crop_pixel_size = 256 * sx. heatmap is 64 -> resize to crop_pixel_size
+    # For synthetic, sx = image_w / hm_w. crop_pixel_size = hm_w * sx = image_w.
+    # That's the full image -- correct for synthetic (no crop).
+
+    # Detect if this is SH (crop_to_hm_ratio=4) or synthetic (ratio=1)
+    # SH: 256/64=4. For SH, the full crop in pixel space is 256*sx.
+    # For synthetic, the full crop in pixel space is hm_w * sx.
+    # We'll just scale up proportionally.
+
+    # How many crop units does this heatmap cover?
+    # For SH: the heatmap covers 256 crop units at 64px resolution (ratio 4)
+    # For synthetic: the heatmap covers hm_w crop units at hm_w px resolution (ratio 1)
+
+    # Let's just assume: the crop size in crop-units = max(256, hm_w*4) for SH detection
+    # Actually the simplest reliable method: try both and detect from the affine.
+    # The affine encodes sx = crop_pixel_extent / crop_coord_range.
+    # If crop_coord_range is 256 (SH), crop_w_px = 256 * sx.
+    # If crop_coord_range is hm_w (synthetic), crop_w_px = hm_w * sx.
+    # We can tell by checking: does hm_w * sx give a reasonable crop size?
+    # If sx >> 1 (like 20+), it's synthetic (maps 64 hm coords to 1920 pixels).
+    # If sx < 5, it's SH (maps 256 crop coords to ~1000 pixels, so sx ~ 4).
+
+    # Use heuristic: if sx > 5, treat as synthetic (crop_units = hm_w)
+    # else treat as SH (crop_units = 256, hm covers 256 crop units at 64 res)
+
+    if sx > 5.0:
+        # Synthetic: affine maps [0, hm_w] to pixels directly
+        crop_w = int(round(hm_w * sx))
+        crop_h = int(round(hm_h * sy))
+    else:
+        # SH: affine maps [0, 255] crop to pixels, heatmap is 64x64 of 256x256
+        crop_w = max(1, int(round(256 * sx)))
+        crop_h = max(1, int(round(256 * sy)))
+
+    resized = cv2.resize(
+        heatmap_64, (crop_w, crop_h), interpolation=cv2.INTER_LINEAR
+    )
+
+    full_heatmap = np.zeros((frame_h, frame_w), dtype=np.float32)
+
+    dst_x0 = int(round(tx))
+    dst_y0 = int(round(ty))
+    dst_x1 = dst_x0 + crop_w
+    dst_y1 = dst_y0 + crop_h
+
+    src_x0 = max(0, -dst_x0)
+    src_y0 = max(0, -dst_y0)
+    src_x1 = crop_w - max(0, dst_x1 - frame_w)
+    src_y1 = crop_h - max(0, dst_y1 - frame_h)
+
+    paste_x0 = max(0, dst_x0)
+    paste_y0 = max(0, dst_y0)
+    paste_x1 = min(frame_w, dst_x1)
+    paste_y1 = min(frame_h, dst_y1)
+
+    if paste_x1 > paste_x0 and paste_y1 > paste_y0 and src_x1 > src_x0 and src_y1 > src_y0:
+        full_heatmap[paste_y0:paste_y1, paste_x0:paste_x1] = resized[src_y0:src_y1, src_x0:src_x1]
+
+    return full_heatmap
+
+
+def _blend_heatmap_additive(
+    frame_bgr: np.ndarray,
+    heatmap: np.ndarray,
+    intensity: float = 200.0,
+) -> np.ndarray:
+    """Additively blend heatmap onto frame using HOT colormap."""
+    maxval = float(heatmap.max())
+    if maxval < 1e-6:
+        return frame_bgr
+    norm = np.clip(heatmap / maxval, 0, 1)
+    hm_uint8 = (norm * 255).astype(np.uint8)
+    hm_color = cv2.applyColorMap(hm_uint8, cv2.COLORMAP_HOT)
+    glow = hm_color.astype(np.float32) * (norm[:, :, np.newaxis] * intensity / 255.0)
+    result = np.clip(frame_bgr.astype(np.float32) + glow, 0, 255)
+    return result.astype(np.uint8)
+
+
+def _project_3d_to_2d(
+    pts_3d: np.ndarray,
+    fx: float, fy: float, cx: float, cy: float,
+) -> np.ndarray:
+    """Perspective projection: (N, 3) camera-space -> (N, 2) pixels."""
+    pts = np.asarray(pts_3d, dtype=np.float64)
+    Z = np.maximum(pts[:, 2], 0.01)
+    u = fx * pts[:, 0] / Z + cx
+    v = fy * pts[:, 1] / Z + cy
+    return np.stack([u, v], axis=-1)
+
+
+def _draw_skeleton_2d(
+    frame: np.ndarray,
+    pts_2d: np.ndarray,
+    color: tuple[int, int, int],
+    thickness: int = 2,
+    visible_mask: np.ndarray | None = None,
+) -> None:
+    """Draw skeleton bones + joint circles on frame (in-place)."""
+    h, w = frame.shape[:2]
+    for parent, child in BONES:
+        if visible_mask is not None and (not visible_mask[parent] or not visible_mask[child]):
+            continue
+        p1 = (int(pts_2d[parent, 0]), int(pts_2d[parent, 1]))
+        p2 = (int(pts_2d[child, 0]), int(pts_2d[child, 1]))
+        if 0 <= p1[0] < w and 0 <= p1[1] < h and 0 <= p2[0] < w and 0 <= p2[1] < h:
+            cv2.line(frame, p1, p2, color, thickness, cv2.LINE_AA)
+    for j in range(min(pts_2d.shape[0], NUM_JOINTS)):
+        if visible_mask is not None and not visible_mask[j]:
+            continue
+        pt = (int(pts_2d[j, 0]), int(pts_2d[j, 1]))
+        if 0 <= pt[0] < w and 0 <= pt[1] < h:
+            cv2.circle(frame, pt, 4, color, -1, cv2.LINE_AA)
+
+
+def generate_overlay_video(
+    output_path: str,
+    frames_rgb: list[np.ndarray],
+    heatmaps: list[np.ndarray],
+    detector_2d: list[np.ndarray],
+    detector_3d: list[np.ndarray],
+    optimized_3d: list[np.ndarray],
+    camera_fx: float,
+    camera_fy: float,
+    camera_cx: float,
+    camera_cy: float,
+    affine: np.ndarray,
+    frame_indices: list[int] | None = None,
+    gt_3d: list[np.ndarray | None] | None = None,
+    visibility: list[np.ndarray] | None = None,
+    visibility_threshold: float = 0.3,
+    intensity: float = 200.0,
+    pipeline_name: str = "Detector",
+) -> None:
+    """Generate overlay video from in-memory pipeline data.
+
+    Args:
+        output_path: Path for output .mp4 video.
+        frames_rgb: List of (H, W, 3) uint8 RGB frames.
+        heatmaps: List of (C, H_hm, W_hm) heatmaps per frame.
+        detector_2d: List of (K, 2) or (K, 3) 2D detections in pixel coords.
+        detector_3d: List of (K, 3) raw 3D positions in camera space.
+        optimized_3d: List of (K, 3) optimized 3D positions in camera space.
+        camera_fx, camera_fy, camera_cx, camera_cy: Camera intrinsics.
+        affine: (2, 3) affine from crop/heatmap coords to original pixel coords.
+        frame_indices: Optional frame indices for labeling.
+        gt_3d: Optional list of (K, 3) ground truth 3D or None.
+        visibility: Optional per-frame visibility/confidence arrays.
+        visibility_threshold: Threshold for drawing joints.
+        intensity: Heatmap blend intensity.
+        pipeline_name: Name for legend (e.g. "MotionBERT", "MediaPipe").
+    """
+    if not frames_rgb:
+        print("  WARNING: No frames for overlay video.")
+        return
+
+    n_frames = len(frames_rgb)
+    h, w = frames_rgb[0].shape[:2]
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(output_path, fourcc, 5.0, (w, h))
+
+    for i in range(n_frames):
+        frame_bgr = cv2.cvtColor(frames_rgb[i], cv2.COLOR_RGB2BGR)
+
+        # 1. Heatmap overlay
+        if i < len(heatmaps):
+            hm_combined = np.clip(heatmaps[i], 0, None).sum(axis=0)
+            hm_full = _resize_heatmap_to_frame(hm_combined, affine, h, w)
+            frame_bgr = _blend_heatmap_additive(frame_bgr, hm_full, intensity)
+
+        # Visibility mask
+        vis_mask = None
+        if visibility is not None and i < len(visibility):
+            vis_mask = visibility[i] >= visibility_threshold
+
+        # 2. Yellow dots for raw 2D detections
+        if i < len(detector_2d):
+            kp = detector_2d[i]
+            for j in range(kp.shape[0]):
+                # Check if confidence column exists and meets threshold
+                if kp.shape[1] > 2 and kp[j, 2] < visibility_threshold:
+                    continue
+                pt = (int(kp[j, 0]), int(kp[j, 1]))
+                if 0 <= pt[0] < w and 0 <= pt[1] < h:
+                    cv2.circle(frame_bgr, pt, 4, (0, 255, 255), -1, cv2.LINE_AA)
+
+        # 3. Green skeleton: raw 3D projected
+        if i < len(detector_3d):
+            det_proj = _project_3d_to_2d(
+                detector_3d[i], camera_fx, camera_fy, camera_cx, camera_cy
+            )
+            _draw_skeleton_2d(frame_bgr, det_proj, color=(0, 255, 0), thickness=2,
+                              visible_mask=vis_mask)
+
+        # 4. Red skeleton: optimized 3D projected
+        if i < len(optimized_3d):
+            opt_proj = _project_3d_to_2d(
+                optimized_3d[i], camera_fx, camera_fy, camera_cx, camera_cy
+            )
+            _draw_skeleton_2d(frame_bgr, opt_proj, color=(0, 0, 255), thickness=2,
+                              visible_mask=vis_mask)
+
+        # 5. Blue skeleton: GT 3D projected
+        if gt_3d is not None and i < len(gt_3d) and gt_3d[i] is not None:
+            gt_proj = _project_3d_to_2d(
+                gt_3d[i], camera_fx, camera_fy, camera_cx, camera_cy
+            )
+            _draw_skeleton_2d(frame_bgr, gt_proj, color=(255, 100, 0), thickness=2)
+
+        # Frame label
+        frame_label = (
+            f"Frame {frame_indices[i]}" if frame_indices and i < len(frame_indices)
+            else f"Frame {i}"
+        )
+        cv2.putText(frame_bgr, frame_label,
+                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
+        # Legend
+        legend_y = h - 20
+        cv2.putText(
+            frame_bgr,
+            f"Yellow=2D Det  Green={pipeline_name}  Red=Optimized  Blue=GT",
+            (10, legend_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
+        )
+
+        writer.write(frame_bgr)
+
+    writer.release()
+    print(f"  Saved overlay video: {output_path} ({n_frames} frames)")
