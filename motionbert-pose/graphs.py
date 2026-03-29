@@ -139,8 +139,10 @@ def generate_per_joint_szi_error_bar(
     output_dir: str,
     opt_per_joint: list[float] | None = None,
     opt_szi_per_joint: list[float] | None = None,
+    det_vw_szi_per_joint: list[float] | None = None,
+    opt_vw_szi_per_joint: list[float] | None = None,
 ) -> None:
-    """Combined 4-bar chart: MPJPE + SZI-MPJPE per joint (12 eval joints).
+    """Combined bar chart: MPJPE + SZI-MPJPE + VW-SZI-MPJPE per joint (12 eval joints).
 
     Args:
         det_per_joint: 12 per-joint MPJPE values in meters (detector).
@@ -148,27 +150,50 @@ def generate_per_joint_szi_error_bar(
         output_dir: Directory to save the graph.
         opt_per_joint: Optional 12 per-joint MPJPE values (optimized).
         opt_szi_per_joint: Optional 12 per-joint SZI-MPJPE values (optimized).
+        det_vw_szi_per_joint: Optional 12 per-joint VW-SZI-MPJPE (detector).
+        opt_vw_szi_per_joint: Optional 12 per-joint VW-SZI-MPJPE (optimized).
     """
     os.makedirs(output_dir, exist_ok=True)
     x: np.ndarray = np.arange(NUM_EVAL_JOINTS)
 
     fig: plt.Figure
     ax: plt.Axes
-    fig, ax = plt.subplots(figsize=(14, 6))
+    has_vw: bool = det_vw_szi_per_joint is not None and opt_vw_szi_per_joint is not None
 
     if opt_per_joint is not None and opt_szi_per_joint is not None:
-        bw: float = 0.2
-        ax.bar(x - 1.5 * bw, [v * 100 for v in det_per_joint], bw,
-               color="green", alpha=0.7, label="Det MPJPE")
-        ax.bar(x - 0.5 * bw, [v * 100 for v in opt_per_joint], bw,
-               color="red", alpha=0.7, label="Opt MPJPE")
-        ax.bar(x + 0.5 * bw, [v * 100 for v in det_szi_per_joint], bw,
-               color="lightgreen", alpha=0.7, label="Det SZI-MPJPE")
-        ax.bar(x + 1.5 * bw, [v * 100 for v in opt_szi_per_joint], bw,
-               color="lightcoral", alpha=0.7, label="Opt SZI-MPJPE")
+        if has_vw:
+            # 6 bars: MPJPE (det/opt), SZI (det/opt), VW-SZI (det/opt)
+            bw: float = 0.13
+            fig, ax = plt.subplots(figsize=(16, 6))
+            ax.bar(x - 2.5 * bw, [v * 100 for v in det_per_joint], bw,
+                   color="green", alpha=0.7, label="Det MPJPE")
+            ax.bar(x - 1.5 * bw, [v * 100 for v in opt_per_joint], bw,
+                   color="red", alpha=0.7, label="Opt MPJPE")
+            ax.bar(x - 0.5 * bw, [v * 100 for v in det_szi_per_joint], bw,
+                   color="lightgreen", alpha=0.7, label="Det SZI-MPJPE")
+            ax.bar(x + 0.5 * bw, [v * 100 for v in opt_szi_per_joint], bw,
+                   color="lightcoral", alpha=0.7, label="Opt SZI-MPJPE")
+            ax.bar(x + 1.5 * bw, [v * 100 for v in det_vw_szi_per_joint], bw,
+                   color="dodgerblue", alpha=0.7, label="Det VW-SZI-MPJPE")
+            ax.bar(x + 2.5 * bw, [v * 100 for v in opt_vw_szi_per_joint], bw,
+                   color="orange", alpha=0.7, label="Opt VW-SZI-MPJPE")
+            ax.set_title("Per-Joint MPJPE, SZI-MPJPE & VW-SZI-MPJPE (12 eval joints)")
+        else:
+            # 4 bars: MPJPE (det/opt), SZI (det/opt)
+            bw = 0.2
+            fig, ax = plt.subplots(figsize=(14, 6))
+            ax.bar(x - 1.5 * bw, [v * 100 for v in det_per_joint], bw,
+                   color="green", alpha=0.7, label="Det MPJPE")
+            ax.bar(x - 0.5 * bw, [v * 100 for v in opt_per_joint], bw,
+                   color="red", alpha=0.7, label="Opt MPJPE")
+            ax.bar(x + 0.5 * bw, [v * 100 for v in det_szi_per_joint], bw,
+                   color="lightgreen", alpha=0.7, label="Det SZI-MPJPE")
+            ax.bar(x + 1.5 * bw, [v * 100 for v in opt_szi_per_joint], bw,
+                   color="lightcoral", alpha=0.7, label="Opt SZI-MPJPE")
+            ax.set_title("Per-Joint MPJPE & SZI-MPJPE (12 eval joints)")
         ax.legend()
-        ax.set_title("Per-Joint MPJPE & SZI-MPJPE (12 eval joints)")
     else:
+        fig, ax = plt.subplots(figsize=(14, 6))
         ax.bar(x - 0.2, [v * 100 for v in det_per_joint], 0.4,
                color="green", alpha=0.7, label="Det MPJPE")
         ax.bar(x + 0.2, [v * 100 for v in det_szi_per_joint], 0.4,
@@ -556,9 +581,22 @@ def generate_summary(
     ax.set_title("Per-Joint MPJPE & SZI (cm)", fontsize=9)
     ax.grid(True, alpha=0.2, axis="y")
 
-    # Row 2, Col 2: (empty panel)
+    # Row 2, Col 2: VW-SZI-MPJPE per joint
     ax = axes[2, 2]
-    ax.axis("off")
+    if "det_vw_szi_per_joint" in metrics and "opt_vw_szi_per_joint" in metrics:
+        x_ej2: np.ndarray = np.arange(NUM_EVAL_JOINTS)
+        bw2: float = 0.3
+        ax.bar(x_ej2 - bw2 / 2, [v * 100 for v in metrics["det_vw_szi_per_joint"]], bw2,
+               label="Det VW-SZI", color="dodgerblue", alpha=0.7)
+        ax.bar(x_ej2 + bw2 / 2, [v * 100 for v in metrics["opt_vw_szi_per_joint"]], bw2,
+               label="Opt VW-SZI", color="orange", alpha=0.7)
+        ax.set_xticks(x_ej2)
+        ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=90, fontsize=5)
+        ax.legend(fontsize=5)
+        ax.set_title("Per-Joint VW-SZI-MPJPE (cm)", fontsize=9)
+        ax.grid(True, alpha=0.2, axis="y")
+    else:
+        ax.axis("off")
 
     # Row 2, Col 3: Bone lengths (GT / Detector / Optimized)
     ax = axes[2, 3]
@@ -664,12 +702,17 @@ def generate_summary(
             f"  |  Det SZI: {metrics['det_szi_mpjpe']*100:.1f}cm"
             f"  Opt SZI: {metrics['opt_szi_mpjpe']*100:.1f}cm"
         )
+    if "det_vw_szi_mpjpe" in metrics:
+        metric_str += (
+            f"  |  Det VW-SZI: {metrics['det_vw_szi_mpjpe']*100:.1f}cm"
+            f"  Opt VW-SZI: {metrics['opt_vw_szi_mpjpe']*100:.1f}cm"
+        )
     if "det_mpjve" in metrics:
         metric_str += (
             f"  |  Det MPJVE: {metrics['det_mpjve']*100:.2f}cm/f"
             f"  Opt MPJVE: {metrics['opt_mpjve']*100:.2f}cm/f"
         )
-    fig.suptitle(f"{title}{metric_str}", fontsize=12, fontweight="bold")
+    fig.suptitle(f"{title}{metric_str}", fontsize=11, fontweight="bold")
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     _save(fig, os.path.join(output_dir, "summary.png"))
 
@@ -803,34 +846,50 @@ def generate_aggregate_summary(
         _save(fig, os.path.join(output_dir, "aggregate_mpjve.png"))
 
     # Print table
+    has_vw: bool = all("det_vw_szi_mpjpe" in m for m in with_gt)
     print("\n  === Aggregate Results ===")
     if has_opt:
-        print(
+        header: str = (
             f"  {'Example':<35} {'Det MPJPE':>10} {'Opt MPJPE':>10} {'Improv':>8} "
             f"{'Det MPJVE':>10} {'Opt MPJVE':>10}"
         )
-        print(
+        sep: str = (
             f"  {'-'*35} {'-'*10} {'-'*10} {'-'*8} {'-'*10} {'-'*10}"
         )
+        if has_vw:
+            header += f" {'Det VW-SZI':>10} {'Opt VW-SZI':>10}"
+            sep += f" {'-'*10} {'-'*10}"
+        print(header)
+        print(sep)
         for i, name in enumerate(names):
             improv: float = det_mpjpe_cm[i] - opt_mpjpe_cm[i]
             det_v: float = with_gt[i].get("det_mpjve", 0) * 100
             opt_v: float = with_gt[i].get("opt_mpjve", 0) * 100
-            print(
+            line: str = (
                 f"  {name:<35} {det_mpjpe_cm[i]:>10.2f} {opt_mpjpe_cm[i]:>10.2f} "
                 f"{improv:>+8.2f} "
                 f"{det_v:>10.2f} {opt_v:>10.2f}"
             )
+            if has_vw:
+                det_vw_cm: float = with_gt[i]["det_vw_szi_mpjpe"] * 100
+                opt_vw_cm: float = with_gt[i]["opt_vw_szi_mpjpe"] * 100
+                line += f" {det_vw_cm:>10.2f} {opt_vw_cm:>10.2f}"
+            print(line)
         mean_det: float = float(np.mean(det_mpjpe_cm))
         mean_opt: float = float(np.mean(opt_mpjpe_cm))
         mean_improv: float = mean_det - mean_opt
         mean_det_v: float = float(np.mean([m.get("det_mpjve", 0) * 100 for m in with_gt]))
         mean_opt_v: float = float(np.mean([m.get("opt_mpjve", 0) * 100 for m in with_gt]))
-        print(
+        mean_line: str = (
             f"  {'MEAN':<35} {mean_det:>10.2f} {mean_opt:>10.2f} "
             f"{mean_improv:>+8.2f} "
             f"{mean_det_v:>10.2f} {mean_opt_v:>10.2f}"
         )
+        if has_vw:
+            mean_det_vw: float = float(np.mean([m["det_vw_szi_mpjpe"] * 100 for m in with_gt]))
+            mean_opt_vw: float = float(np.mean([m["opt_vw_szi_mpjpe"] * 100 for m in with_gt]))
+            mean_line += f" {mean_det_vw:>10.2f} {mean_opt_vw:>10.2f}"
+        print(mean_line)
     else:
         print(f"  {'Example':<35} {'MPJPE (cm)':>10}")
         print(f"  {'-'*35} {'-'*10}")

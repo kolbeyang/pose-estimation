@@ -40,12 +40,33 @@ EXAMPLES: list[tuple] = [
     ("160906_pizza1", "00_00", 4500, 150, 0),
     ("female_example_01", "00_00", 350, 150, 0),
     # --- Occlusion tests (16 visible, 16 black) ---
-    ("171204_pose1_sample", "00_00", 0, 100, 0,
-     os.path.join(_OCC_DIR, "171204_pose1_sample_0_occ16v16b.mp4"), "_occ16v16b"),
-    ("171204_pose2", "00_00", 15000, 150, 0,
-     os.path.join(_OCC_DIR, "171204_pose2_15000_occ16v16b.mp4"), "_occ16v16b"),
-    ("171204_pose3", "00_00", 4000, 150, 0,
-     os.path.join(_OCC_DIR, "171204_pose3_4000_occ16v16b.mp4"), "_occ16v16b"),
+    (
+        "171204_pose1_sample",
+        "00_00",
+        0,
+        100,
+        0,
+        os.path.join(_OCC_DIR, "171204_pose1_sample_0_occ16v16b.mp4"),
+        "_occ16v16b",
+    ),
+    (
+        "171204_pose2",
+        "00_00",
+        15000,
+        150,
+        0,
+        os.path.join(_OCC_DIR, "171204_pose2_15000_occ16v16b.mp4"),
+        "_occ16v16b",
+    ),
+    (
+        "171204_pose3",
+        "00_00",
+        4000,
+        150,
+        0,
+        os.path.join(_OCC_DIR, "171204_pose3_4000_occ16v16b.mp4"),
+        "_occ16v16b",
+    ),
 ]
 
 # --- Video processing ---
@@ -65,7 +86,7 @@ SIGMA: float = 50.0
 HEATMAP_BLUR_SIGMA: float = 4.0
 
 # Motion penalty weights
-POSITION_PENALTY_WEIGHT: float = 50.0
+POSITION_PENALTY_WEIGHT: float = 500.0
 
 # Per-joint rotation penalty weights (16 joints)
 # Trunk joints penalized more to prevent wild torso swings.

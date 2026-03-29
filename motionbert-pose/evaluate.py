@@ -8,7 +8,14 @@ import numpy as np
 from scipy.optimize import minimize_scalar
 
 from camera import Camera
-from skeleton import NUM_JOINTS, JOINT_NAMES, EVAL_JOINTS, NUM_EVAL_JOINTS, EVAL_JOINT_NAMES, PARENTS
+from skeleton import (
+    NUM_JOINTS,
+    JOINT_NAMES,
+    EVAL_JOINTS,
+    NUM_EVAL_JOINTS,
+    EVAL_JOINT_NAMES,
+    PARENTS,
+)
 
 # Eval joints excluding ankles (joints 3=RAnkle, 6=LAnkle)
 EVAL_JOINTS_NO_ANKLES: list[int] = [j for j in EVAL_JOINTS if j not in (3, 6)]
@@ -84,8 +91,10 @@ def mpjve_per_frame(predicted: np.ndarray, target: np.ndarray) -> list[float]:
     """
     pred_vel: np.ndarray = np.diff(predicted, axis=0)
     tgt_vel: np.ndarray = np.diff(target, axis=0)
-    return [float(np.mean(np.linalg.norm(pred_vel[i] - tgt_vel[i], axis=-1)))
-            for i in range(pred_vel.shape[0])]
+    return [
+        float(np.mean(np.linalg.norm(pred_vel[i] - tgt_vel[i], axis=-1)))
+        for i in range(pred_vel.shape[0])
+    ]
 
 
 def root_relative(positions: np.ndarray) -> np.ndarray:
@@ -156,6 +165,7 @@ def optimal_scale(predicted: np.ndarray, target: np.ndarray) -> float:
     if float(np.sum(predicted * predicted)) < 1e-12:
         return 1.0
 
+    # TODO: reuse later in evaluation
     def _mpjpe_at_scale(s: float) -> float:
         return float(np.mean(np.linalg.norm(s * predicted - target, axis=-1)))
 
@@ -195,6 +205,93 @@ def szi_mpjpe_per_joint(predicted: np.ndarray, target: np.ndarray) -> np.ndarray
     s: float = optimal_scale(predicted, target)
     scaled: np.ndarray = s * predicted
     return mpjpe_per_joint(scaled, target)
+
+
+def _optimal_scale_weighted(
+    predicted: np.ndarray,
+    target: np.ndarray,
+    weights: np.ndarray,
+) -> float:
+    """Find optimal scale s minimizing visibility-weighted MPJPE.
+
+    Args:
+        predicted: (F, J, 3) root-relative predicted positions.
+        target: (F, J, 3) root-relative ground truth positions.
+        weights: (F, J) per-joint per-frame weights (e.g. SH confidence).
+
+    Returns:
+        Optimal scale factor s.
+    """
+    if float(np.sum(predicted * predicted)) < 1e-12:
+        return 1.0
+
+    w_sum: float = float(weights.sum())
+    if w_sum < 1e-12:
+        return 1.0
+
+    def _weighted_mpjpe(s: float) -> float:
+        errors: np.ndarray = np.linalg.norm(s * predicted - target, axis=-1)  # (F, J)
+        return float(np.sum(errors * weights) / w_sum)
+
+    result = minimize_scalar(_weighted_mpjpe, bounds=(0.5, 2.0), method="bounded")
+    return float(result.x)
+
+
+def vw_szi_mpjpe(
+    predicted: np.ndarray,
+    target: np.ndarray,
+    weights: np.ndarray,
+) -> tuple[float, float]:
+    """Visibility-Weighted Scale-Z-Invariant MPJPE.
+
+    Finds the global scale that minimizes visibility-weighted MPJPE, then
+    reports the weighted MPJPE at that scale.
+
+    Args:
+        predicted: (F, J, 3) root-relative positions.
+        target: (F, J, 3) root-relative positions.
+        weights: (F, J) per-joint per-frame visibility weights.
+
+    Returns:
+        Tuple of (vw_szi_mpjpe_value, optimal_scale_factor).
+    """
+    s: float = _optimal_scale_weighted(predicted, target, weights)
+    scaled: np.ndarray = s * predicted
+    errors: np.ndarray = np.linalg.norm(scaled - target, axis=-1)  # (F, J)
+    w_sum: float = float(weights.sum())
+    if w_sum < 1e-12:
+        return float(np.mean(errors)), s
+    return float(np.sum(errors * weights) / w_sum), s
+
+
+def vw_szi_mpjpe_per_joint(
+    predicted: np.ndarray,
+    target: np.ndarray,
+    weights: np.ndarray,
+) -> np.ndarray:
+    """Per-joint VW-SZI-MPJPE (scale determined globally with weights).
+
+    Args:
+        predicted: (F, J, 3).
+        target: (F, J, 3).
+        weights: (F, J) per-joint per-frame visibility weights.
+
+    Returns:
+        (J,) weighted mean error per joint after optimal scaling.
+    """
+    s: float = _optimal_scale_weighted(predicted, target, weights)
+    scaled: np.ndarray = s * predicted
+    errors: np.ndarray = np.linalg.norm(scaled - target, axis=-1)  # (F, J)
+    n_joints: int = errors.shape[1]
+    result: np.ndarray = np.zeros(n_joints)
+    for j in range(n_joints):
+        w_j: np.ndarray = weights[:, j]
+        w_sum: float = float(w_j.sum())
+        if w_sum < 1e-12:
+            result[j] = float(np.mean(errors[:, j]))
+        else:
+            result[j] = float(np.sum(errors[:, j] * w_j) / w_sum)
+    return result
 
 
 def compute_comparison(
@@ -331,6 +428,30 @@ def compute_comparison_with_optimization(
         for i in range(len(gt_indices))
     ]
 
+    # VW-SZI-MPJPE (visibility-weighted, using SH confidence scores)
+    if visibility is not None:
+        vis_arr: np.ndarray = np.array([visibility[i] for i in gt_indices])  # (F, 16)
+        vis_eval: np.ndarray = vis_arr[:, ej]  # (F, 12)
+
+        det_eval_rr: np.ndarray = det_rr[:, ej, :]
+        det_vw_val, det_vw_scale = vw_szi_mpjpe(det_eval_rr, gt_eval, vis_eval)
+        results["det_vw_szi_mpjpe"] = det_vw_val
+        results["det_vw_szi_scale"] = det_vw_scale
+        results["det_vw_szi_per_joint"] = vw_szi_mpjpe_per_joint(
+            det_eval_rr,
+            gt_eval,
+            vis_eval,
+        ).tolist()
+
+        opt_vw_val, opt_vw_scale = vw_szi_mpjpe(opt_eval, gt_eval, vis_eval)
+        results["opt_vw_szi_mpjpe"] = opt_vw_val
+        results["opt_vw_szi_scale"] = opt_vw_scale
+        results["opt_vw_szi_per_joint"] = vw_szi_mpjpe_per_joint(
+            opt_eval,
+            gt_eval,
+            vis_eval,
+        ).tolist()
+
     # No-ankles MPJPE for optimized
     ej_na: list[int] = EVAL_JOINTS_NO_ANKLES
     opt_eval_na: np.ndarray = opt_rr[:, ej_na, :]
@@ -347,14 +468,22 @@ def compute_comparison_with_optimization(
     det_bl: np.ndarray = np.zeros(NUM_JOINTS)
     for j in range(1, NUM_JOINTS):
         p: int = int(PARENTS[j])
-        gt_bl[j] = float(np.mean([
-            np.linalg.norm(gt_rr[f, j] - gt_rr[f, p])
-            for f in range(len(gt_indices))
-        ]))
-        det_bl[j] = float(np.mean([
-            np.linalg.norm(det_rr[f, j] - det_rr[f, p])
-            for f in range(len(gt_indices))
-        ]))
+        gt_bl[j] = float(
+            np.mean(
+                [
+                    np.linalg.norm(gt_rr[f, j] - gt_rr[f, p])
+                    for f in range(len(gt_indices))
+                ]
+            )
+        )
+        det_bl[j] = float(
+            np.mean(
+                [
+                    np.linalg.norm(det_rr[f, j] - det_rr[f, p])
+                    for f in range(len(gt_indices))
+                ]
+            )
+        )
     results["gt_bone_lengths"] = gt_bl.tolist()
     results["det_bone_lengths"] = det_bl.tolist()
 
@@ -376,8 +505,12 @@ def compute_comparison_with_optimization(
             gt_2d: np.ndarray = camera.world_to_image(gt_arr[i])
             det_2d: np.ndarray = camera.world_to_image(det_arr[i])
             opt_2d: np.ndarray = camera.world_to_image(opt_arr[i])
-            det_2d_errors.append(float(np.mean(np.linalg.norm(det_2d - gt_2d, axis=-1))))
-            opt_2d_errors.append(float(np.mean(np.linalg.norm(opt_2d - gt_2d, axis=-1))))
+            det_2d_errors.append(
+                float(np.mean(np.linalg.norm(det_2d - gt_2d, axis=-1)))
+            )
+            opt_2d_errors.append(
+                float(np.mean(np.linalg.norm(opt_2d - gt_2d, axis=-1)))
+            )
         results["det_per_frame_2d_mpjpe"] = det_2d_errors
         results["opt_per_frame_2d_mpjpe"] = opt_2d_errors
         results["det_2d_mpjpe"] = float(np.mean(det_2d_errors))
@@ -386,10 +519,16 @@ def compute_comparison_with_optimization(
     # --- 2D reprojection error vs 2D DETECTIONS (not GT) ---
     if camera is not None and detections_2d is not None and visibility is not None:
         det_vs_det = reprojection_error_vs_detections(
-            detector_3d, detections_2d, visibility, camera,
+            detector_3d,
+            detections_2d,
+            visibility,
+            camera,
         )
         opt_vs_det = reprojection_error_vs_detections(
-            optimized_3d, detections_2d, visibility, camera,
+            optimized_3d,
+            detections_2d,
+            visibility,
+            camera,
         )
         results["det_2d_det_mpjpe_px"] = det_vs_det["mean_px"]
         results["opt_2d_det_mpjpe_px"] = opt_vs_det["mean_px"]

@@ -253,6 +253,9 @@ def process_example(
         print(f"    Opt SZI-MPJPE: {metrics['opt_szi_mpjpe']*100:.2f} cm (scale={metrics['opt_szi_scale']:.4f})")
     if "opt_mpjpe_no_ankles" in metrics:
         print(f"    Opt MPJPE (no ankles): {metrics['opt_mpjpe_no_ankles']*100:.2f} cm")
+    if "det_vw_szi_mpjpe" in metrics:
+        print(f"    Det VW-SZI-MPJPE: {metrics['det_vw_szi_mpjpe']*100:.2f} cm (scale={metrics['det_vw_szi_scale']:.4f})")
+        print(f"    Opt VW-SZI-MPJPE: {metrics['opt_vw_szi_mpjpe']*100:.2f} cm (scale={metrics['opt_vw_szi_scale']:.4f})")
     if "improvement" in metrics:
         improv_cm: float = metrics["improvement"] * 100
         print(f"    Improvement: {improv_cm:+.2f} cm")
@@ -322,6 +325,8 @@ def process_example(
             example_graph_dir,
             opt_per_joint=metrics.get("opt_per_joint"),
             opt_szi_per_joint=metrics.get("opt_szi_per_joint"),
+            det_vw_szi_per_joint=metrics.get("det_vw_szi_per_joint"),
+            opt_vw_szi_per_joint=metrics.get("opt_vw_szi_per_joint"),
         )
     if "det_per_frame_mpjpe" in metrics:
         generate_per_frame_mpjpe(
