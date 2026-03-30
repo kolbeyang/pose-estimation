@@ -8,7 +8,7 @@
             "person_idx": 0
         }
     ],
-    "data_root": "../data/panoptic-toolbox",
+    "data_root": "data/panoptic-toolbox",
     "output_dir": null,
     "target_fps": 10.0,
     "sh_batch_size": 32,

@@ -8,10 +8,9 @@
             "person_idx": 0
         }
     ],
-    "data_root": "../data/panoptic-toolbox",
+    "data_root": "data/panoptic-toolbox",
     "output_dir": null,
     "target_fps": 10.0,
-    "gaussian_sigma": 50.0,
     "optimization": {
         "num_steps": 50,
         "learning_rate": 0.002,

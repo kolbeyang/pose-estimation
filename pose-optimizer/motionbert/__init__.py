@@ -211,6 +211,20 @@ def process_example(
             for i in range(len(gt_indices))
         ]
 
+        # Per-frame MPJVE (velocity error)
+        if len(gt_indices) >= 3:
+            det_vel = np.diff(det_rr, axis=0)
+            gt_vel = np.diff(gt_rr, axis=0)
+            opt_vel = np.diff(opt_rr, axis=0)
+            metrics["det_per_frame_mpjve"] = [
+                float(np.mean(np.linalg.norm(det_vel[i] - gt_vel[i], axis=-1)))
+                for i in range(len(det_vel))
+            ]
+            metrics["opt_per_frame_mpjve"] = [
+                float(np.mean(np.linalg.norm(opt_vel[i] - gt_vel[i], axis=-1)))
+                for i in range(len(opt_vel))
+            ]
+
         # Bone lengths
         gt_bl = _compute_bone_lengths(gt_arr[0])
         det_bl = _compute_bone_lengths(det_arr[0])
@@ -293,6 +307,12 @@ def process_example(
         generate_per_frame_mpjpe(
             metrics["det_per_frame_mpjpe"], graphs_dir,
             opt_per_frame=metrics.get("opt_per_frame_mpjpe"),
+        )
+    if "det_per_frame_mpjve" in metrics:
+        generate_per_frame_mpjve(
+            metrics["det_per_frame_mpjve"],
+            metrics.get("opt_per_frame_mpjve"),
+            graphs_dir,
         )
     generate_summary(
         det_cam_positions, optimized_3d, gt_cam,

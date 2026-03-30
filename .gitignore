@@ -39,3 +39,7 @@ test_cmu_visualization/*.bvh
 
 # Large data (symlinked)
 data/
+!pose-optimizer/data/
+pose-optimizer/data/*
+!pose-optimizer/data/.gitignore
+!pose-optimizer/data/panoptic-toolbox

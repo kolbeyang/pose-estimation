@@ -62,7 +62,7 @@ class RunConfig(BaseModel):
     examples: list[ExampleConfig] = Field(default_factory=lambda: [
         ExampleConfig(),
     ])
-    data_root: str = "../data/panoptic-toolbox"
+    data_root: str = "data/panoptic-toolbox"
     output_dir: str | None = None
     target_fps: float = 10.0
     optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
@@ -70,7 +70,6 @@ class RunConfig(BaseModel):
     # Pipeline-specific
     sh_batch_size: int = 32
     motionbert_conf_threshold: float = 0.0
-    gaussian_sigma: float = 50.0  # For MediaPipe synthetic heatmaps
 
     model_config = {"json_schema_extra": {"examples": []}}
 

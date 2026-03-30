@@ -17,7 +17,7 @@ from skeleton import coco19_to_h36m, NUM_JOINTS
 # ---------------------------------------------------------------------------
 _THIS_DIR: str = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DATA_ROOT: str = os.path.normpath(
-    os.path.join(_THIS_DIR, "..", "data", "panoptic-toolbox")
+    os.path.join(_THIS_DIR, "data", "panoptic-toolbox")
 )
 
 
@@ -44,14 +44,15 @@ EXAMPLES: list[tuple[str, str, int, int, int]] = [
     ("171204_pose1", "00_00", 22000, 150, 0),
     ("171204_pose1", "00_00", 30000, 150, 0),
     ("171204_pose1", "00_00", 38000, 150, 0),
-    # ultimatum
-    ("160422_ultimatum1", "00_00", 200, 150, 0),
-    ("160422_ultimatum1", "00_00", 10000, 150, 0),
-    ("160422_ultimatum1", "00_00", 20000, 150, 0),
-    # pizza
-    ("160906_pizza1", "00_00", 2000, 150, 0),
-    ("160906_pizza1", "00_00", 4500, 150, 0),
-    ("160906_pizza1", "00_00", 7000, 150, 0),
+    # pose1 -- additional windows
+    ("171204_pose1", "00_00", 10000, 150, 0),
+    ("171204_pose1", "00_00", 18000, 150, 0),
+    # pose2 -- additional windows
+    ("171204_pose2", "00_00", 20000, 150, 0),
+    ("171204_pose2", "00_00", 30000, 150, 0),
+    # pose3 -- additional windows
+    ("171204_pose3", "00_00", 2000, 150, 0),
+    ("171204_pose3", "00_00", 6000, 150, 0),
     # female_example
     ("female_example_01", "00_00", 350, 150, 0),
     ("female_example_01", "00_00", 1000, 150, 0),
