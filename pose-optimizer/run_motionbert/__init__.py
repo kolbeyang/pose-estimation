@@ -45,7 +45,7 @@ from graphs import (
 from run_motionbert.detect import detect_poses, motionbert_to_camera_space
 from optimize import optimize
 from overlay_video import generate_overlay_video
-from skeleton import JOINT_NAMES, EVAL_JOINTS, EVAL_JOINT_NAMES, NUM_JOINTS, PARENTS, DEFAULT_BONE_LENGTHS
+from skeleton import JOINT_NAMES, EVAL_JOINTS, NUM_JOINTS, PARENTS
 
 
 def _example_name(seq: str, start: int) -> str:

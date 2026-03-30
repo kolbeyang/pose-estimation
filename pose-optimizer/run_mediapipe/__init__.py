@@ -46,7 +46,7 @@ from run_mediapipe.detect import detect_poses, mediapipe_3d_to_camera
 from optimize import optimize
 from overlay_video import generate_overlay_video
 from scoring import generate_synthetic_heatmaps
-from skeleton import JOINT_NAMES, EVAL_JOINTS, EVAL_JOINT_NAMES, NUM_JOINTS, PARENTS, DEFAULT_BONE_LENGTHS
+from skeleton import JOINT_NAMES, EVAL_JOINTS, NUM_JOINTS, PARENTS
 
 
 def _example_name(seq: str, start: int) -> str:

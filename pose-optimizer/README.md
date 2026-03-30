@@ -9,12 +9,12 @@ cd pose-optimizer
 uv sync
 
 # Single example
-uv run python motionbert.py motionbert/run_single_config.json
-uv run python mediapipe.py mediapipe/run_single_config.json
+uv run python run_motionbert.py run_motionbert/run_single_config.json
+uv run python run_mediapipe.py run_mediapipe/run_single_config.json
 
 # Full 25-example evaluation
-uv run python motionbert.py motionbert/run_full_config.json
-uv run python mediapipe.py mediapipe/run_full_config.json
+uv run python run_motionbert.py run_motionbert/run_full_config.json
+uv run python run_mediapipe.py run_mediapipe/run_full_config.json
 
 # Cross-pipeline comparison
 uv run python compare.py output/motionbert_*/ output/mediapipe_*/ --output output/comparison/
@@ -47,18 +47,18 @@ Both paths produce raw 3D predictions and 2D heatmaps. The shared optimizer refi
 ## File Structure
 
 ```
-motionbert.py              MotionBert entrypoint
-mediapipe.py               MediaPipe entrypoint
+run_motionbert.py          MotionBert entrypoint
+run_mediapipe.py           MediaPipe entrypoint
 compare.py                 Cross-pipeline comparison visualizations
 
-motionbert/
+run_motionbert/
     __init__.py            Pipeline: YOLO → SH → MotionBert → Optimizer → Evaluate → Output
     detect.py              YOLO person detection, Stacked Hourglass 2D, MotionBert 3D lifting
     setup_models.py        Model checkpoint downloads
     run_single_config.json
     run_full_config.json
 
-mediapipe/
+run_mediapipe/
     __init__.py            Pipeline: MediaPipe → solvePnP → Optimizer → Evaluate → Output
     detect.py              MediaPipe PoseLandmarker detection + camera-space conversion
     run_single_config.json
