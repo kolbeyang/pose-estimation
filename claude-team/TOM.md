@@ -24,6 +24,8 @@ if (!exists(SPEC)):
 
 ## Initialization
 
+NOTE: Your root directory is the folder that this file lives in. `./` refers to this folder and all subsequent files should be placed relative to here.
+
 ```agent-intsruction
 
 if (!exists(./logs/)):

@@ -37,9 +37,6 @@ training_runs/
 # BVH motion capture data
 test_cmu_visualization/*.bvh
 
-# Large data (symlinked)
+# Large data
 data/
-!pose-optimizer/data/
-pose-optimizer/data/*
-!pose-optimizer/data/.gitignore
-!pose-optimizer/data/panoptic-toolbox
+pose-optimizer/data/panoptic-toolbox/
