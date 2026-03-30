@@ -9,7 +9,7 @@ import subprocess
 import cv2
 import numpy as np
 
-from skeleton import coco19_to_h36m, NUM_JOINTS
+from skeleton import coco19_to_skeleton, NUM_JOINTS
 
 
 # ---------------------------------------------------------------------------
@@ -180,18 +180,18 @@ def load_ground_truth_sequence(
 ) -> list[np.ndarray | None]:
     """Load ground truth for a sequence of frames.
 
-    Converts from COCO19 to H36M 16-joint format.
+    Converts from COCO19 to 16-joint skeleton format.
 
     Returns:
-        List of (16, 3) H36M arrays in world coordinates (centimeters),
+        List of (16, 3) skeleton arrays in world coordinates (centimeters),
         or None for missing frames.
     """
     results: list[np.ndarray | None] = []
     for fidx in frame_indices:
         coco19 = load_ground_truth_frame(sequence_dir, fidx, person_idx)
         if coco19 is not None:
-            h36m = coco19_to_h36m(coco19)
-            results.append(h36m)
+            skel = coco19_to_skeleton(coco19)
+            results.append(skel)
         else:
             results.append(None)
     return results

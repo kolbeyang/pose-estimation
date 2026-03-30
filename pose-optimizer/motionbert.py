@@ -2,13 +2,13 @@
 
 Usage:
     uv run python motionbert.py config.json
-    uv run python motionbert.py motionbert/run_single_config.json
+    uv run python motionbert.py run_motionbert/run_single_config.json
 """
 
 import sys
 
 from config import load_config
-from motionbert import run_pipeline
+from run_motionbert import run_pipeline
 
 
 def main() -> None:

@@ -1,4 +1,4 @@
-"""Differentiable forward kinematics for the H36M 16-joint skeleton.
+"""Differentiable forward kinematics for the 16-joint skeleton.
 
 Uses axis-angle rotation representation (no gimbal lock).
 All operations use PyTorch for autograd support.

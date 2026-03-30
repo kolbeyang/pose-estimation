@@ -13,8 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from skeleton import (
     NUM_JOINTS, JOINT_NAMES, PARENTS, EVAL_JOINTS,
-    coco19_to_h36m, mediapipe_to_h36m, mediapipe_visibility_to_h36m,
-    h36m_17_to_16, mpii_to_h36m,
+    coco19_to_skeleton, mediapipe_to_skeleton, mediapipe_visibility_to_skeleton,
+    strip_head_joint, mpii_to_skeleton,
 )
 from camera import Camera
 from config import RunConfig, ExampleConfig, OptimizationConfig, load_config, save_config
@@ -34,52 +34,64 @@ class TestSkeleton:
         assert len(JOINT_NAMES) == 16
         assert len(PARENTS) == 16
 
-    def test_eval_joints_exclude_midpoints(self):
-        excluded = {0, 7, 8, 9}
+    def test_eval_joints(self):
+        excluded = {7, 9}  # Spine (FK-internal) and Head (mode-dependent)
         for j in EVAL_JOINTS:
             assert j not in excluded
-        assert len(EVAL_JOINTS) == 12
+        assert len(EVAL_JOINTS) == 14
 
-    def test_coco19_to_h36m_shape(self):
+    def test_coco19_to_skeleton_shape(self):
         coco19 = np.random.randn(19, 3)
-        h36m = coco19_to_h36m(coco19)
-        assert h36m.shape == (16, 3)
+        skel = coco19_to_skeleton(coco19)
+        assert skel.shape == (16, 3)
 
-    def test_coco19_to_h36m_hip_is_body_center(self):
+    def test_coco19_to_skeleton_pelvis_is_body_center(self):
         coco19 = np.random.randn(19, 3)
-        h36m = coco19_to_h36m(coco19)
-        np.testing.assert_allclose(h36m[0], coco19[2])  # BodyCenter
+        skel = coco19_to_skeleton(coco19)
+        np.testing.assert_allclose(skel[0], coco19[2])  # BodyCenter
 
-    def test_coco19_to_h36m_spine_is_midpoint(self):
+    def test_coco19_to_skeleton_spine_is_midpoint(self):
         coco19 = np.random.randn(19, 3)
-        h36m = coco19_to_h36m(coco19)
+        skel = coco19_to_skeleton(coco19)
         expected_spine = (coco19[2] + coco19[0]) / 2.0
-        np.testing.assert_allclose(h36m[7], expected_spine)
+        np.testing.assert_allclose(skel[7], expected_spine)
 
-    def test_mediapipe_to_h36m_shape(self):
+    def test_mediapipe_to_skeleton_shape(self):
         landmarks = np.random.randn(33, 3)
-        h36m = mediapipe_to_h36m(landmarks)
-        assert h36m.shape == (16, 3)
+        skel = mediapipe_to_skeleton(landmarks)
+        assert skel.shape == (16, 3)
 
-    def test_mediapipe_visibility_to_h36m_shape(self):
+    def test_mediapipe_visibility_to_skeleton_shape(self):
         vis = np.random.rand(33)
-        h36m_vis = mediapipe_visibility_to_h36m(vis)
-        assert h36m_vis.shape == (16,)
+        skel_vis = mediapipe_visibility_to_skeleton(vis)
+        assert skel_vis.shape == (16,)
 
-    def test_h36m_17_to_16(self):
+    def test_strip_head_joint(self):
         arr = np.random.randn(17, 3)
-        result = h36m_17_to_16(arr)
+        result = strip_head_joint(arr)
         assert result.shape == (16, 3)
 
-    def test_h36m_17_to_16_batch(self):
+    def test_strip_head_joint_batch(self):
         arr = np.random.randn(5, 17, 3)
-        result = h36m_17_to_16(arr)
+        result = strip_head_joint(arr)
         assert result.shape == (5, 16, 3)
 
-    def test_mpii_to_h36m_shape(self):
+    def test_mpii_to_skeleton_shape(self):
         mpii = np.random.randn(16, 3)
-        h36m = mpii_to_h36m(mpii)
-        assert h36m.shape == (17, 3)
+        skel = mpii_to_skeleton(mpii)
+        assert skel.shape == (17, 3)
+
+    def test_mpii_to_skeleton_pelvis_direct(self):
+        """Pelvis should map directly from MPII[6], not midpoint."""
+        mpii = np.random.randn(16, 3)
+        skel = mpii_to_skeleton(mpii)
+        np.testing.assert_allclose(skel[0], mpii[6])
+
+    def test_mpii_to_skeleton_spine_direct(self):
+        """Spine should map directly from MPII[7], not midpoint."""
+        mpii = np.random.randn(16, 3)
+        skel = mpii_to_skeleton(mpii)
+        np.testing.assert_allclose(skel[7], mpii[7])
 
 
 # ---------------------------------------------------------------------------

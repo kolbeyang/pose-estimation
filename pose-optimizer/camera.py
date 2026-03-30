@@ -155,15 +155,6 @@ class Camera:
         result = torch.stack([u, v], dim=-1)
         return result.reshape(shape[:-1] + (2,))
 
-    # Backward-compat aliases
-    def world_to_image(self, point: np.ndarray) -> np.ndarray:
-        """Alias for camera_to_image (legacy name)."""
-        return self.camera_to_image(point)
-
-    def world_to_image_torch(self, points: torch.Tensor) -> torch.Tensor:
-        """Alias for camera_to_image_torch (legacy name)."""
-        return self.camera_to_image_torch(points)
-
     # ----- Frame boundary checks -----
 
     def is_in_frame(self, points_2d: np.ndarray) -> np.ndarray:

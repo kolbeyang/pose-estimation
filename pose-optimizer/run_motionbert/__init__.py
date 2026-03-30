@@ -1,10 +1,6 @@
-"""MediaPipe pipeline entrypoint.
+"""MotionBERT pipeline entrypoint.
 
-Full pipeline: config -> load data -> MediaPipe -> synthetic heatmaps -> optimizer -> evaluate -> output.
-
-IMPORTANT: This package is named 'mediapipe' which conflicts with the pip
-mediapipe package. The detect.py submodule handles this by importing the
-pip package before the local package is registered.
+Full pipeline: config -> load data -> YOLO -> SH -> MotionBERT -> optimizer -> evaluate -> output.
 """
 
 import json
@@ -46,10 +42,9 @@ from graphs import (
     generate_summary,
     generate_trajectory_graphs,
 )
-from mediapipe.detect import detect_poses, mediapipe_3d_to_camera
+from run_motionbert.detect import detect_poses, motionbert_to_camera_space
 from optimize import optimize
 from overlay_video import generate_overlay_video
-from scoring import generate_synthetic_heatmaps
 from skeleton import JOINT_NAMES, EVAL_JOINTS, EVAL_JOINT_NAMES, NUM_JOINTS, PARENTS, DEFAULT_BONE_LENGTHS
 
 
@@ -92,7 +87,7 @@ def process_example(
     person_idx: int,
     run_dir: str,
 ) -> dict[str, Any]:
-    """Process one CMU Panoptic example end-to-end with MediaPipe pipeline."""
+    """Process one CMU Panoptic example end-to-end with MotionBERT pipeline."""
     name = _example_name(seq_name, start_frame)
     print(f"\n{'='*60}")
     print(f"  Processing: {name}")
@@ -134,18 +129,20 @@ def process_example(
         print("    ERROR: Need at least 2 frames. Skipping.")
         return {}
 
-    # --- 3. Run MediaPipe ---
-    print(f"\n  [3/7] Running MediaPipe on {len(frames_rgb)} frames...")
-    kp_2d, kp_3d, visibility = detect_poses(frames_rgb)
-    n_detected = sum(1 for v in visibility if v.mean() > 0.3)
-    print(f"    Detected poses in {n_detected}/{len(frames_rgb)} frames")
+    # --- 3. Run MotionBERT detection ---
+    print(f"\n  [3/7] Running MotionBERT on {len(frames_rgb)} frames...")
+    kp_2d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm = detect_poses(
+        frames_rgb,
+        sh_batch_size=config.sh_batch_size,
+        conf_threshold=config.motionbert_conf_threshold,
+    )
 
     # --- 4. Convert to camera coordinates ---
     print("\n  [4/7] Converting to camera coordinates...")
     det_cam_positions: list[np.ndarray] = []
     for i in range(len(frames_rgb)):
-        pos_cam = mediapipe_3d_to_camera(
-            kp_3d[i], kp_2d[i], fx, fy, cx, cy,
+        pos_cam = motionbert_to_camera_space(
+            positions_3d_norm[i], kp_2d[i], fx, fy, cx, cy,
         )
         det_cam_positions.append(pos_cam)
 
@@ -158,7 +155,7 @@ def process_example(
     gt_cam: list[np.ndarray | None] = []
     for gt in gt_world:
         if gt is not None:
-            gt_cam_pts = camera.world_to_camera(gt) * 0.01
+            gt_cam_pts = camera.world_to_camera(gt) * 0.01  # cm -> meters
             gt_cam.append(gt_cam_pts)
         else:
             gt_cam.append(None)
@@ -167,22 +164,12 @@ def process_example(
 
     # --- 5. Optimize ---
     print(f"\n  [5/7] Running FK optimization...")
-
-    # Generate synthetic heatmaps for overlay video (we pass target_2d to optimizer
-    # which generates its own, but we also need them for overlay)
-    target_2d_arr = np.array(kp_2d)
-    synthetic_heatmaps, synthetic_affine = generate_synthetic_heatmaps(
-        target_2d_arr,
-        image_size=camera.image_size,
-        heatmap_size=64,
-        sigma=config.optimization.heatmap_sigma,
-    )
-
     optimized_3d, bone_lengths_final, loss_history = optimize(
         raw_3d=det_cam_positions,
         camera=camera,
         config=config.optimization,
-        target_2d=kp_2d,
+        heatmaps=heatmaps,
+        affine=affine,
         visibility=visibility,
     )
 
@@ -190,26 +177,31 @@ def process_example(
     print(f"\n  [6/7] Evaluating...")
     metrics: dict[str, Any] = {"name": name}
 
+    # Filter frames with GT
     gt_indices = [i for i, g in enumerate(gt_cam) if g is not None]
     if len(gt_indices) >= 2:
         gt_arr = np.array([gt_cam[i] for i in gt_indices])
         det_arr = np.array([det_cam_positions[i] for i in gt_indices])
         opt_arr = np.array([optimized_3d[i] for i in gt_indices])
 
+        # Raw detector metrics
         det_metrics = evaluate(det_arr, gt_arr, camera)
         for k, v in det_metrics.items():
             metrics[f"det_{k}"] = v
 
+        # Optimized metrics
         opt_metrics = evaluate(opt_arr, gt_arr, camera)
         for k, v in opt_metrics.items():
             metrics[f"opt_{k}"] = v
 
+        # Per-joint breakdown
         det_rr = root_relative(det_arr)[:, EVAL_JOINTS, :]
         gt_rr = root_relative(gt_arr)[:, EVAL_JOINTS, :]
         opt_rr = root_relative(opt_arr)[:, EVAL_JOINTS, :]
         metrics["det_per_joint"] = mpjpe_per_joint(det_rr, gt_rr).tolist()
         metrics["opt_per_joint"] = mpjpe_per_joint(opt_rr, gt_rr).tolist()
 
+        # Per-frame MPJPE
         metrics["det_per_frame_mpjpe"] = [
             float(np.mean(np.linalg.norm(det_rr[i] - gt_rr[i], axis=-1)))
             for i in range(len(gt_indices))
@@ -233,11 +225,13 @@ def process_example(
                 for i in range(len(opt_vel))
             ]
 
+        # Bone lengths
         gt_bl = _compute_bone_lengths(gt_arr[0])
         det_bl = _compute_bone_lengths(det_arr[0])
         metrics["gt_bone_lengths"] = gt_bl.tolist()
         metrics["det_bone_lengths"] = det_bl.tolist()
 
+        # Print summary
         print(f"    Det MPJPE:       {metrics['det_mpjpe']*100:.2f} cm")
         print(f"    Opt MPJPE:       {metrics['opt_mpjpe']*100:.2f} cm")
         print(f"    Det SI-MPJPE:    {metrics['det_si_mpjpe']*100:.2f} cm")
@@ -263,7 +257,7 @@ def process_example(
         "mpjve", "si_mpjve", "vw_mpjve", "vw_si_mpjve",
     ]
     results_data: dict[str, Any] = {
-        "model": "mediapipe",
+        "model": "motionbert",
         "example": name,
         "num_frames": len(frames_rgb),
         "metrics": {k: metrics[f"opt_{k}"] for k in _METRIC_KEYS if f"opt_{k}" in metrics},
@@ -327,36 +321,27 @@ def process_example(
     )
     print(f"    Saved graphs: {graphs_dir}")
 
-    # Overlay video -- use synthetic heatmaps for visualization
+    # Overlay video
     overlay_path = os.path.join(example_dir, "overlay_video.mp4")
-
-    # For overlay, build per-frame 2D detection arrays with visibility as 3rd column
-    detector_2d_with_vis = []
-    for i in range(len(frames_rgb)):
-        kp_with_vis = np.zeros((NUM_JOINTS, 3), dtype=np.float64)
-        kp_with_vis[:, :2] = kp_2d[i]
-        kp_with_vis[:, 2] = visibility[i]
-        detector_2d_with_vis.append(kp_with_vis)
-
     generate_overlay_video(
         output_path=overlay_path,
         frames_rgb=frames_rgb,
-        heatmaps=[synthetic_heatmaps[i] for i in range(len(frames_rgb))],
-        detector_2d=detector_2d_with_vis,
+        heatmaps=heatmaps,
+        detector_2d=mpii_kp_2d,
         detector_3d=det_cam_positions,
         optimized_3d=optimized_3d,
         camera_fx=fx,
         camera_fy=fy,
         camera_cx=cx,
         camera_cy=cy,
-        affine=synthetic_affine,
+        affine=affine,
         frame_indices=frame_indices[:len(frames_rgb)],
         gt_3d=gt_cam,
         visibility=visibility,
-        pipeline_name="MediaPipe",
+        pipeline_name="MotionBERT",
     )
 
-    # summary.png copy
+    # summary.png symlink to the one in graphs/
     summary_src = os.path.join(graphs_dir, "summary.png")
     summary_dst = os.path.join(example_dir, "summary.png")
     if os.path.exists(summary_src) and not os.path.exists(summary_dst):
@@ -367,17 +352,17 @@ def process_example(
 
 
 def run_pipeline(config: RunConfig) -> None:
-    """Run the full MediaPipe pipeline on all examples in config."""
+    """Run the full MotionBERT pipeline on all examples in config."""
     if config.output_dir:
         run_dir = config.output_dir
     else:
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M")
-        run_dir = os.path.join("output", f"mediapipe_{timestamp}")
+        run_dir = os.path.join("output", f"motionbert_{timestamp}")
 
     os.makedirs(run_dir, exist_ok=True)
 
     print("=" * 60)
-    print("  MediaPipe Pose Estimation Pipeline")
+    print("  MotionBERT Pose Estimation Pipeline")
     print(f"  {len(config.examples)} examples to process")
     print(f"  Run: {run_dir}")
     print("=" * 60)
@@ -402,6 +387,7 @@ def run_pipeline(config: RunConfig) -> None:
             traceback.print_exc()
             continue
 
+    # Aggregate summary
     if all_metrics:
         generate_aggregate_summary(all_metrics, run_dir)
 

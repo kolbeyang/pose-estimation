@@ -1,6 +1,6 @@
-"""MediaPipe PoseLandmarker detection with H36M mapping.
+"""MediaPipe PoseLandmarker detection with skeleton mapping.
 
-Adapted from mediapipe-pose/detect.py for the unified pose-optimizer.
+Adapted for the unified pose-optimizer.
 """
 
 import os
@@ -8,90 +8,17 @@ import sys
 import urllib.request
 
 import cv2
+import mediapipe as mp
 import numpy as np
-
-
-# ---------------------------------------------------------------------------
-# Lazy import of the pip mediapipe package.
-# Since our directory is also called 'mediapipe', we load the pip version
-# from its known site-packages location using importlib.util.
-# ---------------------------------------------------------------------------
-
-_mp = None
-_BaseOptions = None
-_vision = None
-
-
-def _get_mediapipe():
-    """Lazily import the pip mediapipe package from site-packages."""
-    global _mp, _BaseOptions, _vision
-    if _mp is not None:
-        return _mp, _BaseOptions, _vision
-
-    import importlib.util
-
-    # Find the site-packages path containing the pip mediapipe
-    _our_dir = os.path.normpath(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    mp_init = None
-    for path_entry in sys.path:
-        if "site-packages" not in path_entry:
-            continue
-        candidate = os.path.join(path_entry, "mediapipe", "__init__.py")
-        if os.path.exists(candidate):
-            mp_init = candidate
-            mp_base = os.path.join(path_entry, "mediapipe")
-            break
-
-    if mp_init is None:
-        raise ImportError("pip mediapipe not found in site-packages")
-
-    # Temporarily clear our local mediapipe from sys.modules
-    saved_mods = {}
-    for key in list(sys.modules.keys()):
-        if key == "mediapipe" or key.startswith("mediapipe."):
-            saved_mods[key] = sys.modules.pop(key)
-
-    # Also temporarily adjust sys.path -- remove both our dir and '' (cwd)
-    orig_path = sys.path[:]
-    cwd = os.getcwd()
-    cwd_norm = os.path.normpath(cwd)
-    sys.path = [
-        p for p in sys.path
-        if os.path.normpath(p or cwd) != _our_dir
-        and os.path.normpath(p or cwd) != cwd_norm
-    ]
-
-    try:
-        # Now import the pip mediapipe -- it won't find our local one
-        import mediapipe as mp_mod
-        from mediapipe.tasks.python import BaseOptions as BO
-        from mediapipe.tasks.python import vision as vis
-
-        # Save references to the pip modules we need
-        _mp = mp_mod
-        _BaseOptions = BO
-        _vision = vis
-
-        # Keep the pip mediapipe modules in sys.modules alongside ours
-        # by storing them under aliased names
-        pip_mods = {}
-        for key in list(sys.modules.keys()):
-            if key == "mediapipe" or key.startswith("mediapipe."):
-                pip_mods["_pip_" + key] = sys.modules[key]
-
-        return _mp, _BaseOptions, _vision
-    finally:
-        # Restore path
-        sys.path = orig_path
-        # Restore our local mediapipe modules
-        sys.modules.update(saved_mods)
+from mediapipe.tasks.python import BaseOptions
+from mediapipe.tasks.python import vision
 
 # Add parent dir to path for skeleton imports
 _PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PARENT_DIR not in sys.path:
     sys.path.insert(0, _PARENT_DIR)
 
-from skeleton import mediapipe_to_h36m, mediapipe_visibility_to_h36m, NUM_JOINTS
+from skeleton import mediapipe_to_skeleton, mediapipe_visibility_to_skeleton, NUM_JOINTS
 
 SCRIPT_DIR: str = os.path.dirname(os.path.abspath(__file__))
 _MODEL_PATH = os.path.join(SCRIPT_DIR, "pose_landmarker_lite.task")
@@ -101,25 +28,11 @@ _MODEL_URL = (
     "pose_landmarker_lite.task"
 )
 
-# Also check mediapipe-pose for the model file as fallback
-_MEDIAPIPE_POSE_DIR = os.path.normpath(
-    os.path.join(SCRIPT_DIR, "..", "..", "mediapipe-pose")
-)
-
 
 def _ensure_model() -> None:
     """Download the pose landmarker model if missing."""
     if os.path.exists(_MODEL_PATH):
         return
-
-    # Check if model exists in mediapipe-pose directory
-    fallback_path = os.path.join(_MEDIAPIPE_POSE_DIR, "pose_landmarker_lite.task")
-    if os.path.exists(fallback_path):
-        print(f"    Copying model from {fallback_path}")
-        import shutil
-        shutil.copy2(fallback_path, _MODEL_PATH)
-        return
-
     print(f"    Downloading pose model to {_MODEL_PATH}...")
     urllib.request.urlretrieve(_MODEL_URL, _MODEL_PATH)
 
@@ -133,13 +46,11 @@ def detect_poses(
         frames_rgb: List of (H, W, 3) uint8 RGB frames.
 
     Returns:
-        keypoints_2d: List of (16, 2) pixel coordinates (H36M 16-joint).
+        keypoints_2d: List of (16, 2) pixel coordinates (skeleton 16-joint).
         keypoints_3d: List of (16, 3) world coordinates in meters (hip-relative).
         visibility: List of (16,) visibility scores [0, 1].
     """
     _ensure_model()
-
-    mp, BaseOptions, vision = _get_mediapipe()
 
     options = vision.PoseLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=_MODEL_PATH),
@@ -183,10 +94,10 @@ def detect_poses(
                 dtype=np.float64,
             )
 
-            # Convert to H36M 16-joint
-            all_kp_2d.append(mediapipe_to_h36m(mp_2d))
-            all_kp_3d.append(mediapipe_to_h36m(mp_3d))
-            all_vis.append(mediapipe_visibility_to_h36m(mp_vis))
+            # Convert to optimizer 16-joint skeleton
+            all_kp_2d.append(mediapipe_to_skeleton(mp_2d))
+            all_kp_3d.append(mediapipe_to_skeleton(mp_3d))
+            all_vis.append(mediapipe_visibility_to_skeleton(mp_vis))
 
     return all_kp_2d, all_kp_3d, all_vis
 

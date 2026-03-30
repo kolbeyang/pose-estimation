@@ -1,6 +1,6 @@
 """YOLO + Stacked Hourglass + MotionBERT detection pipeline.
 
-Adapted from motionbert-pose/detect.py for the unified pose-optimizer.
+Adapted for the unified pose-optimizer.
 """
 
 import copy
@@ -19,16 +19,11 @@ _PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PARENT_DIR not in sys.path:
     sys.path.insert(0, _PARENT_DIR)
 
-from skeleton import mpii_to_h36m, h36m_17_to_16, NUM_JOINTS
+from skeleton import mpii_to_skeleton, strip_head_joint, NUM_JOINTS
 
 SCRIPT_DIR: str = os.path.dirname(os.path.abspath(__file__))
 EXTERNAL_DIR: str = os.path.join(SCRIPT_DIR, "external")
 CHECKPOINTS_DIR: str = os.path.join(SCRIPT_DIR, "checkpoints")
-
-# Also check motionbert-pose for model files as fallback
-_MOTIONBERT_POSE_DIR = os.path.normpath(
-    os.path.join(SCRIPT_DIR, "..", "..", "motionbert-pose")
-)
 
 # MPII flip pairs for horizontal flip augmentation
 MPII_FLIP_PAIRS: list[tuple[int, int]] = [
@@ -268,29 +263,23 @@ def run_hourglass(
 # ---------------------------------------------------------------------------
 
 def _find_motionbert_path() -> str:
-    """Find MotionBERT installation, checking local and motionbert-pose dirs."""
+    """Find MotionBERT installation."""
     local_path = os.path.join(EXTERNAL_DIR, "MotionBERT")
     if os.path.exists(local_path):
         return local_path
-    fallback = os.path.join(_MOTIONBERT_POSE_DIR, "external", "MotionBERT")
-    if os.path.exists(fallback):
-        return fallback
     raise RuntimeError(
-        f"MotionBERT not found at {local_path} or {fallback}. "
+        f"MotionBERT not found at {local_path}. "
         "Run setup_models.py first."
     )
 
 
 def _find_motionbert_checkpoint() -> str:
-    """Find MotionBERT checkpoint, checking local and motionbert-pose dirs."""
+    """Find MotionBERT checkpoint."""
     local_ckpt = os.path.join(CHECKPOINTS_DIR, "motionbert_lite_h36m.bin")
     if os.path.exists(local_ckpt):
         return local_ckpt
-    fallback = os.path.join(_MOTIONBERT_POSE_DIR, "checkpoints", "motionbert_lite_h36m.bin")
-    if os.path.exists(fallback):
-        return fallback
     raise RuntimeError(
-        f"MotionBERT checkpoint not found at {local_ckpt} or {fallback}. "
+        f"MotionBERT checkpoint not found at {local_ckpt}. "
         "Run setup_models.py first."
     )
 
@@ -322,7 +311,7 @@ def load_motionbert_model() -> torch.nn.Module:
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     model.load_state_dict(state_dict, strict=True)
     model.eval()
-    print("  Loaded MotionBERT-Lite (global, H3.6M)")
+    print("  Loaded MotionBERT-Lite (global)")
     return model
 
 
@@ -350,7 +339,7 @@ def crop_scale(motion: np.ndarray) -> tuple[np.ndarray, dict[str, float]]:
 
 
 def flip_data(data):
-    """Flip H36M 17-joint data: negate X, swap L/R joints."""
+    """Flip 17-joint data: negate X, swap L/R joints."""
     left_joints = [4, 5, 6, 11, 12, 13]
     right_joints = [1, 2, 3, 14, 15, 16]
     flipped_data = copy.deepcopy(data)
@@ -381,24 +370,24 @@ def run_motionbert(
 
     n_frames = len(keypoints_2d_list)
 
-    # Convert MPII 16-joint to H36M 17-joint
-    keypoints_h36m = np.zeros((n_frames, 17, 3), dtype=np.float32)
+    # Convert MPII 16-joint to 17-joint skeleton
+    keypoints_17 = np.zeros((n_frames, 17, 3), dtype=np.float32)
     for i, kp_mpii in enumerate(keypoints_2d_list):
-        keypoints_h36m[i] = mpii_to_h36m(kp_mpii)
+        keypoints_17[i] = mpii_to_skeleton(kp_mpii)
 
     # Zero out low-confidence joints
     n_zeroed = 0
     if conf_threshold > 0.0:
         for i in range(n_frames):
             for j in range(17):
-                if keypoints_h36m[i, j, 2] < conf_threshold:
-                    keypoints_h36m[i, j, :] = 0.0
+                if keypoints_17[i, j, 2] < conf_threshold:
+                    keypoints_17[i, j, :] = 0.0
                     n_zeroed += 1
     n_total = n_frames * 17
     print(f"  Confidence threshold={conf_threshold}: zeroed {n_zeroed}/{n_total} "
           f"({100*n_zeroed/n_total:.1f}%)")
 
-    keypoints_norm, cs_params = crop_scale(keypoints_h36m)
+    keypoints_norm, cs_params = crop_scale(keypoints_17)
     print(f"  crop_scale: scale={cs_params['scale']:.1f} "
           f"offset=({cs_params['xs']:.1f}, {cs_params['ys']:.1f})")
 
@@ -430,7 +419,7 @@ def run_motionbert(
           f"{positions_3d[:, 0, 2].max():.4f}")
 
     # Strip Head joint -> 16 joints
-    positions_3d = h36m_17_to_16(positions_3d)
+    positions_3d = strip_head_joint(positions_3d)
     return positions_3d
 
 
@@ -546,14 +535,14 @@ def detect_poses(
     # 3. MotionBERT
     positions_3d_norm = run_motionbert(all_keypoints_2d, conf_threshold=conf_threshold)
 
-    # 4. Convert MPII 2D to H36M 2D
+    # 4. Convert MPII 2D to skeleton 2D
     kp_2d_list: list[np.ndarray] = []
     visibility_list: list[np.ndarray] = []
     for kp_mpii in all_keypoints_2d:
-        kp_h36m = mpii_to_h36m(kp_mpii)
-        kp_h36m_16 = h36m_17_to_16(kp_h36m)
-        kp_2d_list.append(kp_h36m_16[:, :2])
-        visibility_list.append(kp_h36m_16[:, 2])
+        kp_17 = mpii_to_skeleton(kp_mpii)
+        kp_16 = strip_head_joint(kp_17)
+        kp_2d_list.append(kp_16[:, :2])
+        visibility_list.append(kp_16[:, 2])
 
     return (
         kp_2d_list,

@@ -10,20 +10,20 @@ import torch.nn.functional as F
 
 
 # ---------------------------------------------------------------------------
-# Mapping from H36M 16-joint index to MPII heatmap index.
-# None means no single MPII heatmap exists (synthetic midpoint joints).
+# Mapping from skeleton 16-joint index to MPII heatmap index.
+# All 16 joints now have direct MPII heatmap mappings.
 # ---------------------------------------------------------------------------
-H36M_TO_MPII_HEATMAP: list[int | None] = [
-    None,  # 0: Hip
+SKELETON_TO_MPII_HEATMAP: list[int] = [
+    6,     # 0: Pelvis
     2,     # 1: RHip
     1,     # 2: RKnee
     0,     # 3: RAnkle
     3,     # 4: LHip
     4,     # 5: LKnee
     5,     # 6: LAnkle
-    None,  # 7: Spine
-    7,     # 8: Thorax
-    8,     # 9: Neck
+    7,     # 7: Spine -- MPII Thorax
+    8,     # 8: Neck (Base of Neck) -- MPII Upper Neck
+    9,     # 9: Head -- MPII Head Top
     13,    # 10: LShoulder
     14,    # 11: LElbow
     15,    # 12: LWrist
@@ -32,8 +32,8 @@ H36M_TO_MPII_HEATMAP: list[int | None] = [
     10,    # 15: RWrist
 ]
 
-_HM_H36M_INDICES: list[int] = [j for j, m in enumerate(H36M_TO_MPII_HEATMAP) if m is not None]
-_HM_MPII_INDICES: list[int] = [m for m in H36M_TO_MPII_HEATMAP if m is not None]
+_HM_SKEL_INDICES: list[int] = list(range(16))
+_HM_MPII_INDICES: list[int] = SKELETON_TO_MPII_HEATMAP
 
 
 # ---------------------------------------------------------------------------
@@ -51,9 +51,9 @@ def heatmap_score_batch(
 ) -> torch.Tensor:
     """Batched heatmap scoring across all frames.
 
-    For MotionBert (real SH heatmaps): uses MPII mapping to score 14 joints.
+    For MotionBert (real SH heatmaps): uses MPII mapping to score all 16 joints.
     For MediaPipe (synthetic heatmaps): scores all 16 joints directly
-    (heatmaps have 16 channels matching H36M indices).
+    (heatmaps have 16 channels matching skeleton indices).
 
     Args:
         projected_2d_batch: (F, J, 2) projected positions in pixel coords.
@@ -62,8 +62,8 @@ def heatmap_score_batch(
         visibility_batch: (F, J) confidence scores.
         confidence_epsilon: Floor for low-confidence joints.
         eps: Floor to avoid log(0).
-        use_mpii_mapping: If True, use MPII->H36M mapping (14 joints).
-            If False, assume heatmaps are (F, 16, H, W) in H36M order.
+        use_mpii_mapping: If True, use MPII->skeleton mapping (16 joints).
+            If False, assume heatmaps are (F, 16, H, W) in skeleton order.
 
     Returns:
         Scalar total score across all frames.
@@ -78,11 +78,11 @@ def heatmap_score_batch(
     ty = affine[1, 2]
 
     if use_mpii_mapping:
-        # MotionBert mode: 14 joints with MPII heatmaps
-        hm_proj = projected_2d_batch[:, _HM_H36M_INDICES, :]  # (F, 14, 2)
-        hm_conf = visibility_batch[:, _HM_H36M_INDICES]       # (F, 14)
-        hm_selected = heatmaps_batch[:, _HM_MPII_INDICES, :, :]  # (F, 14, H, W)
-        n_joints = 14
+        # MotionBert mode: all 16 joints with MPII heatmaps
+        hm_proj = projected_2d_batch[:, _HM_SKEL_INDICES, :]  # (F, 16, 2)
+        hm_conf = visibility_batch[:, _HM_SKEL_INDICES]       # (F, 16)
+        hm_selected = heatmaps_batch[:, _HM_MPII_INDICES, :, :]  # (F, 16, H, W)
+        n_joints = 16
     else:
         # MediaPipe mode: all 16 joints directly
         hm_proj = projected_2d_batch  # (F, 16, 2)
@@ -293,7 +293,7 @@ def compute_total_score_batch(
         heatmaps: (F, C, H, W) heatmaps.
         affine: (2, 3) affine transform.
         confidence_epsilon: Floor for low-confidence joints.
-        use_mpii_mapping: Whether to use MPII->H36M joint mapping.
+        use_mpii_mapping: Whether to use MPII->skeleton joint mapping.
 
     Returns:
         (total_score, details_dict).

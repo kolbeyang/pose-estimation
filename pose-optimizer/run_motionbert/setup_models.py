@@ -61,19 +61,6 @@ def ensure_models() -> None:
         print("  https://huggingface.co/walterzhu/MotionBERT/tree/main")
         print(f"  Place at: {motionbert_ckpt}")
 
-    # Check for existing models in motionbert-pose (symlink for convenience)
-    existing_external = os.path.normpath(
-        os.path.join(SCRIPT_DIR, "..", "..", "motionbert-pose", "external", "MotionBERT")
-    )
-    existing_ckpt = os.path.normpath(
-        os.path.join(SCRIPT_DIR, "..", "..", "motionbert-pose", "checkpoints", "motionbert_lite_h36m.bin")
-    )
-    if not os.path.exists(motionbert_dir) and os.path.exists(existing_external):
-        print(f"  Symlinking from existing: {existing_external}")
-        os.symlink(existing_external, motionbert_dir)
-    if not os.path.exists(motionbert_ckpt) and os.path.exists(existing_ckpt):
-        print(f"  Symlinking from existing: {existing_ckpt}")
-        os.symlink(existing_ckpt, motionbert_ckpt)
 
 
 def main() -> None:
