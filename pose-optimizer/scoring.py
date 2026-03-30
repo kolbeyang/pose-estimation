@@ -362,8 +362,9 @@ def generate_synthetic_heatmaps(
         [0, sy, 0],
     ], dtype=np.float32)
 
-    # Convert sigma from pixel space to heatmap space
-    sigma_hm = sigma / sx  # approximate, assumes sx ~ sy
+    # Convert sigma from pixel space to heatmap space (per-axis for non-square images)
+    sigma_hm_x = sigma / sx
+    sigma_hm_y = sigma / sy
 
     # Create coordinate grids
     yy, xx = np.mgrid[0:heatmap_size, 0:heatmap_size]  # (H, W) each
@@ -378,9 +379,11 @@ def generate_synthetic_heatmaps(
             cx_hm = target_2d[f, j, 0] / sx
             cy_hm = target_2d[f, j, 1] / sy
 
-            # Gaussian blob
-            sq_dist = (xx - cx_hm) ** 2 + (yy - cy_hm) ** 2
-            heatmaps[f, j] = np.exp(-sq_dist / (2 * sigma_hm ** 2))
+            # Gaussian blob (circular in pixel space, elliptical in heatmap space)
+            heatmaps[f, j] = np.exp(
+                -((xx - cx_hm) ** 2 / (2 * sigma_hm_x ** 2)
+                  + (yy - cy_hm) ** 2 / (2 * sigma_hm_y ** 2))
+            )
 
     return heatmaps, affine
 
