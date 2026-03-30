@@ -13,7 +13,7 @@ from skeleton import coco19_to_skeleton, NUM_JOINTS
 
 
 # ---------------------------------------------------------------------------
-# Default data root (relative to this file -> ../data/panoptic-toolbox)
+# Default data root (relative to this file -> data/panoptic-toolbox)
 # ---------------------------------------------------------------------------
 _THIS_DIR: str = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DATA_ROOT: str = os.path.normpath(

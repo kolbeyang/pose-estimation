@@ -16,8 +16,8 @@ uv run python run_mediapipe.py run_mediapipe/run_single_config.json
 uv run python run_motionbert.py run_motionbert/run_full_config.json
 uv run python run_mediapipe.py run_mediapipe/run_full_config.json
 
-# Cross-pipeline comparison
-uv run python compare.py output/motionbert_*/ output/mediapipe_*/ --output output/comparison/
+# Full 25-example evaluation
+# Results are written to timestamped output directories
 ```
 
 ## Data
@@ -49,7 +49,6 @@ Both paths produce raw 3D predictions and 2D heatmaps. The shared optimizer refi
 ```
 run_motionbert.py          MotionBert entrypoint
 run_mediapipe.py           MediaPipe entrypoint
-compare.py                 Cross-pipeline comparison visualizations
 
 run_motionbert/
     __init__.py            Pipeline: YOLO → SH → MotionBert → Optimizer → Evaluate → Output
@@ -67,7 +66,7 @@ run_mediapipe/
 optimize/
     __init__.py            Shared optimizer: heatmaps + raw 3D + Camera → improved 3D
 
-skeleton.py                16-joint H36M skeleton definition and joint mappings
+skeleton.py                16-joint skeleton definition and joint mappings
 camera.py                  Camera model (intrinsics, extrinsics, projection, visibility)
 fk.py                      Differentiable forward kinematics (single + batch)
 evaluate.py                9 evaluation metrics (MPJPE, P-MPJPE, SI, VW, velocity variants)
@@ -136,15 +135,15 @@ output/motionbert_2026_03_29_21_24/
 
 ## Skeleton
 
-16-joint H36M skeleton (Head removed). No extrapolated joints.
+16-joint skeleton. No extrapolated joints.
 
 ```
-0=Hip  1=RHip  2=RKnee  3=RAnkle  4=LHip  5=LKnee  6=LAnkle
-7=Spine  8=Thorax  9=Neck  10=LShoulder  11=LElbow  12=LWrist
+0=Pelvis  1=RHip  2=RKnee  3=RAnkle  4=LHip  5=LKnee  6=LAnkle
+7=Spine  8=Neck  9=Head  10=LShoulder  11=LElbow  12=LWrist
 13=RShoulder  14=RElbow  15=RWrist
 ```
 
-Evaluation uses 12 joints (excludes midpoints: Hip, Spine, Thorax, Neck).
+Evaluation uses 14 joints (excludes midpoints: Spine and Head).
 
 ## Tests
 

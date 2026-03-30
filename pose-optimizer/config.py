@@ -32,7 +32,7 @@ class OptimizationConfig(BaseModel):
 
     # Per-joint rotation penalty multipliers (relative to rotation_penalty_scalar)
     rotation_penalty_multipliers: list[float] = Field(default_factory=lambda: [
-        3.0,   # 0: Hip (root rotation)
+        3.0,   # 0: Pelvis (root rotation)
         1.0,   # 1: RHip
         0.5,   # 2: RKnee
         0.2,   # 3: RAnkle
@@ -40,8 +40,8 @@ class OptimizationConfig(BaseModel):
         0.5,   # 5: LKnee
         0.2,   # 6: LAnkle
         1.0,   # 7: Spine
-        1.0,   # 8: Thorax
-        0.5,   # 9: Neck
+        1.0,   # 8: Neck (Base of Neck)
+        0.5,   # 9: Head
         0.5,   # 10: LShoulder
         0.3,   # 11: LElbow
         0.1,   # 12: LWrist
