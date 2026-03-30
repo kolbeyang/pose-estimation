@@ -1,0 +1,4 @@
+# Ignore all data files except the symlink
+*
+!.gitignore
+!panoptic-toolbox

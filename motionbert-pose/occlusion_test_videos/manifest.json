@@ -1,0 +1,98 @@
+[
+  {
+    "video_path": "/Users/kolbeyang/Documents/School/spring_2026/capstone/pose-estimation/motionbert-pose/occlusion_test_videos/171204_pose1_sample_0_every_other_black.mp4",
+    "video_name": "171204_pose1_sample_0_every_other_black.mp4",
+    "source_example_idx": 0,
+    "sequence": "171204_pose1_sample",
+    "camera": "00_00",
+    "start_frame": 0,
+    "num_frames": 100,
+    "pattern": "every_other_black",
+    "n_blacked": 50,
+    "n_visible": 50
+  },
+  {
+    "video_path": "/Users/kolbeyang/Documents/School/spring_2026/capstone/pose-estimation/motionbert-pose/occlusion_test_videos/171204_pose1_sample_0_every_4th_visible.mp4",
+    "video_name": "171204_pose1_sample_0_every_4th_visible.mp4",
+    "source_example_idx": 0,
+    "sequence": "171204_pose1_sample",
+    "camera": "00_00",
+    "start_frame": 0,
+    "num_frames": 100,
+    "pattern": "every_4th_visible",
+    "n_blacked": 75,
+    "n_visible": 25
+  },
+  {
+    "video_path": "/Users/kolbeyang/Documents/School/spring_2026/capstone/pose-estimation/motionbert-pose/occlusion_test_videos/171204_pose1_sample_0_every_4th_black.mp4",
+    "video_name": "171204_pose1_sample_0_every_4th_black.mp4",
+    "source_example_idx": 0,
+    "sequence": "171204_pose1_sample",
+    "camera": "00_00",
+    "start_frame": 0,
+    "num_frames": 100,
+    "pattern": "every_4th_black",
+    "n_blacked": 25,
+    "n_visible": 75
+  },
+  {
+    "video_path": "/Users/kolbeyang/Documents/School/spring_2026/capstone/pose-estimation/motionbert-pose/occlusion_test_videos/171204_pose1_sample_0_16on_16off.mp4",
+    "video_name": "171204_pose1_sample_0_16on_16off.mp4",
+    "source_example_idx": 0,
+    "sequence": "171204_pose1_sample",
+    "camera": "00_00",
+    "start_frame": 0,
+    "num_frames": 100,
+    "pattern": "16on_16off",
+    "n_blacked": 48,
+    "n_visible": 52
+  },
+  {
+    "video_path": "/Users/kolbeyang/Documents/School/spring_2026/capstone/pose-estimation/motionbert-pose/occlusion_test_videos/171204_pose3_200_every_other_black.mp4",
+    "video_name": "171204_pose3_200_every_other_black.mp4",
+    "source_example_idx": 4,
+    "sequence": "171204_pose3",
+    "camera": "00_00",
+    "start_frame": 200,
+    "num_frames": 150,
+    "pattern": "every_other_black",
+    "n_blacked": 75,
+    "n_visible": 75
+  },
+  {
+    "video_path": "/Users/kolbeyang/Documents/School/spring_2026/capstone/pose-estimation/motionbert-pose/occlusion_test_videos/171204_pose3_200_every_4th_visible.mp4",
+    "video_name": "171204_pose3_200_every_4th_visible.mp4",
+    "source_example_idx": 4,
+    "sequence": "171204_pose3",
+    "camera": "00_00",
+    "start_frame": 200,
+    "num_frames": 150,
+    "pattern": "every_4th_visible",
+    "n_blacked": 112,
+    "n_visible": 38
+  },
+  {
+    "video_path": "/Users/kolbeyang/Documents/School/spring_2026/capstone/pose-estimation/motionbert-pose/occlusion_test_videos/171204_pose3_200_every_4th_black.mp4",
+    "video_name": "171204_pose3_200_every_4th_black.mp4",
+    "source_example_idx": 4,
+    "sequence": "171204_pose3",
+    "camera": "00_00",
+    "start_frame": 200,
+    "num_frames": 150,
+    "pattern": "every_4th_black",
+    "n_blacked": 37,
+    "n_visible": 113
+  },
+  {
+    "video_path": "/Users/kolbeyang/Documents/School/spring_2026/capstone/pose-estimation/motionbert-pose/occlusion_test_videos/171204_pose3_200_16on_16off.mp4",
+    "video_name": "171204_pose3_200_16on_16off.mp4",
+    "source_example_idx": 4,
+    "sequence": "171204_pose3",
+    "camera": "00_00",
+    "start_frame": 200,
+    "num_frames": 150,
+    "pattern": "16on_16off",
+    "n_blacked": 70,
+    "n_visible": 80
+  }
+]

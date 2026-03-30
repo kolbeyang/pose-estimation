@@ -1,270 +1,293 @@
-"""Generate overlay video from a predictions JSON.
+"""Generate overlay video with heatmaps, 2D keypoints, and projected 3D skeletons.
 
-Projects skeletons onto the original video frames, with optional
-real Stacked Hourglass heatmap overlays.
-
-Usage:
-    python overlay_video.py <predictions.json> [--output overlay.mp4]
-
-Shows:
-  - Real Stacked Hourglass heatmaps (summed across joints, HOT colormap)
-  - White dots at 2D detection centers
-  - Green skeleton: Detector 3D projected to 2D via camera intrinsics
-  - Red skeleton: Optimised 3D projected to 2D via camera intrinsics
-  - Blue skeleton: Ground truth projected to 2D (if available)
+Overlays on original video frames:
+  1. Actual Stacked Hourglass (16, 64, 64) heatmaps (HOT colormap, additive blend)
+  2. Yellow dots at raw Stacked Hourglass 2D detection positions (MPII 16 joints)
+  3. Green skeleton: MotionBERT raw 3D projected to 2D via camera intrinsics
+  4. Red skeleton: Optimized 3D projected to 2D via camera intrinsics
+  5. Blue skeleton: Ground truth 3D projected to 2D (if available)
 """
 
-import argparse
-import json
 import os
 
 import cv2
 import numpy as np
 
-from panoptic import extract_video_frames, get_video_path
 from skeleton import BONES, NUM_JOINTS
-import config as cfg
 
 
-def _project_3d_to_2d(pts_3d, fx, fy, cx, cy):
-    """Perspective projection: (N, 3) camera-space -> (N, 2) pixels."""
-    pts = np.asarray(pts_3d, dtype=np.float64)
-    Z = np.maximum(pts[:, 2], 0.01)
-    u = fx * pts[:, 0] / Z + cx
-    v = fy * pts[:, 1] / Z + cy
-    return np.stack([u, v], axis=-1)
+def _resize_heatmap_to_frame(
+    heatmap_64: np.ndarray,
+    affine: np.ndarray,
+    frame_h: int,
+    frame_w: int,
+) -> np.ndarray:
+    """Resize a 64x64 heatmap to the full video frame using the affine transform.
 
+    The heatmap is in 64x64 space (quarter of the 256x256 crop).
+    affine maps 256-crop coords -> original pixel coords:
+        x_orig = sx * x_256 + tx
+        y_orig = sy * y_256 + ty
 
-def _render_heatmap_from_detections(h, w, pts_2d, visibility, sigma):
-    """Render Gaussian heatmap from 2D detection points.
-
-    Fallback when real heatmaps are not available.
-    """
-    ys = np.arange(h, dtype=np.float32)
-    xs = np.arange(w, dtype=np.float32)
-    radius = int(3 * sigma)
-    heatmap = np.zeros((h, w), dtype=np.float32)
-
-    for j in range(pts_2d.shape[0]):
-        if visibility[j] < 0.01:
-            continue
-        cx_j = pts_2d[j, 0]
-        cy_j = pts_2d[j, 1]
-        x0 = max(0, int(cx_j) - radius)
-        x1 = min(w, int(cx_j) + radius + 1)
-        y0 = max(0, int(cy_j) - radius)
-        y1 = min(h, int(cy_j) + radius + 1)
-        if x0 >= x1 or y0 >= y1:
-            continue
-        local_xs = xs[x0:x1]
-        local_ys = ys[y0:y1]
-        dx = local_xs[np.newaxis, :] - cx_j
-        dy = local_ys[:, np.newaxis] - cy_j
-        sq_dist = dx ** 2 + dy ** 2
-        gauss = np.exp(-sq_dist / (2.0 * sigma ** 2))
-        heatmap[y0:y1, x0:x1] += visibility[j] * gauss
-
-    return heatmap
-
-
-def _render_real_heatmaps(h, w, heatmaps_64, affine_256_to_pixel):
-    """Render real Stacked Hourglass heatmaps at video resolution.
+    Steps:
+    1. Resize 64x64 -> crop region size using bilinear interpolation
+    2. Place into full frame at the correct offset
 
     Args:
-        h, w: Video frame dimensions.
-        heatmaps_64: (16, 64, 64) raw heatmaps for one frame.
-        affine_256_to_pixel: (2, 3) affine from 256-crop to pixel coords.
+        heatmap_64: (64, 64) single-channel heatmap.
+        affine: (2, 3) affine transform (256-crop -> original pixels).
+        frame_h: Full frame height.
+        frame_w: Full frame width.
 
     Returns:
-        (h, w) float32 heatmap image.
+        (frame_h, frame_w) float32 heatmap in original pixel space.
     """
-    # Sum all 16 joint heatmaps
-    hm_sum = heatmaps_64.sum(axis=0)  # (64, 64)
-    # Normalize to [0, 1]
-    hm_max = hm_sum.max()
-    if hm_max > 1e-6:
-        hm_sum = hm_sum / hm_max
+    sx: float = float(affine[0, 0])
+    sy: float = float(affine[1, 1])
+    tx: float = float(affine[0, 2])
+    ty: float = float(affine[1, 2])
 
-    # Upscale 64 -> 256 crop space
-    hm_256 = cv2.resize(hm_sum, (256, 256), interpolation=cv2.INTER_LINEAR)
+    # The 64x64 heatmap corresponds to a 256x256 crop.
+    # In original pixel space, the crop spans (256 * sx) x (256 * sy) at offset (tx, ty).
+    crop_w: int = max(1, int(round(256 * sx)))
+    crop_h: int = max(1, int(round(256 * sy)))
 
-    # Apply affine to map 256-crop -> pixel coords
-    # affine_256_to_pixel: pixel = A * crop + b
-    #   [[scale_x, 0, offset_x],
-    #    [0, scale_y, offset_y]]
-    M = affine_256_to_pixel[:2, :].astype(np.float64)
-    hm_full = cv2.warpAffine(
-        hm_256, M, (w, h),
-        flags=cv2.INTER_LINEAR,
-        borderMode=cv2.BORDER_CONSTANT,
-        borderValue=0,
+    # Resize heatmap from 64x64 to crop region size
+    resized: np.ndarray = cv2.resize(
+        heatmap_64, (crop_w, crop_h), interpolation=cv2.INTER_LINEAR
     )
-    return hm_full.astype(np.float32)
+
+    # Place into full frame
+    full_heatmap: np.ndarray = np.zeros((frame_h, frame_w), dtype=np.float32)
+
+    # Compute paste region with clipping
+    dst_x0: int = int(round(tx))
+    dst_y0: int = int(round(ty))
+    dst_x1: int = dst_x0 + crop_w
+    dst_y1: int = dst_y0 + crop_h
+
+    # Source region (within resized heatmap)
+    src_x0: int = max(0, -dst_x0)
+    src_y0: int = max(0, -dst_y0)
+    src_x1: int = crop_w - max(0, dst_x1 - frame_w)
+    src_y1: int = crop_h - max(0, dst_y1 - frame_h)
+
+    # Destination region (within full frame)
+    paste_x0: int = max(0, dst_x0)
+    paste_y0: int = max(0, dst_y0)
+    paste_x1: int = min(frame_w, dst_x1)
+    paste_y1: int = min(frame_h, dst_y1)
+
+    if paste_x1 > paste_x0 and paste_y1 > paste_y0 and src_x1 > src_x0 and src_y1 > src_y0:
+        full_heatmap[paste_y0:paste_y1, paste_x0:paste_x1] = resized[src_y0:src_y1, src_x0:src_x1]
+
+    return full_heatmap
 
 
-def _blend_heatmap_additive(frame_bgr, heatmap, intensity=200.0):
-    """Additively blend heatmap onto frame using HOT colormap."""
-    maxval = heatmap.max()
+def _blend_heatmap_additive(
+    frame_bgr: np.ndarray,
+    heatmap: np.ndarray,
+    intensity: float = 200.0,
+) -> np.ndarray:
+    """Additively blend heatmap onto frame using OpenCV's HOT colormap.
+
+    The heatmap glows on top of the video.
+
+    Args:
+        frame_bgr: (H, W, 3) uint8 BGR frame.
+        heatmap: (H, W) float32 heatmap.
+        intensity: Additive blend strength.
+
+    Returns:
+        (H, W, 3) uint8 BGR frame with heatmap overlay.
+    """
+    maxval: float = float(heatmap.max())
     if maxval < 1e-6:
         return frame_bgr
-    norm = np.clip(heatmap / maxval, 0, 1)
-    hm_uint8 = (norm * 255).astype(np.uint8)
-    hm_color = cv2.applyColorMap(hm_uint8, cv2.COLORMAP_HOT)
+    norm: np.ndarray = np.clip(heatmap / maxval, 0, 1)
+    hm_uint8: np.ndarray = (norm * 255).astype(np.uint8)
+    hm_color: np.ndarray = cv2.applyColorMap(hm_uint8, cv2.COLORMAP_HOT)
 
-    glow = hm_color.astype(np.float32) * (norm[:, :, np.newaxis] * intensity / 255.0)
-    result = np.clip(frame_bgr.astype(np.float32) + glow, 0, 255)
+    # Additive blend: frame + heatmap * intensity, weighted by heatmap strength
+    glow: np.ndarray = hm_color.astype(np.float32) * (norm[:, :, np.newaxis] * intensity / 255.0)
+    result: np.ndarray = np.clip(frame_bgr.astype(np.float32) + glow, 0, 255)
     return result.astype(np.uint8)
 
 
-def _draw_skeleton_2d(frame, pts_2d, color, thickness=2):
-    """Draw skeleton bones + joints on frame."""
+def _project_3d_to_2d(
+    pts_3d: np.ndarray,
+    fx: float,
+    fy: float,
+    cx: float,
+    cy: float,
+) -> np.ndarray:
+    """Perspective projection: (N, 3) camera-space -> (N, 2) pixels.
+
+    Args:
+        pts_3d: (N, 3) 3D points in camera space.
+        fx, fy, cx, cy: Camera intrinsics.
+
+    Returns:
+        (N, 2) pixel coordinates.
+    """
+    pts: np.ndarray = np.asarray(pts_3d, dtype=np.float64)
+    Z: np.ndarray = np.maximum(pts[:, 2], 0.01)
+    u: np.ndarray = fx * pts[:, 0] / Z + cx
+    v: np.ndarray = fy * pts[:, 1] / Z + cy
+    return np.stack([u, v], axis=-1)
+
+
+def _draw_skeleton_2d(
+    frame: np.ndarray,
+    pts_2d: np.ndarray,
+    color: tuple[int, int, int],
+    thickness: int = 2,
+    visible_mask: np.ndarray | None = None,
+) -> None:
+    """Draw skeleton bones + joint circles on frame.
+
+    Args:
+        frame: (H, W, 3) BGR image (modified in-place).
+        pts_2d: (17, 2) pixel coordinates.
+        color: BGR color tuple.
+        thickness: Line thickness.
+        visible_mask: Optional (17,) boolean mask. If provided, only draw
+            joints/bones where the mask is True.
+    """
+    h: int
+    w: int
     h, w = frame.shape[:2]
     for parent, child in BONES:
-        p1 = (int(pts_2d[parent, 0]), int(pts_2d[parent, 1]))
-        p2 = (int(pts_2d[child, 0]), int(pts_2d[child, 1]))
+        if visible_mask is not None and (not visible_mask[parent] or not visible_mask[child]):
+            continue
+        p1: tuple[int, int] = (int(pts_2d[parent, 0]), int(pts_2d[parent, 1]))
+        p2: tuple[int, int] = (int(pts_2d[child, 0]), int(pts_2d[child, 1]))
         if 0 <= p1[0] < w and 0 <= p1[1] < h and 0 <= p2[0] < w and 0 <= p2[1] < h:
             cv2.line(frame, p1, p2, color, thickness, cv2.LINE_AA)
     for j in range(NUM_JOINTS):
-        pt = (int(pts_2d[j, 0]), int(pts_2d[j, 1]))
+        if visible_mask is not None and not visible_mask[j]:
+            continue
+        pt: tuple[int, int] = (int(pts_2d[j, 0]), int(pts_2d[j, 1]))
         if 0 <= pt[0] < w and 0 <= pt[1] < h:
             cv2.circle(frame, pt, 4, color, -1, cv2.LINE_AA)
 
 
 def generate_overlay_video(
-    json_path: str,
     output_path: str,
-    heatmaps_list: list[np.ndarray] | None = None,
-    affine_256_to_pixel: np.ndarray | None = None,
-    sigma_fallback: float = 10.0,
-):
-    """Generate overlay video from predictions JSON.
+    frames_rgb: list[np.ndarray],
+    heatmaps: list[np.ndarray],
+    mpii_keypoints_2d: list[np.ndarray],
+    detector_3d: list[np.ndarray],
+    optimized_3d: list[np.ndarray],
+    camera_fx: float,
+    camera_fy: float,
+    camera_cx: float,
+    camera_cy: float,
+    affine: np.ndarray,
+    frame_indices: list[int] | None = None,
+    gt_3d: list[np.ndarray | None] | None = None,
+    intensity: float = 200.0,
+    visibility: list[np.ndarray] | None = None,
+    visibility_threshold: float = 0.3,
+) -> None:
+    """Generate overlay video from in-memory pipeline data.
+
+    Per-frame layers:
+    1. Heatmap overlay from actual Stacked Hourglass (16, 64, 64) heatmaps
+    2. Yellow dots at raw MPII 2D detection positions
+    3. Green skeleton from MotionBERT raw 3D projected to 2D
+    4. Red skeleton from optimized 3D projected to 2D
+    5. Blue skeleton from ground truth 3D projected to 2D (if available)
 
     Args:
-        json_path: Path to predictions JSON file.
-        output_path: Output MP4 path.
-        heatmaps_list: Optional per-frame (16, 64, 64) real heatmaps.
-            If None, falls back to rendering Gaussians from 2D detections.
-        affine_256_to_pixel: (2, 3) affine for mapping heatmaps to pixel space.
-            Required if heatmaps_list is provided.
-        sigma_fallback: Gaussian sigma for fallback heatmap rendering.
+        output_path: Path for output .mp4 video.
+        frames_rgb: List of (H, W, 3) uint8 RGB frames.
+        heatmaps: List of (16, 64, 64) raw Stacked Hourglass heatmaps per frame.
+        mpii_keypoints_2d: List of (16, 3) MPII keypoints (x, y, conf) in original pixel coords.
+        detector_3d: List of (17, 3) MotionBERT camera-space 3D positions.
+        optimized_3d: List of (17, 3) optimized camera-space 3D positions.
+        camera_fx, camera_fy, camera_cx, camera_cy: Camera intrinsics.
+        affine: (2, 3) affine from 256-crop coords to original pixel coords.
+        frame_indices: Optional list of frame indices for labeling.
+        gt_3d: Optional list of (17, 3) ground truth 3D positions (None for missing frames).
+        intensity: Heatmap additive blend strength.
     """
-    with open(json_path) as f:
-        data = json.load(f)
-
-    seq_name = data["sequence"]
-    camera_name = data["camera"]
-    frame_indices = data["frame_indices"]
-    intrinsics = data["camera_intrinsics"]
-    fx, fy = intrinsics["fx"], intrinsics["fy"]
-    cx, cy = intrinsics["cx"], intrinsics["cy"]
-    frames_data = data["frames"]
-
-    use_real_heatmaps = heatmaps_list is not None and affine_256_to_pixel is not None
-
-    # Load original video frames
-    video_path = get_video_path(cfg.PANOPTIC_ROOT, seq_name, camera_name)
-    print(f"  Loading {len(frame_indices)} frames from {video_path}...")
-    frames_rgb = extract_video_frames(video_path, frame_indices)
-
-    if len(frames_rgb) == 0:
-        print("  ERROR: No frames loaded for overlay video.")
+    if not frames_rgb:
+        print("  WARNING: No frames for overlay video.")
         return
 
+    n_frames: int = len(frames_rgb)
+    h: int
+    w: int
     h, w = frames_rgb[0].shape[:2]
-    hm_mode = "real Stacked Hourglass" if use_real_heatmaps else f"Gaussian (sigma={sigma_fallback})"
-    print(f"  Frame size: {w}x{h}, {len(frames_rgb)} frames, heatmaps: {hm_mode}")
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(output_path, fourcc, 5.0, (w, h))
+    fourcc: int = cv2.VideoWriter_fourcc(*"mp4v")
+    writer: cv2.VideoWriter = cv2.VideoWriter(output_path, fourcc, 5.0, (w, h))
 
-    for i, frame_rgb in enumerate(frames_rgb):
-        if i >= len(frames_data):
-            break
+    for i in range(n_frames):
+        frame_bgr: np.ndarray = cv2.cvtColor(frames_rgb[i], cv2.COLOR_RGB2BGR)
 
-        fd = frames_data[i]
-        frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+        # 1. Heatmap overlay: sum all 16 joint channels, resize to frame, blend
+        if i < len(heatmaps):
+            hm_combined: np.ndarray = np.clip(heatmaps[i], 0, None).sum(axis=0)  # (64, 64)
+            hm_full: np.ndarray = _resize_heatmap_to_frame(hm_combined, affine, h, w)
+            frame_bgr = _blend_heatmap_additive(frame_bgr, hm_full, intensity)
 
-        mp_2d = np.array(fd["mediapipe_2d"])
-        mp_3d = np.array(fd["mediapipe_3d"])
-        opt_3d = np.array(fd["optimized_3d"])
+        # Compute visibility mask for this frame
+        vis_mask: np.ndarray | None = None
+        if visibility is not None and i < len(visibility):
+            vis_mask = visibility[i] >= visibility_threshold
 
-        # Visibility
-        if "visibility" in fd:
-            vis = np.array(fd["visibility"], dtype=np.float32)
-        else:
-            vis = (np.linalg.norm(mp_2d, axis=1) > 1.0).astype(np.float32)
+        # 2. Yellow dots for raw MPII 2D keypoints
+        if i < len(mpii_keypoints_2d):
+            kp_mpii: np.ndarray = mpii_keypoints_2d[i]
+            for j in range(kp_mpii.shape[0]):
+                if kp_mpii[j, 2] < visibility_threshold:
+                    continue
+                pt: tuple[int, int] = (int(kp_mpii[j, 0]), int(kp_mpii[j, 1]))
+                if 0 <= pt[0] < w and 0 <= pt[1] < h:
+                    cv2.circle(frame_bgr, pt, 4, (0, 255, 255), -1, cv2.LINE_AA)
 
-        # 1. Render heatmaps
-        if use_real_heatmaps and i < len(heatmaps_list):
-            heatmap = _render_real_heatmaps(h, w, heatmaps_list[i], affine_256_to_pixel)
-        else:
-            heatmap = _render_heatmap_from_detections(h, w, mp_2d, vis, sigma_fallback)
-        frame_bgr = _blend_heatmap_additive(frame_bgr, heatmap)
+        # 3. Green skeleton: MotionBERT raw 3D projected to 2D
+        if i < len(detector_3d):
+            det_proj: np.ndarray = _project_3d_to_2d(
+                detector_3d[i], camera_fx, camera_fy, camera_cx, camera_cy
+            )
+            _draw_skeleton_2d(frame_bgr, det_proj, color=(0, 255, 0), thickness=2,
+                              visible_mask=vis_mask)
 
-        # Project 3D to 2D
-        mp_proj = _project_3d_to_2d(mp_3d, fx, fy, cx, cy)
-        opt_proj = _project_3d_to_2d(opt_3d, fx, fy, cx, cy)
+        # 4. Red skeleton: Optimized 3D projected to 2D
+        if i < len(optimized_3d):
+            opt_proj: np.ndarray = _project_3d_to_2d(
+                optimized_3d[i], camera_fx, camera_fy, camera_cx, camera_cy
+            )
+            _draw_skeleton_2d(frame_bgr, opt_proj, color=(0, 0, 255), thickness=2,
+                              visible_mask=vis_mask)
 
-        # GT skeleton
-        gt_3d_data = fd.get("ground_truth_3d")
-        gt_proj = None
-        if gt_3d_data is not None:
-            gt_proj = _project_3d_to_2d(np.array(gt_3d_data), fx, fy, cx, cy)
-
-        # 2. White dots at 2D detection centers
-        for j in range(NUM_JOINTS):
-            pt = (int(mp_2d[j, 0]), int(mp_2d[j, 1]))
-            if 0 <= pt[0] < w and 0 <= pt[1] < h:
-                cv2.circle(frame_bgr, pt, 5, (255, 255, 255), -1, cv2.LINE_AA)
-
-        # 3. Green skeleton: Detector 3D projected to 2D
-        _draw_skeleton_2d(frame_bgr, mp_proj, color=(0, 255, 0), thickness=2)
-
-        # 4. Red skeleton: Optimised 3D projected to 2D
-        _draw_skeleton_2d(frame_bgr, opt_proj, color=(0, 0, 255), thickness=2)
-
-        # 5. Blue skeleton: Ground truth projected to 2D
-        if gt_proj is not None:
+        # 5. Blue skeleton: Ground truth 3D projected to 2D
+        if gt_3d is not None and i < len(gt_3d) and gt_3d[i] is not None:
+            gt_proj: np.ndarray = _project_3d_to_2d(
+                gt_3d[i], camera_fx, camera_fy, camera_cx, camera_cy
+            )
             _draw_skeleton_2d(frame_bgr, gt_proj, color=(255, 100, 0), thickness=2)
 
-        # Frame label with sequence info for debugging
-        example_name = f"{seq_name}_{frame_indices[0]}" if frame_indices else seq_name
+        # Frame label
+        frame_label: str = f"Frame {frame_indices[i]}" if frame_indices and i < len(frame_indices) else f"Frame {i}"
         cv2.putText(
-            frame_bgr, f"{example_name}  Frame {frame_indices[i]} ({i+1}/{len(frames_data)})",
-            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2,
+            frame_bgr, frame_label,
+            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2,
         )
+
         # Legend
-        legend_y = h - 20
-        cv2.putText(frame_bgr, "White=2D det  Green=Detector 3D  Red=Optimised  Blue=GT",
-                    (10, legend_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        legend_y: int = h - 20
+        cv2.putText(
+            frame_bgr,
+            "Yellow=SH 2D  Green=MotionBERT  Red=Optimized  Blue=GT",
+            (10, legend_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
+        )
 
         writer.write(frame_bgr)
 
     writer.release()
-    print(f"  Saved overlay video: {output_path}")
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Generate overlay video")
-    parser.add_argument("json_path", help="Path to predictions JSON file")
-    parser.add_argument(
-        "--output", "-o", default=None,
-        help="Output video path (default: same dir as JSON, <name>_overlay.mp4)",
-    )
-    parser.add_argument(
-        "--sigma", type=float, default=10.0,
-        help="Gaussian sigma in pixels for fallback heatmap rendering (default: 10)",
-    )
-    args = parser.parse_args()
-
-    if args.output is None:
-        json_dir = os.path.dirname(args.json_path)
-        base = os.path.splitext(os.path.basename(args.json_path))[0]
-        args.output = os.path.join(json_dir, f"{base}_overlay.mp4")
-
-    generate_overlay_video(args.json_path, args.output, sigma_fallback=args.sigma)
-
-
-if __name__ == "__main__":
-    main()
+    print(f"  Saved overlay video: {output_path} ({n_frames} frames)")

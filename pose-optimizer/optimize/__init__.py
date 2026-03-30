@@ -1,0 +1,216 @@
+"""Pure-function optimizer: optimize(raw_3d, camera, ...) -> improved_3d.
+
+Based on MotionBert's batched optimizer with support for both real SH heatmaps
+(MotionBert) and synthetic Gaussian heatmaps (MediaPipe).
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import torch
+
+from camera import Camera
+from config import OptimizationConfig
+from fk import forward_kinematics, forward_kinematics_batch, positions_to_fk_params
+from scoring import (
+    compute_total_score_batch,
+    generate_synthetic_heatmaps,
+    apply_blur,
+)
+from skeleton import NUM_JOINTS
+
+
+def optimize(
+    raw_3d: list[np.ndarray],
+    camera: Camera,
+    config: OptimizationConfig,
+    heatmaps: list[np.ndarray] | None = None,
+    affine: np.ndarray | None = None,
+    target_2d: list[np.ndarray] | None = None,
+    visibility: list[np.ndarray] | None = None,
+    verbose: bool = True,
+) -> tuple[list[np.ndarray], np.ndarray, list[float]]:
+    """Run FK optimization to improve 3D pose estimates.
+
+    For MotionBert: pass heatmaps + affine (real SH heatmaps).
+    For MediaPipe: pass target_2d (synthetic Gaussian heatmaps generated internally).
+
+    Args:
+        raw_3d: Per-frame (K, 3) camera-space positions from detector.
+        camera: Camera for 3D->2D projection.
+        config: Optimization hyperparameters.
+        heatmaps: Per-frame (C, H, W) real SH heatmaps. None for MediaPipe.
+        affine: (2, 3) affine from crop to pixel coords. Required with heatmaps.
+        target_2d: Per-frame (K, 2) 2D detections in pixels. For MediaPipe mode.
+        visibility: Per-frame (K,) confidence scores. Defaults to ones.
+        verbose: Print progress.
+
+    Returns:
+        Tuple of:
+            optimized_3d: list of (K, 3) improved camera-space positions.
+            bone_lengths_final: (K,) final shared bone lengths.
+            loss_history: list of loss values per step.
+    """
+    n_frames = len(raw_3d)
+    use_mpii_mapping = True  # Default: real SH heatmaps with MPII mapping
+
+    # Default visibility to ones
+    if visibility is None:
+        visibility = [np.ones(NUM_JOINTS) for _ in range(n_frames)]
+
+    # Determine heatmap mode
+    if heatmaps is not None and affine is not None:
+        # MotionBert mode: real SH heatmaps
+        use_mpii_mapping = True
+        heatmaps_np = np.array(heatmaps)
+        affine_np = affine
+    elif target_2d is not None:
+        # MediaPipe mode: generate synthetic Gaussian heatmaps
+        use_mpii_mapping = False
+        target_2d_arr = np.array(target_2d)  # (F, K, 2)
+        heatmaps_np, affine_np = generate_synthetic_heatmaps(
+            target_2d_arr,
+            image_size=camera.image_size,
+            heatmap_size=64,
+            sigma=config.heatmap_sigma,
+        )
+    else:
+        raise ValueError(
+            "Either (heatmaps + affine) or target_2d must be provided."
+        )
+
+    # --- Initialize FK parameters ---
+    if verbose:
+        print(f"  Initializing FK parameters for {n_frames} frames...")
+
+    all_root_pos: list[np.ndarray] = []
+    all_root_rot: list[np.ndarray] = []
+    all_local_rots: list[np.ndarray] = []
+    all_bone_lengths: list[np.ndarray] = []
+    roundtrip_errors: list[float] = []
+
+    for positions in raw_3d:
+        root_pos, root_rot, local_rots, bone_lengths = positions_to_fk_params(positions)
+
+        with torch.no_grad():
+            reconstructed = forward_kinematics(
+                torch.tensor(root_pos, dtype=torch.float32),
+                torch.tensor(root_rot, dtype=torch.float32),
+                torch.tensor(local_rots, dtype=torch.float32),
+                torch.tensor(bone_lengths, dtype=torch.float32),
+            )
+            rt_error = float(torch.mean(torch.norm(
+                reconstructed - torch.tensor(positions, dtype=torch.float32),
+                dim=-1,
+            )).item())
+            roundtrip_errors.append(rt_error)
+
+        all_root_pos.append(root_pos)
+        all_root_rot.append(root_rot)
+        all_local_rots.append(local_rots)
+        all_bone_lengths.append(bone_lengths)
+
+    if verbose:
+        mean_rt = float(np.mean(roundtrip_errors))
+        max_rt = float(np.max(roundtrip_errors))
+        print(f"    FK roundtrip error: mean={mean_rt*100:.4f} cm, max={max_rt*100:.4f} cm")
+
+    # --- Create batched learnable parameters ---
+    param_root_pos = torch.tensor(
+        np.array(all_root_pos), dtype=torch.float32, requires_grad=True,
+    )  # (F, 3)
+    param_root_rot = torch.tensor(
+        np.array(all_root_rot), dtype=torch.float32, requires_grad=True,
+    )  # (F, 3)
+    param_local_rots = torch.tensor(
+        np.array(all_local_rots), dtype=torch.float32, requires_grad=True,
+    )  # (F, J, 3)
+
+    # Shared bone lengths: median across frames
+    median_bone_lengths = np.median(np.array(all_bone_lengths), axis=0)
+    param_bone_lengths = torch.tensor(
+        median_bone_lengths, dtype=torch.float32, requires_grad=True,
+    )
+
+    # --- Non-learnable tensors ---
+    visibility_t = torch.tensor(np.array(visibility), dtype=torch.float32)  # (F, J)
+    heatmaps_t = torch.tensor(heatmaps_np, dtype=torch.float32)  # (F, C, H, W)
+    affine_t = torch.tensor(affine_np, dtype=torch.float32)  # (2, 3)
+
+    # Apply blur
+    if config.heatmap_blur_sigma > 0:
+        heatmaps_t = apply_blur(heatmaps_t, config.heatmap_blur_sigma)
+
+    # Rotation penalty weights
+    rot_per_joint_weights = torch.tensor(
+        config.rotation_penalty_per_joint, dtype=torch.float32,
+    )
+
+    # --- Optimizer: 3 param groups ---
+    optimizer = torch.optim.Adam([
+        {"params": [param_root_pos], "lr": config.learning_rate * 1.5},
+        {"params": [param_root_rot, param_local_rots], "lr": config.learning_rate},
+        {"params": [param_bone_lengths], "lr": config.bone_length_lr},
+    ])
+
+    loss_history: list[float] = []
+    num_steps = config.num_steps
+
+    if verbose:
+        print(f"  Optimising {n_frames} frames for {num_steps} steps (batched)...")
+
+    for step in range(num_steps):
+        optimizer.zero_grad()
+
+        # Batched FK
+        all_positions = forward_kinematics_batch(
+            param_root_pos, param_root_rot, param_local_rots, param_bone_lengths,
+        )  # (F, J, 3)
+
+        # Batched projection
+        pos_flat = all_positions.reshape(-1, 3)
+        proj_flat = camera.camera_to_image_torch(pos_flat)
+        all_projected_2d = proj_flat.reshape(n_frames, NUM_JOINTS, 2)
+
+        # Batched scoring
+        total_score, details = compute_total_score_batch(
+            all_positions, all_projected_2d, param_local_rots,
+            visibility_t,
+            config.position_penalty_weight, rot_per_joint_weights,
+            heatmaps=heatmaps_t,
+            affine=affine_t,
+            confidence_epsilon=config.confidence_epsilon,
+            use_mpii_mapping=use_mpii_mapping,
+        )
+
+        loss = -total_score
+        loss.backward()
+        optimizer.step()
+
+        # Clamp bone lengths
+        with torch.no_grad():
+            param_bone_lengths.clamp_(min=0.01)
+
+        loss_history.append(float(loss.item()))
+
+        if verbose and (step % 20 == 0 or step == num_steps - 1):
+            print(
+                f"    Step {step:4d}/{num_steps}  "
+                f"loss={loss.item():.1f}  "
+                f"heatmap={details['heatmap']:.1f}  "
+                f"pos_p={details['pos_penalty']:.4f}  "
+                f"rot_p={details['rot_penalty']:.4f}"
+            )
+
+    # --- Extract final positions ---
+    optimized_3d: list[np.ndarray] = []
+    with torch.no_grad():
+        final_positions = forward_kinematics_batch(
+            param_root_pos, param_root_rot, param_local_rots, param_bone_lengths,
+        )
+        for i in range(n_frames):
+            optimized_3d.append(final_positions[i].numpy().copy())
+
+    bone_lengths_final = param_bone_lengths.detach().numpy().copy()
+
+    return optimized_3d, bone_lengths_final, loss_history

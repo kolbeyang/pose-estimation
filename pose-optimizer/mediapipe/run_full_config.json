@@ -1,0 +1,41 @@
+{
+    "examples": [
+        {"sequence": "171204_pose1_sample", "camera": "00_00", "start_frame": 0, "num_frames": 100, "person_idx": 0},
+        {"sequence": "171204_pose1", "camera": "00_00", "start_frame": 1000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose1", "camera": "00_00", "start_frame": 5000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose1", "camera": "00_00", "start_frame": 8000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose1", "camera": "00_00", "start_frame": 10000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose1", "camera": "00_00", "start_frame": 12000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose1", "camera": "00_00", "start_frame": 14000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose1", "camera": "00_00", "start_frame": 16000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose1", "camera": "00_00", "start_frame": 18000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose1", "camera": "00_00", "start_frame": 20000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose1", "camera": "00_00", "start_frame": 22000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose1", "camera": "00_00", "start_frame": 26000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose2", "camera": "00_00", "start_frame": 200, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose2", "camera": "00_00", "start_frame": 2000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose2", "camera": "00_00", "start_frame": 5000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose2", "camera": "00_00", "start_frame": 8000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose2", "camera": "00_00", "start_frame": 10000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose2", "camera": "00_00", "start_frame": 15000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose2", "camera": "00_00", "start_frame": 20000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose2", "camera": "00_00", "start_frame": 25000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose2", "camera": "00_00", "start_frame": 27000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose3", "camera": "00_00", "start_frame": 200, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose3", "camera": "00_00", "start_frame": 2000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose3", "camera": "00_00", "start_frame": 3000, "num_frames": 150, "person_idx": 0},
+        {"sequence": "171204_pose3", "camera": "00_00", "start_frame": 4000, "num_frames": 150, "person_idx": 0}
+    ],
+    "data_root": "data/panoptic-toolbox",
+    "output_dir": null,
+    "target_fps": 10.0,
+    "optimization": {
+        "num_steps": 50,
+        "learning_rate": 0.002,
+        "bone_length_lr": 0.0001,
+        "position_penalty_weight": 500.0,
+        "rotation_penalty_scalar": 10.0,
+        "heatmap_blur_sigma": 4.0,
+        "heatmap_sigma": 50.0
+    }
+}

@@ -1,7 +1,7 @@
 """Download external model repos and pretrained weights.
 
 Stacked Hourglass: installed via pip (pytorch-stacked-hourglass package).
-  Pretrained weights auto-download when using hg2(pretrained=True) or hg8(pretrained=True).
+  Pretrained weights auto-download when using hg8(pretrained=True).
 
 MotionBERT: cloned from GitHub, checkpoint from HuggingFace.
 """
@@ -10,12 +10,13 @@ import os
 import subprocess
 import urllib.request
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-EXTERNAL_DIR = os.path.join(SCRIPT_DIR, "external")
-CHECKPOINTS_DIR = os.path.join(SCRIPT_DIR, "checkpoints")
+SCRIPT_DIR: str = os.path.dirname(os.path.abspath(__file__))
+EXTERNAL_DIR: str = os.path.join(SCRIPT_DIR, "external")
+CHECKPOINTS_DIR: str = os.path.join(SCRIPT_DIR, "checkpoints")
 
 
-def clone_repo(url: str, target_dir: str):
+def clone_repo(url: str, target_dir: str) -> None:
+    """Clone a git repo if not already present."""
     if os.path.exists(target_dir):
         print(f"  Already exists: {target_dir}")
         return
@@ -23,7 +24,8 @@ def clone_repo(url: str, target_dir: str):
     subprocess.run(["git", "clone", "--depth", "1", url, target_dir], check=True)
 
 
-def download_file(url: str, target_path: str):
+def download_file(url: str, target_path: str) -> None:
+    """Download a file if not already present."""
     if os.path.exists(target_path):
         print(f"  Already exists: {target_path}")
         return
@@ -34,7 +36,8 @@ def download_file(url: str, target_path: str):
     print(f"    Done ({os.path.getsize(target_path) / 1e6:.1f} MB)")
 
 
-def main():
+def main() -> None:
+    """Download all required models and checkpoints."""
     os.makedirs(EXTERNAL_DIR, exist_ok=True)
     os.makedirs(CHECKPOINTS_DIR, exist_ok=True)
 
@@ -45,15 +48,15 @@ def main():
 
     # 2. Clone MotionBERT
     print("\n=== MotionBERT ===")
-    motionbert_dir = os.path.join(EXTERNAL_DIR, "MotionBERT")
+    motionbert_dir: str = os.path.join(EXTERNAL_DIR, "MotionBERT")
     clone_repo(
         "https://github.com/Walter0807/MotionBERT.git",
         motionbert_dir,
     )
 
-    # Download MotionBERT-Lite fine-tuned for 3D pose (H3.6M) from HuggingFace
-    motionbert_ckpt = os.path.join(CHECKPOINTS_DIR, "motionbert_lite_h36m.bin")
-    hf_url = (
+    # 3. Download MotionBERT-Lite H36M checkpoint
+    motionbert_ckpt: str = os.path.join(CHECKPOINTS_DIR, "motionbert_lite_h36m.bin")
+    hf_url: str = (
         "https://huggingface.co/walterzhu/MotionBERT/resolve/main/"
         "checkpoint/pose3d/FT_MB_lite_MB_ft_h36m_global_lite/best_epoch.bin"
     )
