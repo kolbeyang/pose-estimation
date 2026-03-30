@@ -58,11 +58,6 @@ def make_comparison(mp_dir: str, mb_dir: str) -> None:
     out_dir = os.path.join("output", f"comparison_{timestamp}")
     os.makedirs(out_dir, exist_ok=True)
 
-    # Extract metric arrays
-    def get_metric(results, name, metric_key, raw=False):
-        src = "raw_metrics" if raw else "metrics"
-        return results[name].get(src, {}).get(metric_key, None)
-
     # --- Graph 1: Per-Example VW-SI-MPJPE Bar Chart ---
     _per_example_bar(common, mp_results, mb_results, "vw_si_mpjpe",
                      "VW-SI-MPJPE", out_dir)
@@ -229,9 +224,11 @@ def _scatter_plot(common, mp_results, mb_results, out_dir):
     hi = max(max(mp_vals), max(mb_vals)) * 1.1
     ax.plot([lo, hi], [lo, hi], "k--", alpha=0.5, label="y = x")
 
-    # Annotate points
-    for i, name in enumerate(names):
-        short = name.split("_")[-1]  # just the frame number
+    # Only label outliers (top 5 points furthest from y=x line)
+    distances = [abs(mb_vals[i] - mp_vals[i]) for i in range(len(names))]
+    top_indices = sorted(range(len(distances)), key=lambda i: distances[i], reverse=True)[:5]
+    for i in top_indices:
+        short = names[i].split("_")[-1]
         ax.annotate(short, (mp_vals[i], mb_vals[i]), fontsize=6, alpha=0.7,
                     xytext=(3, 3), textcoords="offset points")
 
@@ -271,7 +268,7 @@ def _per_joint_comparison(common, mp_results, mb_results, out_dir):
     ax.set_xticks(x)
     ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=45, ha="right", fontsize=8)
     ax.set_ylabel("MPJPE (cm)")
-    ax.set_title("Per-Joint Error (Mean across all examples, Optimized)")
+    ax.set_title("Per-Joint Error (Raw MPJPE — not scale-corrected, Mean across all examples)")
     ax.legend()
     ax.grid(True, alpha=0.3, axis="y")
     _save(fig, os.path.join(out_dir, "per_joint_comparison.png"))
@@ -403,6 +400,33 @@ def _build_summary(common, mp_results, mb_results, mp_dir, mb_dir):
                 "motionbert_std": float(np.std(mb_v)),
             }
 
+    # Velocity wins
+    vel_key = "vw_si_mpjve"
+    mp_vel = [mp_results[n]["metrics"].get(vel_key, 0) for n in common]
+    mb_vel = [mb_results[n]["metrics"].get(vel_key, 0) for n in common]
+    mp_vel_wins = sum(1 for m, b in zip(mp_vel, mb_vel) if m < b)
+    mb_vel_wins = sum(1 for m, b in zip(mp_vel, mb_vel) if b < m)
+
+    # Build conclusion
+    n = len(common)
+    mp_mean_cm = float(np.mean(mp_vals)) * 100
+    mb_mean_cm = float(np.mean(mb_vals)) * 100
+    mp_vel_mean_cm = float(np.mean(mp_vel)) * 100
+    mb_vel_mean_cm = float(np.mean(mb_vel)) * 100
+
+    pos_winner = "MediaPipe" if mp_wins >= mb_wins else "MotionBert"
+    pos_loser_wins = mb_wins if pos_winner == "MediaPipe" else mp_wins
+    pos_winner_wins = mp_wins if pos_winner == "MediaPipe" else mb_wins
+    vel_winner = "MediaPipe" if mp_vel_wins >= mb_vel_wins else "MotionBert"
+    vel_winner_wins = mp_vel_wins if vel_winner == "MediaPipe" else mb_vel_wins
+
+    conclusion = (
+        f"{pos_winner} wins on position accuracy ({pos_winner_wins}/{n} examples, "
+        f"mean VW-SI-MPJPE {mp_mean_cm:.1f} vs {mb_mean_cm:.1f} cm). "
+        f"{vel_winner} wins on temporal smoothness ({vel_winner_wins}/{n} examples, "
+        f"mean VW-SI-MPJVE {mp_vel_mean_cm:.1f} vs {mb_vel_mean_cm:.1f} cm/frame)."
+    )
+
     return {
         "mediapipe_dir": mp_dir,
         "motionbert_dir": mb_dir,
@@ -411,6 +435,7 @@ def _build_summary(common, mp_results, mb_results, mp_dir, mb_dir):
         "motionbert_mean_vw_si_mpjpe": float(np.mean(mb_vals)),
         "mediapipe_wins": mp_wins,
         "motionbert_wins": mb_wins,
+        "conclusion": conclusion,
         "per_example": per_example,
         "aggregate": aggregate,
     }
