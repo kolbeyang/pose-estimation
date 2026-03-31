@@ -37,8 +37,27 @@ def _ensure_model() -> None:
     urllib.request.urlretrieve(_MODEL_URL, _MODEL_PATH)
 
 
+def load_landmarker() -> vision.PoseLandmarker:
+    """Load MediaPipe PoseLandmarker model once for reuse across examples.
+
+    Returns:
+        A PoseLandmarker instance ready for IMAGE-mode detection.
+    """
+    _ensure_model()
+    options = vision.PoseLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=_MODEL_PATH),
+        running_mode=vision.RunningMode.IMAGE,
+        num_poses=1,
+        output_segmentation_masks=False,
+    )
+    landmarker = vision.PoseLandmarker.create_from_options(options)
+    print("  Loaded MediaPipe PoseLandmarker")
+    return landmarker
+
+
 def detect_poses(
     frames_rgb: list[np.ndarray],
+    landmarker: vision.PoseLandmarker | None = None,
 ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
     """Run MediaPipe PoseLandmarker on a list of RGB frames.
 
@@ -49,6 +68,8 @@ def detect_poses(
 
     Args:
         frames_rgb: List of (H, W, 3) uint8 RGB frames.
+        landmarker: Pre-loaded PoseLandmarker. If None, creates and closes
+            one internally (backward-compatible but slower).
 
     Returns:
         Tuple of:
@@ -56,20 +77,16 @@ def detect_poses(
             keypoints_3d: List of (16, 3) world coords, hip-relative meters. [3D:SKELETON_16]
             visibility: List of (16,) visibility scores [0, 1]. [VIS:SKELETON_16]
     """
-    _ensure_model()
-
-    options = vision.PoseLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=_MODEL_PATH),
-        running_mode=vision.RunningMode.IMAGE,
-        num_poses=1,
-        output_segmentation_masks=False,
-    )
+    should_close = False
+    if landmarker is None:
+        landmarker = load_landmarker()
+        should_close = True
 
     all_kp_2d: list[np.ndarray] = []
     all_kp_3d: list[np.ndarray] = []
     all_vis: list[np.ndarray] = []
 
-    with vision.PoseLandmarker.create_from_options(options) as landmarker:
+    try:
         for frame in frames_rgb:
             h, w = frame.shape[:2]
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
@@ -104,6 +121,9 @@ def detect_poses(
             all_kp_2d.append(mediapipe_to_skeleton(mp_2d))  # [2D:SKELETON_16]
             all_kp_3d.append(mediapipe_to_skeleton(mp_3d))  # [3D:SKELETON_16]
             all_vis.append(mediapipe_visibility_to_skeleton(mp_vis))  # [VIS:SKELETON_16]
+    finally:
+        if should_close:
+            landmarker.close()
 
     return all_kp_2d, all_kp_3d, all_vis
 

@@ -42,7 +42,12 @@ from graphs import (
     generate_summary,
     generate_trajectory_graphs,
 )
-from run_motionbert.detect import detect_poses, motionbert_to_camera_space
+from run_motionbert.detect import (
+    detect_poses,
+    load_all_models,
+    motionbert_to_camera_space,
+    MotionBertModels,
+)
 from optimize import optimize
 from overlay_video import generate_overlay_video
 from skeleton import JOINT_NAMES, EVAL_JOINTS, NUM_JOINTS, PARENTS
@@ -105,6 +110,7 @@ def process_example(
     num_frames: int,
     person_idx: int,
     run_dir: str,
+    models: MotionBertModels | None = None,
 ) -> dict[str, Any]:
     """Process one CMU Panoptic example end-to-end with MotionBERT pipeline.
 
@@ -119,6 +125,7 @@ def process_example(
         num_frames: Number of frames to process.
         person_idx: Which person to track (0 = first).
         run_dir: Output directory for results.
+        models: Pre-loaded MotionBertModels. If None, models are loaded per call.
 
     Returns:
         Dict of evaluation metrics, or empty dict on failure.
@@ -175,6 +182,7 @@ def process_example(
         positions_3d_norm,  # (N, 16, 3) [3D:SKELETON_16] normalized
     ) = detect_poses(
         frames_rgb,
+        models=models,
         sh_batch_size=config.sh_batch_size,
         conf_threshold=config.motionbert_conf_threshold,
     )
@@ -416,6 +424,9 @@ def run_pipeline(config: RunConfig) -> None:
     print(f"  Run: {run_dir}")
     print("=" * 60)
 
+    print("\n  Loading models...")
+    models = load_all_models()
+
     all_metrics: list[dict[str, Any]] = []
     for example in config.examples:
         try:
@@ -427,6 +438,7 @@ def run_pipeline(config: RunConfig) -> None:
                 example.num_frames,
                 example.person_idx,
                 run_dir,
+                models=models,
             )
             if metrics:
                 all_metrics.append(metrics)

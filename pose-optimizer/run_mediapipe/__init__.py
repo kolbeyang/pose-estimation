@@ -42,7 +42,7 @@ from graphs import (
     generate_summary,
     generate_trajectory_graphs,
 )
-from run_mediapipe.detect import detect_poses, mediapipe_3d_to_camera
+from run_mediapipe.detect import detect_poses, load_landmarker, mediapipe_3d_to_camera
 from optimize import optimize
 from overlay_video import generate_overlay_video
 from scoring import generate_synthetic_heatmaps
@@ -106,6 +106,7 @@ def process_example(
     num_frames: int,
     person_idx: int,
     run_dir: str,
+    landmarker=None,
 ) -> dict[str, Any]:
     """Process one CMU Panoptic example end-to-end with MediaPipe pipeline.
 
@@ -121,6 +122,7 @@ def process_example(
         num_frames: Number of frames to process.
         person_idx: Which person to track (0 = first).
         run_dir: Output directory for results.
+        landmarker: Pre-loaded MediaPipe PoseLandmarker. If None, loads per call.
 
     Returns:
         Dict of evaluation metrics, or empty dict on failure.
@@ -168,7 +170,7 @@ def process_example(
 
     # --- 3. Run MediaPipe ---
     print(f"\n  [3/7] Running MediaPipe on {len(frames_rgb)} frames...")
-    kp_2d, kp_3d, visibility = detect_poses(frames_rgb)  # [2D:SKELETON_16], [3D:SKELETON_16], [VIS:SKELETON_16]
+    kp_2d, kp_3d, visibility = detect_poses(frames_rgb, landmarker=landmarker)  # [2D:SKELETON_16], [3D:SKELETON_16], [VIS:SKELETON_16]
     n_detected = sum(1 for v in visibility if v.mean() > 0.3)
     print(f"    Detected poses in {n_detected}/{len(frames_rgb)} frames")
 
@@ -421,6 +423,9 @@ def run_pipeline(config: RunConfig) -> None:
     print(f"  Run: {run_dir}")
     print("=" * 60)
 
+    print("\n  Loading MediaPipe model...")
+    landmarker = load_landmarker()
+
     all_metrics: list[dict[str, Any]] = []
     for example in config.examples:
         try:
@@ -432,6 +437,7 @@ def run_pipeline(config: RunConfig) -> None:
                 example.num_frames,
                 example.person_idx,
                 run_dir,
+                landmarker=landmarker,
             )
             if metrics:
                 all_metrics.append(metrics)
@@ -440,6 +446,8 @@ def run_pipeline(config: RunConfig) -> None:
             import traceback
             traceback.print_exc()
             continue
+
+    landmarker.close()
 
     if all_metrics:
         generate_aggregate_summary(all_metrics, run_dir)
