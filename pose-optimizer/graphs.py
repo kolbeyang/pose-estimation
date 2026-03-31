@@ -115,9 +115,9 @@ def generate_per_joint_error_bar(
     """Bar chart of per-joint MPJPE for [SKELETON_16_EVAL] joints (14 eval joints).
 
     Args:
-        det_per_joint: List of per-joint errors for eval joints. [3D:SKELETON_16_EVAL]
+        det_per_joint: List of per-joint errors for eval joints. [SKELETON_16_EVAL]
         output_dir: Directory to save the graph.
-        opt_per_joint: Optional optimized per-joint errors. [3D:SKELETON_16_EVAL]
+        opt_per_joint: Optional optimized per-joint errors. [SKELETON_16_EVAL]
     """
     os.makedirs(output_dir, exist_ok=True)
     x = np.arange(NUM_EVAL_JOINTS)
@@ -130,10 +130,10 @@ def generate_per_joint_error_bar(
         ax.bar(x + width / 2, [v * 100 for v in opt_per_joint],
                width, color="forestgreen", alpha=0.7, label="Optimized")
         ax.legend()
-        ax.set_title("Per-Joint Error (Detector vs Optimized, 12 eval joints)")
+        ax.set_title("Per-Joint Error (Detector vs Optimized, 14 eval joints)")
     else:
         ax.bar(x, [v * 100 for v in det_per_joint], color="steelblue", alpha=0.7)
-        ax.set_title("Per-Joint Error (Detector, 12 eval joints)")
+        ax.set_title("Per-Joint Error (Detector, 14 eval joints)")
 
     ax.set_xticks(x)
     ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=45, ha="right", fontsize=8)
