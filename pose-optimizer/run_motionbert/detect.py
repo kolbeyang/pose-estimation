@@ -35,7 +35,16 @@ _SH_RGB_MEAN: np.ndarray = np.array([0.4404, 0.4440, 0.4327], dtype=np.float32)
 
 
 def _normalize_for_sh(cropped: np.ndarray) -> np.ndarray:
-    """Normalize a cropped HWC uint8 image for SH inference."""
+    """Normalize a cropped HWC uint8 image to CHW float32 for Stacked Hourglass.
+
+    Converts (256, 256, 3) uint8 RGB to (3, 256, 256) float32 with mean subtracted.
+
+    Args:
+        cropped: (H, W, 3) uint8 RGB image.
+
+    Returns:
+        (3, H, W) float32 normalized image.
+    """
     img = cropped.astype(np.float32) / 255.0
     img = np.transpose(img, (2, 0, 1))
     img[0] -= _SH_RGB_MEAN[0]
@@ -45,7 +54,7 @@ def _normalize_for_sh(cropped: np.ndarray) -> np.ndarray:
 
 
 def _get_device() -> torch.device:
-    """Select best available device."""
+    """Select best available compute device (CUDA > MPS > CPU)."""
     if torch.cuda.is_available():
         return torch.device("cuda")
     if torch.backends.mps.is_available():
@@ -58,7 +67,17 @@ def _get_device() -> torch.device:
 # ---------------------------------------------------------------------------
 
 def detect_person_bbox(frames_rgb: list[np.ndarray]) -> np.ndarray:
-    """Detect persons with YOLOv8, return union bounding box."""
+    """Detect persons with YOLOv8, return union bounding box across all frames.
+
+    Runs YOLOv8 person detection on each frame, selects the largest detection,
+    and returns the union bounding box covering all frames.
+
+    Args:
+        frames_rgb: List of (H, W, 3) uint8 RGB frames.
+
+    Returns:
+        (4,) float32 array [x1, y1, x2, y2] in pixel coordinates.
+    """
     from ultralytics import YOLO
 
     h, w = frames_rgb[0].shape[:2]
@@ -97,7 +116,19 @@ def detect_person_bbox(frames_rgb: list[np.ndarray]) -> np.ndarray:
 def crop_and_resize(
     frame: np.ndarray, bbox: np.ndarray, target_size: int = 256,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Crop frame to bounding box with 20% padding and resize to square."""
+    """Crop frame to bounding box with 20% padding and resize to square.
+
+    Args:
+        frame: (H, W, 3) uint8 RGB frame.
+        bbox: (4,) float32 [x1, y1, x2, y2] bounding box in pixel coords.
+        target_size: Output square size in pixels (default 256).
+
+    Returns:
+        Tuple of:
+            resized: (target_size, target_size, 3) uint8 cropped+resized image.
+            affine: (2, 3) float32 affine mapping crop coords (0..target_size-1)
+                to original pixel coords.
+    """
     x1, y1, x2, y2 = bbox
     cx_f = (x1 + x2) / 2
     cy_f = (y1 + y2) / 2
@@ -145,7 +176,14 @@ def crop_and_resize(
 # ---------------------------------------------------------------------------
 
 def _flip_heatmaps(heatmaps: np.ndarray) -> np.ndarray:
-    """Horizontally flip heatmaps and swap symmetric joints."""
+    """Horizontally flip heatmaps and swap symmetric MPII joints.
+
+    Args:
+        heatmaps: (16, H, W) heatmaps in MPII order. [HEATMAP:MPII_16]
+
+    Returns:
+        (16, H, W) flipped heatmaps with L/R joints swapped. [HEATMAP:MPII_16]
+    """
     flipped = heatmaps[:, :, ::-1].copy()
     for left, right in MPII_FLIP_PAIRS:
         flipped[left], flipped[right] = flipped[right].copy(), flipped[left].copy()
@@ -153,7 +191,14 @@ def _flip_heatmaps(heatmaps: np.ndarray) -> np.ndarray:
 
 
 def _parse_heatmaps(heatmaps: np.ndarray) -> np.ndarray:
-    """Extract 2D keypoint locations from heatmaps."""
+    """Extract 2D keypoint locations and confidence from heatmaps.
+
+    Args:
+        heatmaps: (16, H, W) heatmaps in MPII order. [HEATMAP:MPII_16]
+
+    Returns:
+        (16, 3) array of (x, y, confidence) per joint. [2D:MPII_16]
+    """
     n_joints = heatmaps.shape[0]
     keypoints = np.zeros((n_joints, 3), dtype=np.float32)
     for j in range(n_joints):
@@ -169,7 +214,20 @@ def run_hourglass(
     bbox: np.ndarray,
     batch_size: int = 32,
 ) -> tuple[list[np.ndarray], list[np.ndarray], np.ndarray]:
-    """Run HG8 on cropped frames with flip augmentation (batched)."""
+    """Run Stacked Hourglass (HG8) on cropped frames with flip augmentation.
+
+    Args:
+        frames_rgb: List of (H, W, 3) uint8 RGB frames.
+        bbox: (4,) float32 union bounding box [x1, y1, x2, y2].
+        batch_size: Inference batch size.
+
+    Returns:
+        Tuple of:
+            all_keypoints_2d: List of (16, 3) per-frame. [2D:MPII_16]
+                (x, y in original pixel coords, confidence).
+            all_heatmaps: List of (16, 64, 64) per-frame. [HEATMAP:MPII_16]
+            affine: (2, 3) shared affine mapping crop coords to pixel coords.
+    """
     from stacked_hourglass import hg8
 
     device = _get_device()
@@ -263,7 +321,7 @@ def run_hourglass(
 # ---------------------------------------------------------------------------
 
 def _find_motionbert_path() -> str:
-    """Find MotionBERT installation."""
+    """Find MotionBERT installation directory under external/."""
     local_path = os.path.join(EXTERNAL_DIR, "MotionBERT")
     if os.path.exists(local_path):
         return local_path
@@ -274,7 +332,7 @@ def _find_motionbert_path() -> str:
 
 
 def _find_motionbert_checkpoint() -> str:
-    """Find MotionBERT checkpoint."""
+    """Find MotionBERT-Lite checkpoint file under checkpoints/."""
     local_ckpt = os.path.join(CHECKPOINTS_DIR, "motionbert_lite_h36m.bin")
     if os.path.exists(local_ckpt):
         return local_ckpt
@@ -285,7 +343,11 @@ def _find_motionbert_checkpoint() -> str:
 
 
 def load_motionbert_model() -> torch.nn.Module:
-    """Load pretrained MotionBERT-Lite model."""
+    """Load pretrained MotionBERT-Lite DSTformer model for 2D->3D lifting.
+
+    Returns:
+        MotionBERT-Lite model in eval mode (expects 17-joint input).
+    """
     motionbert_path = _find_motionbert_path()
 
     lib_path = os.path.join(motionbert_path, "lib")
@@ -316,7 +378,16 @@ def load_motionbert_model() -> torch.nn.Module:
 
 
 def crop_scale(motion: np.ndarray) -> tuple[np.ndarray, dict[str, float]]:
-    """Normalize 2D keypoints to [-1, 1] based on bounding box."""
+    """Normalize 2D keypoints to [-1, 1] for MotionBERT input.
+
+    Args:
+        motion: (N, 17, 3) 2D keypoints with confidence. [2D:MPII_17]
+
+    Returns:
+        Tuple of:
+            normalized: (N, 17, 3) keypoints in [-1, 1] range.
+            params: Dict with 'xs', 'ys', 'scale' for denormalization.
+    """
     result = copy.deepcopy(motion)
     valid_coords = motion[motion[..., 2] != 0][:, :2]
     if len(valid_coords) < 4:
@@ -339,7 +410,17 @@ def crop_scale(motion: np.ndarray) -> tuple[np.ndarray, dict[str, float]]:
 
 
 def flip_data(data):
-    """Flip 17-joint data: negate X, swap L/R joints."""
+    """Flip 17-joint data: negate X, swap L/R joints.
+
+    Operates on [2D:MPII_17] or [3D:MOTIONBERT_17] 17-joint data for
+    horizontal flip augmentation.
+
+    Args:
+        data: (..., 17, D) array of 17-joint keypoints.
+
+    Returns:
+        (..., 17, D) horizontally flipped data with L/R swapped.
+    """
     left_joints = [4, 5, 6, 11, 12, 13]
     right_joints = [1, 2, 3, 14, 15, 16]
     flipped_data = copy.deepcopy(data)
@@ -356,12 +437,16 @@ def run_motionbert(
 ) -> np.ndarray:
     """Lift 2D keypoints to 3D using MotionBERT.
 
+    Converts [2D:MPII_16] inputs to 17-joint format via mpii_to_skeleton(),
+    runs MotionBERT 3D lifting, then strips head joint to produce
+    [3D:SKELETON_16] output.
+
     Args:
-        keypoints_2d_list: List of (16, 3) MPII keypoints per frame.
+        keypoints_2d_list: List of (16, 3) MPII keypoints per frame. [2D:MPII_16]
         conf_threshold: Zero out joints below this confidence.
 
     Returns:
-        (N, 16, 3) normalized MotionBERT output (Head removed).
+        (N, 16, 3) normalized MotionBERT output. [3D:SKELETON_16]
     """
     model = load_motionbert_model()
     device = _get_device()
@@ -371,7 +456,7 @@ def run_motionbert(
     n_frames = len(keypoints_2d_list)
 
     # Convert MPII 16-joint to 17-joint skeleton
-    keypoints_17 = np.zeros((n_frames, 17, 3), dtype=np.float32)
+    keypoints_17 = np.zeros((n_frames, 17, 3), dtype=np.float32)  # [2D:MPII_17]
     for i, kp_mpii in enumerate(keypoints_2d_list):
         keypoints_17[i] = mpii_to_skeleton(kp_mpii)
 
@@ -411,7 +496,7 @@ def run_motionbert(
             else:
                 raise
 
-    positions_3d = output_3d.cpu().numpy()[0]  # (N, 17, 3)
+    positions_3d = output_3d.cpu().numpy()[0]  # (N, 17, 3) [3D:MOTIONBERT_17]
     positions_3d[0, 0, 2] = 0
 
     print(f"  MotionBERT raw output: {positions_3d.shape}")
@@ -419,7 +504,7 @@ def run_motionbert(
           f"{positions_3d[:, 0, 2].max():.4f}")
 
     # Strip Head joint -> 16 joints
-    positions_3d = strip_head_joint(positions_3d)
+    positions_3d = strip_head_joint(positions_3d)  # [3D:SKELETON_16]
     return positions_3d
 
 
@@ -428,7 +513,15 @@ def run_motionbert(
 # ---------------------------------------------------------------------------
 
 def _iqr_filtered_median(values: np.ndarray, k: float = 1.5) -> float:
-    """Compute median after removing IQR outliers."""
+    """Compute median after removing IQR outliers.
+
+    Args:
+        values: 1D array of numeric values.
+        k: IQR multiplier for outlier bounds (default 1.5).
+
+    Returns:
+        Filtered median as a float.
+    """
     if len(values) < 4:
         return float(np.median(values))
     q1 = float(np.percentile(values, 25))
@@ -449,7 +542,19 @@ def motionbert_to_camera_space(
     kp_2d: np.ndarray,
     fx: float, fy: float, cx: float, cy: float,
 ) -> np.ndarray:
-    """Convert MotionBERT normalized output to camera-space meters."""
+    """Convert MotionBERT normalized output to camera-space meters.
+
+    Estimates bone scale by comparing detected bone lengths against defaults,
+    then estimates root depth from 2D-3D correspondences.
+
+    Args:
+        positions_3d_norm: (16, 3) MotionBERT-normalized positions. [3D:SKELETON_16]
+        kp_2d: (16, 2) 2D pixel coordinates. [2D:SKELETON_16]
+        fx, fy, cx, cy: Camera intrinsics.
+
+    Returns:
+        (16, 3) positions in camera coordinates (meters). [3D:SKELETON_16]
+    """
     from skeleton import PARENTS, DEFAULT_BONE_LENGTHS
 
     root_relative = positions_3d_norm - positions_3d_norm[0:1]
@@ -516,14 +621,32 @@ def detect_poses(
     sh_batch_size: int = 32,
     conf_threshold: float = 0.0,
 ) -> tuple[
-    list[np.ndarray],  # kp_2d (16, 2) pixel coords
-    list[np.ndarray],  # visibility (16,)
-    list[np.ndarray],  # heatmaps (16, 64, 64)
-    list[np.ndarray],  # mpii_kp_2d (16, 3) raw MPII
+    list[np.ndarray],  # kp_2d (16, 2) pixel coords [2D:SKELETON_16]
+    list[np.ndarray],  # visibility (16,) [VIS:SKELETON_16]
+    list[np.ndarray],  # heatmaps (16, 64, 64) [HEATMAP:MPII_16]
+    list[np.ndarray],  # mpii_kp_2d (16, 3) raw MPII [2D:MPII_16]
     np.ndarray,        # affine (2, 3)
-    np.ndarray,        # positions_3d_norm (N, 16, 3)
+    np.ndarray,        # positions_3d_norm (N, 16, 3) [3D:SKELETON_16]
 ]:
-    """Full detection pipeline: YOLO -> SH -> MotionBERT."""
+    """Full detection pipeline: YOLO -> Stacked Hourglass -> MotionBERT.
+
+    Runs the complete MotionBERT detection pipeline and converts all outputs
+    from MPII format to the optimizer's 16-joint skeleton format.
+
+    Args:
+        frames_rgb: List of (H, W, 3) uint8 RGB frames.
+        sh_batch_size: Batch size for Stacked Hourglass inference.
+        conf_threshold: MotionBERT confidence threshold.
+
+    Returns:
+        Tuple of:
+            kp_2d: List of (16, 2) pixel coordinates. [2D:SKELETON_16]
+            visibility: List of (16,) confidence scores. [VIS:SKELETON_16]
+            heatmaps: List of (16, 64, 64) heatmaps. [HEATMAP:MPII_16]
+            mpii_kp_2d: List of (16, 3) raw MPII keypoints. [2D:MPII_16]
+            affine: (2, 3) affine mapping crop to pixel coords.
+            positions_3d_norm: (N, 16, 3) MotionBERT normalized. [3D:SKELETON_16]
+    """
     # 1. YOLO person detection
     union_bbox = detect_person_bbox(frames_rgb)
 
@@ -536,11 +659,11 @@ def detect_poses(
     positions_3d_norm = run_motionbert(all_keypoints_2d, conf_threshold=conf_threshold)
 
     # 4. Convert MPII 2D to skeleton 2D
-    kp_2d_list: list[np.ndarray] = []
-    visibility_list: list[np.ndarray] = []
+    kp_2d_list: list[np.ndarray] = []  # list of [2D:SKELETON_16] (16, 2)
+    visibility_list: list[np.ndarray] = []  # list of [VIS:SKELETON_16] (16,)
     for kp_mpii in all_keypoints_2d:
-        kp_17 = mpii_to_skeleton(kp_mpii)
-        kp_16 = strip_head_joint(kp_17)
+        kp_17 = mpii_to_skeleton(kp_mpii)  # [2D:MPII_17]
+        kp_16 = strip_head_joint(kp_17)  # [2D:SKELETON_16]
         kp_2d_list.append(kp_16[:, :2])
         visibility_list.append(kp_16[:, 2])
 

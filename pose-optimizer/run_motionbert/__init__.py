@@ -49,6 +49,7 @@ from skeleton import JOINT_NAMES, EVAL_JOINTS, NUM_JOINTS, PARENTS
 
 
 def _example_name(seq: str, start: int) -> str:
+    """Build a short example name from sequence name and start frame."""
     return f"{seq}_{start}"
 
 
@@ -56,7 +57,18 @@ def _find_camera_calibration(
     cameras: dict[str, dict[str, np.ndarray]],
     camera_name: str,
 ) -> dict[str, np.ndarray]:
-    """Find camera calibration by name with fallbacks."""
+    """Find camera calibration by name with fallbacks.
+
+    Args:
+        cameras: Dict mapping camera name to calibration dict (K, R, t, etc.).
+        camera_name: Desired camera name (e.g. "00_00").
+
+    Returns:
+        Calibration dict for the matched camera.
+
+    Raises:
+        ValueError: If no matching camera is found.
+    """
     if camera_name in cameras:
         return cameras[camera_name]
     cam_name_full = f"00_{camera_name.split('_')[1]}" if "_" in camera_name else camera_name
@@ -70,7 +82,14 @@ def _find_camera_calibration(
 
 
 def _compute_bone_lengths(positions: np.ndarray) -> np.ndarray:
-    """Compute bone lengths from positions (K, 3)."""
+    """Compute bone lengths from joint positions.
+
+    Args:
+        positions: (16, 3) joint positions. [3D:SKELETON_16]
+
+    Returns:
+        (16,) bone lengths in meters (index 0 = root, always 0).
+    """
     bl = np.zeros(NUM_JOINTS)
     for j in range(1, NUM_JOINTS):
         p = int(PARENTS[j])
@@ -87,7 +106,23 @@ def process_example(
     person_idx: int,
     run_dir: str,
 ) -> dict[str, Any]:
-    """Process one CMU Panoptic example end-to-end with MotionBERT pipeline."""
+    """Process one CMU Panoptic example end-to-end with MotionBERT pipeline.
+
+    Flow: load calibration -> extract frames -> YOLO + SH + MotionBERT detection
+    -> convert to camera-space [3D:SKELETON_16] -> FK optimization -> evaluation.
+
+    Args:
+        config: Run configuration with optimization hyperparameters.
+        seq_name: CMU Panoptic sequence name.
+        camera_name: Camera name (e.g. "00_00").
+        start_frame: First frame index in the sequence.
+        num_frames: Number of frames to process.
+        person_idx: Which person to track (0 = first).
+        run_dir: Output directory for results.
+
+    Returns:
+        Dict of evaluation metrics, or empty dict on failure.
+    """
     name = _example_name(seq_name, start_frame)
     print(f"\n{'='*60}")
     print(f"  Processing: {name}")
@@ -131,7 +166,14 @@ def process_example(
 
     # --- 3. Run MotionBERT detection ---
     print(f"\n  [3/7] Running MotionBERT on {len(frames_rgb)} frames...")
-    kp_2d, visibility, heatmaps, mpii_kp_2d, affine, positions_3d_norm = detect_poses(
+    (
+        kp_2d,              # list of [2D:SKELETON_16] (16, 2)
+        visibility,         # list of [VIS:SKELETON_16] (16,)
+        heatmaps,           # list of [HEATMAP:MPII_16] (16, 64, 64)
+        mpii_kp_2d,         # list of [2D:MPII_16] (16, 3)
+        affine,             # (2, 3)
+        positions_3d_norm,  # (N, 16, 3) [3D:SKELETON_16] normalized
+    ) = detect_poses(
         frames_rgb,
         sh_batch_size=config.sh_batch_size,
         conf_threshold=config.motionbert_conf_threshold,
@@ -139,9 +181,9 @@ def process_example(
 
     # --- 4. Convert to camera coordinates ---
     print("\n  [4/7] Converting to camera coordinates...")
-    det_cam_positions: list[np.ndarray] = []
+    det_cam_positions: list[np.ndarray] = []  # list of [3D:SKELETON_16] (16, 3), camera-space meters
     for i in range(len(frames_rgb)):
-        pos_cam = motionbert_to_camera_space(
+        pos_cam = motionbert_to_camera_space(  # [3D:SKELETON_16]
             positions_3d_norm[i], kp_2d[i], fx, fy, cx, cy,
         )
         det_cam_positions.append(pos_cam)
@@ -152,10 +194,10 @@ def process_example(
     # Ground truth -> camera space
     print("    Loading ground truth...")
     gt_world = load_ground_truth_sequence(seq_dir, frame_indices, person_idx)
-    gt_cam: list[np.ndarray | None] = []
+    gt_cam: list[np.ndarray | None] = []  # list of [3D:SKELETON_16] (16, 3), camera-space meters
     for gt in gt_world:
         if gt is not None:
-            gt_cam_pts = camera.world_to_camera(gt) * 0.01  # cm -> meters
+            gt_cam_pts = camera.world_to_camera(gt) * 0.01  # cm -> meters [3D:SKELETON_16]
             gt_cam.append(gt_cam_pts)
         else:
             gt_cam.append(None)
@@ -195,9 +237,9 @@ def process_example(
             metrics[f"opt_{k}"] = v
 
         # Per-joint breakdown
-        det_rr = root_relative(det_arr)[:, EVAL_JOINTS, :]
-        gt_rr = root_relative(gt_arr)[:, EVAL_JOINTS, :]
-        opt_rr = root_relative(opt_arr)[:, EVAL_JOINTS, :]
+        det_rr = root_relative(det_arr)[:, EVAL_JOINTS, :]  # [3D:SKELETON_16_EVAL]
+        gt_rr = root_relative(gt_arr)[:, EVAL_JOINTS, :]  # [3D:SKELETON_16_EVAL]
+        opt_rr = root_relative(opt_arr)[:, EVAL_JOINTS, :]  # [3D:SKELETON_16_EVAL]
         metrics["det_per_joint"] = mpjpe_per_joint(det_rr, gt_rr).tolist()
         metrics["opt_per_joint"] = mpjpe_per_joint(opt_rr, gt_rr).tolist()
 
@@ -352,7 +394,14 @@ def process_example(
 
 
 def run_pipeline(config: RunConfig) -> None:
-    """Run the full MotionBERT pipeline on all examples in config."""
+    """Run the full MotionBERT pipeline on all examples in config.
+
+    Orchestrates [3D:SKELETON_16] data throughout: detection, optimization,
+    evaluation, and result output for each configured example.
+
+    Args:
+        config: RunConfig with examples, optimization params, and output settings.
+    """
     if config.output_dir:
         run_dir = config.output_dir
     else:

@@ -1,5 +1,22 @@
 """Unified 16-joint skeleton definition, joint mappings, and body groups.
 
+Three categories of joints in the optimizer's canonical 16-joint skeleton:
+
+  Category 1 (12 Eval joints): indices 1-6, 10-15.
+      Directly detected by all systems (MotionBERT, MediaPipe, CMU GT).
+
+  Category 2 (2 Synthesized joints): indices 0 (Pelvis), 8 (Neck).
+      Direct in MotionBERT + CMU GT, synthesized as midpoints for MediaPipe.
+
+  Category 3 (Optimization-only): index 7 (Spine, FK-internal),
+      index 9 (Head -- Head Top for MotionBERT, Nose for MediaPipe).
+      Excluded from evaluation.
+
+Skeleton 16-joint order [SKELETON_16]:
+    Pelvis(0), RHip(1), RKnee(2), RAnkle(3), LHip(4), LKnee(5), LAnkle(6),
+    Spine(7), Neck(8), Head(9), LShoulder(10), LElbow(11), LWrist(12),
+    RShoulder(13), RElbow(14), RWrist(15).
+
 Head joint (old index 10) has been removed. All indices >= 10 are shifted down by 1.
 """
 
@@ -26,7 +43,7 @@ JOINT_NAMES: list[str] = [
     "RWrist",       # 15
 ]
 
-# Eval joints: 14 joints (12 direct + Pelvis + Neck).
+# Eval joints: 14 joints (12 direct + Pelvis + Neck).  [SKELETON_16_EVAL] indices.
 # Excluded: Spine(7) = FK-internal, Head(9) = differs per pipeline.
 EVAL_JOINTS: list[int] = [0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13, 14, 15]
 EVAL_JOINT_NAMES: list[str] = [JOINT_NAMES[j] for j in EVAL_JOINTS]
@@ -110,19 +127,24 @@ for _group_name, _joint_indices in BODY_GROUPS.items():
 # ---------------------------------------------------------------------------
 
 def mpii_to_skeleton(keypoints_mpii: np.ndarray) -> np.ndarray:
-    """Convert MPII 16-joint keypoints to 17-joint skeleton format.
+    """Convert MPII 16-joint keypoints to 17-joint intermediate format.
+
+    Maps [2D:MPII_16] (or [HEATMAP-derived] with confidence) to a 17-joint
+    intermediate layout. The extra joint at index 10 is a duplicate Head
+    that must be removed by calling strip_head_joint() afterward.
 
     Pelvis = MPII[6] direct. Spine = MPII[7] direct.
     Head and Neck both map to MPII head (no separate joint).
 
     Args:
-        keypoints_mpii: (16, D) array of MPII keypoints.
+        keypoints_mpii: (16, D) array of MPII keypoints. [2D:MPII_16]
 
     Returns:
-        (17, D) array of skeleton keypoints.
+        (17, D) array in 17-joint intermediate format. [2D:MPII_17]
+            Must call strip_head_joint() to produce [*:SKELETON_16].
     """
     ndim: int = keypoints_mpii.shape[-1]
-    skel: np.ndarray = np.zeros((17, ndim), dtype=keypoints_mpii.dtype)
+    skel: np.ndarray = np.zeros((17, ndim), dtype=keypoints_mpii.dtype)  # [2D:MPII_17]
 
     skel[0] = keypoints_mpii[6]                       # Pelvis (direct)
     skel[7] = keypoints_mpii[7]                        # Spine (direct)
@@ -151,15 +173,17 @@ def mpii_to_skeleton(keypoints_mpii: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 def coco19_to_skeleton(joints19: np.ndarray) -> np.ndarray:
-    """Convert CMU Panoptic COCO19 (19, 3) to skeleton (16, 3).
+    """Convert CMU Panoptic COCO19 ground truth to optimizer's 16-joint skeleton.
+
+    Spine (index 7) is synthesized as the midpoint of Pelvis and Neck (FK-internal).
 
     Args:
-        joints19: (19, 3) xyz positions.
+        joints19: (19, 3) xyz positions in world coordinates. [3D:COCO19]
 
     Returns:
-        (16, 3) skeleton joints.
+        (16, 3) skeleton joints in world coordinates. [3D:SKELETON_16]
     """
-    skel: np.ndarray = np.zeros((NUM_JOINTS, 3), dtype=np.float64)
+    skel: np.ndarray = np.zeros((NUM_JOINTS, 3), dtype=np.float64)  # [3D:SKELETON_16]
 
     skel[0] = joints19[2]                           # Pelvis <- BodyCenter
     skel[1] = joints19[12]                           # RHip
@@ -182,13 +206,16 @@ def coco19_to_skeleton(joints19: np.ndarray) -> np.ndarray:
 
 
 def strip_head_joint(arr: np.ndarray) -> np.ndarray:
-    """Remove Head joint (index 10) from 17-joint array.
+    """Remove duplicate Head joint (index 10) from 17-joint intermediate array.
+
+    Converts the [*:MPII_17] or [3D:MOTIONBERT_17] 17-joint intermediate
+    format to [*:SKELETON_16] by removing the extra head joint at index 10.
 
     Args:
-        arr: (..., 17, D) array.
+        arr: (..., 17, D) array in 17-joint intermediate format.
 
     Returns:
-        (..., 16, D) array with Head joint removed.
+        (..., 16, D) array in optimizer's skeleton format. [*:SKELETON_16]
     """
     return np.delete(arr, 10, axis=-2)
 
@@ -198,16 +225,19 @@ def strip_head_joint(arr: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 def mediapipe_to_skeleton(landmarks: np.ndarray) -> np.ndarray:
-    """Convert MediaPipe 33-landmark array to 16-joint skeleton array.
+    """Convert MediaPipe 33-landmark array to optimizer's 16-joint skeleton.
+
+    Cat2 joints (Pelvis, Neck) are synthesized as midpoints of the
+    corresponding left/right landmarks. Spine is midpoint of Pelvis and Neck.
 
     Args:
-        landmarks: (33, D) where D >= 2.
+        landmarks: (33, D) where D >= 2. [2D:MEDIAPIPE_33] or [3D:MEDIAPIPE_33]
 
     Returns:
-        (16, D) skeleton joints.
+        (16, D) skeleton joints. [2D:SKELETON_16] or [3D:SKELETON_16]
     """
     d: int = landmarks.shape[1]
-    skel: np.ndarray = np.zeros((NUM_JOINTS, d), dtype=landmarks.dtype)
+    skel: np.ndarray = np.zeros((NUM_JOINTS, d), dtype=landmarks.dtype)  # [*:SKELETON_16]
 
     # Direct mappings
     skel[1] = landmarks[24]          # RHip
@@ -235,15 +265,15 @@ def mediapipe_to_skeleton(landmarks: np.ndarray) -> np.ndarray:
 def mediapipe_visibility_to_skeleton(visibility: np.ndarray) -> np.ndarray:
     """Convert MediaPipe 33-landmark visibility to 16-joint skeleton visibility.
 
-    Takes minimum visibility of contributing landmarks for averaged joints.
+    Takes minimum visibility of contributing landmarks for synthesized joints.
 
     Args:
-        visibility: (33,) float array.
+        visibility: (33,) float array. [VIS:MEDIAPIPE_33]
 
     Returns:
-        (16,) float array.
+        (16,) float array. [VIS:SKELETON_16]
     """
-    skel_vis: np.ndarray = np.zeros(NUM_JOINTS, dtype=np.float64)
+    skel_vis: np.ndarray = np.zeros(NUM_JOINTS, dtype=np.float64)  # [VIS:SKELETON_16]
 
     skel_vis[0] = min(visibility[23], visibility[24])   # Pelvis
     skel_vis[1] = visibility[24]                         # RHip

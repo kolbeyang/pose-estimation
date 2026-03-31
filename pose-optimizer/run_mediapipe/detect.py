@@ -30,7 +30,7 @@ _MODEL_URL = (
 
 
 def _ensure_model() -> None:
-    """Download the pose landmarker model if missing."""
+    """Download the MediaPipe pose landmarker model if missing."""
     if os.path.exists(_MODEL_PATH):
         return
     print(f"    Downloading pose model to {_MODEL_PATH}...")
@@ -42,13 +42,19 @@ def detect_poses(
 ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
     """Run MediaPipe PoseLandmarker on a list of RGB frames.
 
+    Internally extracts [2D:MEDIAPIPE_33], [3D:MEDIAPIPE_33], and
+    [VIS:MEDIAPIPE_33] from each frame, then converts to the optimizer's
+    16-joint skeleton format via mediapipe_to_skeleton() and
+    mediapipe_visibility_to_skeleton().
+
     Args:
         frames_rgb: List of (H, W, 3) uint8 RGB frames.
 
     Returns:
-        keypoints_2d: List of (16, 2) pixel coordinates (skeleton 16-joint).
-        keypoints_3d: List of (16, 3) world coordinates in meters (hip-relative).
-        visibility: List of (16,) visibility scores [0, 1].
+        Tuple of:
+            keypoints_2d: List of (16, 2) pixel coordinates. [2D:SKELETON_16]
+            keypoints_3d: List of (16, 3) world coords, hip-relative meters. [3D:SKELETON_16]
+            visibility: List of (16,) visibility scores [0, 1]. [VIS:SKELETON_16]
     """
     _ensure_model()
 
@@ -78,26 +84,26 @@ def detect_poses(
             pose_lm = result.pose_landmarks[0]
             world_lm = result.pose_world_landmarks[0]
 
-            # 2D pixel landmarks (33, 2)
-            mp_2d = np.array(
+            # 2D pixel landmarks
+            mp_2d = np.array(  # [2D:MEDIAPIPE_33] (33, 2)
                 [[lm.x * w, lm.y * h] for lm in pose_lm],
                 dtype=np.float64,
             )
-            # Visibility (33,)
-            mp_vis = np.array(
+            # Visibility
+            mp_vis = np.array(  # [VIS:MEDIAPIPE_33] (33,)
                 [lm.visibility for lm in pose_lm],
                 dtype=np.float64,
             )
-            # 3D world landmarks (33, 3)
-            mp_3d = np.array(
+            # 3D world landmarks
+            mp_3d = np.array(  # [3D:MEDIAPIPE_33] (33, 3)
                 [[lm.x, lm.y, lm.z] for lm in world_lm],
                 dtype=np.float64,
             )
 
             # Convert to optimizer 16-joint skeleton
-            all_kp_2d.append(mediapipe_to_skeleton(mp_2d))
-            all_kp_3d.append(mediapipe_to_skeleton(mp_3d))
-            all_vis.append(mediapipe_visibility_to_skeleton(mp_vis))
+            all_kp_2d.append(mediapipe_to_skeleton(mp_2d))  # [2D:SKELETON_16]
+            all_kp_3d.append(mediapipe_to_skeleton(mp_3d))  # [3D:SKELETON_16]
+            all_vis.append(mediapipe_visibility_to_skeleton(mp_vis))  # [VIS:SKELETON_16]
 
     return all_kp_2d, all_kp_3d, all_vis
 
@@ -110,12 +116,12 @@ def mediapipe_3d_to_camera(
     """Convert MediaPipe hip-relative 3D to camera-space 3D using solvePnP.
 
     Args:
-        mp_3d: (16, 3) MediaPipe world coords (hip-relative, meters).
-        mp_2d: (16, 2) pixel coordinates.
+        mp_3d: (16, 3) hip-relative world coords (meters). [3D:SKELETON_16]
+        mp_2d: (16, 2) pixel coordinates. [2D:SKELETON_16]
         fx, fy, cx, cy: Camera intrinsics.
 
     Returns:
-        (16, 3) positions in camera coordinates (meters).
+        (16, 3) positions in camera coordinates (meters). [3D:SKELETON_16]
     """
     K = np.array([
         [fx, 0, cx],
@@ -148,7 +154,19 @@ def _depth_heuristic_fallback(
     mp_2d: np.ndarray,
     fx: float, fy: float, cx: float, cy: float,
 ) -> np.ndarray:
-    """Fallback depth estimation when solvePnP fails."""
+    """Fallback depth estimation when solvePnP fails.
+
+    Estimates root depth from apparent body height in pixels, then positions
+    all joints relative to the estimated root position.
+
+    Args:
+        mp_3d: (16, 3) hip-relative world coords (meters). [3D:SKELETON_16]
+        mp_2d: (16, 2) pixel coordinates. [2D:SKELETON_16]
+        fx, fy, cx, cy: Camera intrinsics.
+
+    Returns:
+        (16, 3) positions in camera coordinates (meters). [3D:SKELETON_16]
+    """
     thorax_2d = mp_2d[8]
     ankle_mid_2d = (mp_2d[3] + mp_2d[6]) / 2.0
     pixel_height = abs(thorax_2d[1] - ankle_mid_2d[1])
