@@ -135,14 +135,11 @@ def detect_person_bbox(
 
     Args:
         frames_rgb: List of (H, W, 3) uint8 RGB frames.
-        yolo: Pre-loaded YOLO model. If None, loads a new one (slower).
+        yolo: Pre-loaded YOLO model.
 
     Returns:
         (4,) float32 array [x1, y1, x2, y2] in pixel coordinates.
     """
-    if yolo is None:
-        from ultralytics import YOLO
-        yolo = YOLO("yolov8n.pt")
 
     h, w = frames_rgb[0].shape[:2]
     bboxes: list[np.ndarray] = []
@@ -275,8 +272,8 @@ def _parse_heatmaps(heatmaps: np.ndarray) -> np.ndarray:
 def run_hourglass(
     frames_rgb: list[np.ndarray],
     bbox: np.ndarray,
-    model: torch.nn.Module | None = None,
-    device: torch.device | None = None,
+    model: torch.nn.Module,
+    device: torch.device,
     batch_size: int = 32,
 ) -> tuple[list[np.ndarray], list[np.ndarray], np.ndarray]:
     """Run Stacked Hourglass (HG8) on cropped frames with flip augmentation.
@@ -284,8 +281,8 @@ def run_hourglass(
     Args:
         frames_rgb: List of (H, W, 3) uint8 RGB frames.
         bbox: (4,) float32 union bounding box [x1, y1, x2, y2].
-        model: Pre-loaded Stacked Hourglass model. If None, loads a new one.
-        device: Torch device for inference. If None, auto-detects.
+        model: Pre-loaded Stacked Hourglass model.
+        device: Torch device for inference.
         batch_size: Inference batch size.
 
     Returns:
@@ -295,22 +292,6 @@ def run_hourglass(
             all_heatmaps: List of (16, 64, 64) per-frame. [HEATMAP:MPII_16]
             affine: (2, 3) shared affine mapping crop coords to pixel coords.
     """
-    if model is None or device is None:
-        from stacked_hourglass import hg8
-        device = device or _get_device()
-        try:
-            model = hg8(pretrained=True)
-        except RuntimeError:
-            model = hg8(pretrained=False)
-            cached_path = os.path.join(torch.hub.get_dir(), "checkpoints", "bearpaw_hg8-90e5d470.pth")
-            if os.path.exists(cached_path):
-                state_dict = torch.load(cached_path, map_location="cpu", weights_only=False)
-                model.load_state_dict(state_dict)
-            else:
-                raise RuntimeError("Stacked Hourglass weights not found.")
-        model = model.to(device)
-        model.eval()
-        print(f"  Loaded Stacked Hourglass (8-stack, pretrained) on {device}")
 
     # Preprocess all frames
     preprocessed: list[np.ndarray] = []
@@ -498,8 +479,8 @@ def flip_data(data):
 
 def run_motionbert(
     keypoints_2d_list: list[np.ndarray],
-    model: torch.nn.Module | None = None,
-    device: torch.device | None = None,
+    model: torch.nn.Module,
+    device: torch.device,
     conf_threshold: float = 0.0,
 ) -> np.ndarray:
     """Lift 2D keypoints to 3D using MotionBERT.
@@ -510,17 +491,13 @@ def run_motionbert(
 
     Args:
         keypoints_2d_list: List of (16, 3) MPII keypoints per frame. [2D:MPII_16]
-        model: Pre-loaded MotionBERT model. If None, loads a new one.
-        device: Torch device for inference. If None, auto-detects.
+        model: Pre-loaded MotionBERT model.
+        device: Torch device for inference.
         conf_threshold: Zero out joints below this confidence.
 
     Returns:
         (N, 16, 3) normalized MotionBERT output. [3D:SKELETON_16]
     """
-    if model is None or device is None:
-        device = device or _get_device()
-        model = load_motionbert_model()
-        model = model.to(device)
     print(f"  MotionBERT on {device}")
 
     n_frames = len(keypoints_2d_list)
@@ -747,7 +724,7 @@ def motionbert_to_camera_space(
 
 def detect_poses(
     frames_rgb: list[np.ndarray],
-    models: MotionBertModels | None = None,
+    models: MotionBertModels,
     sh_batch_size: int = 32,
     conf_threshold: float = 0.0,
 ) -> tuple[
@@ -765,8 +742,7 @@ def detect_poses(
 
     Args:
         frames_rgb: List of (H, W, 3) uint8 RGB frames.
-        models: Pre-loaded MotionBertModels container. If None, loads models
-            on each call (slower, but backward-compatible).
+        models: Pre-loaded MotionBertModels container from load_all_models().
         sh_batch_size: Batch size for Stacked Hourglass inference.
         conf_threshold: MotionBERT confidence threshold.
 
@@ -780,23 +756,21 @@ def detect_poses(
             positions_3d_norm: (N, 16, 3) MotionBERT normalized. [3D:SKELETON_16]
     """
     # 1. YOLO person detection
-    union_bbox = detect_person_bbox(
-        frames_rgb, yolo=models.yolo if models else None,
-    )
+    union_bbox = detect_person_bbox(frames_rgb, yolo=models.yolo)
 
     # 2. Stacked Hourglass
     all_keypoints_2d, all_heatmaps, affine = run_hourglass(
         frames_rgb, union_bbox,
-        model=models.hourglass if models else None,
-        device=models.device if models else None,
+        model=models.hourglass,
+        device=models.device,
         batch_size=sh_batch_size,
     )
 
     # 3. MotionBERT
     positions_3d_norm = run_motionbert(
         all_keypoints_2d,
-        model=models.motionbert if models else None,
-        device=models.device if models else None,
+        model=models.motionbert,
+        device=models.device,
         conf_threshold=conf_threshold,
     )
 

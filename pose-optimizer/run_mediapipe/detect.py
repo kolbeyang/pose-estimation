@@ -57,7 +57,7 @@ def load_landmarker() -> vision.PoseLandmarker:
 
 def detect_poses(
     frames_rgb: list[np.ndarray],
-    landmarker: vision.PoseLandmarker | None = None,
+    landmarker: vision.PoseLandmarker,
 ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
     """Run MediaPipe PoseLandmarker on a list of RGB frames.
 
@@ -68,8 +68,7 @@ def detect_poses(
 
     Args:
         frames_rgb: List of (H, W, 3) uint8 RGB frames.
-        landmarker: Pre-loaded PoseLandmarker. If None, creates and closes
-            one internally (backward-compatible but slower).
+        landmarker: Pre-loaded PoseLandmarker from load_landmarker().
 
     Returns:
         Tuple of:
@@ -77,53 +76,45 @@ def detect_poses(
             keypoints_3d: List of (16, 3) world coords, hip-relative meters. [3D:SKELETON_16]
             visibility: List of (16,) visibility scores [0, 1]. [VIS:SKELETON_16]
     """
-    should_close = False
-    if landmarker is None:
-        landmarker = load_landmarker()
-        should_close = True
 
     all_kp_2d: list[np.ndarray] = []
     all_kp_3d: list[np.ndarray] = []
     all_vis: list[np.ndarray] = []
 
-    try:
-        for frame in frames_rgb:
-            h, w = frame.shape[:2]
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
-            result = landmarker.detect(mp_image)
+    for frame in frames_rgb:
+        h, w = frame.shape[:2]
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
+        result = landmarker.detect(mp_image)
 
-            if not result.pose_landmarks or len(result.pose_landmarks) == 0:
-                all_kp_2d.append(np.zeros((NUM_JOINTS, 2), dtype=np.float64))
-                all_kp_3d.append(np.zeros((NUM_JOINTS, 3), dtype=np.float64))
-                all_vis.append(np.zeros(NUM_JOINTS, dtype=np.float64))
-                continue
+        if not result.pose_landmarks or len(result.pose_landmarks) == 0:
+            all_kp_2d.append(np.zeros((NUM_JOINTS, 2), dtype=np.float64))
+            all_kp_3d.append(np.zeros((NUM_JOINTS, 3), dtype=np.float64))
+            all_vis.append(np.zeros(NUM_JOINTS, dtype=np.float64))
+            continue
 
-            pose_lm = result.pose_landmarks[0]
-            world_lm = result.pose_world_landmarks[0]
+        pose_lm = result.pose_landmarks[0]
+        world_lm = result.pose_world_landmarks[0]
 
-            # 2D pixel landmarks
-            mp_2d = np.array(  # [2D:MEDIAPIPE_33] (33, 2)
-                [[lm.x * w, lm.y * h] for lm in pose_lm],
-                dtype=np.float64,
-            )
-            # Visibility
-            mp_vis = np.array(  # [VIS:MEDIAPIPE_33] (33,)
-                [lm.visibility for lm in pose_lm],
-                dtype=np.float64,
-            )
-            # 3D world landmarks
-            mp_3d = np.array(  # [3D:MEDIAPIPE_33] (33, 3)
-                [[lm.x, lm.y, lm.z] for lm in world_lm],
-                dtype=np.float64,
-            )
+        # 2D pixel landmarks
+        mp_2d = np.array(  # [2D:MEDIAPIPE_33] (33, 2)
+            [[lm.x * w, lm.y * h] for lm in pose_lm],
+            dtype=np.float64,
+        )
+        # Visibility
+        mp_vis = np.array(  # [VIS:MEDIAPIPE_33] (33,)
+            [lm.visibility for lm in pose_lm],
+            dtype=np.float64,
+        )
+        # 3D world landmarks
+        mp_3d = np.array(  # [3D:MEDIAPIPE_33] (33, 3)
+            [[lm.x, lm.y, lm.z] for lm in world_lm],
+            dtype=np.float64,
+        )
 
-            # Convert to optimizer 16-joint skeleton
-            all_kp_2d.append(mediapipe_to_skeleton(mp_2d))  # [2D:SKELETON_16]
-            all_kp_3d.append(mediapipe_to_skeleton(mp_3d))  # [3D:SKELETON_16]
-            all_vis.append(mediapipe_visibility_to_skeleton(mp_vis))  # [VIS:SKELETON_16]
-    finally:
-        if should_close:
-            landmarker.close()
+        # Convert to optimizer 16-joint skeleton
+        all_kp_2d.append(mediapipe_to_skeleton(mp_2d))  # [2D:SKELETON_16]
+        all_kp_3d.append(mediapipe_to_skeleton(mp_3d))  # [3D:SKELETON_16]
+        all_vis.append(mediapipe_visibility_to_skeleton(mp_vis))  # [VIS:SKELETON_16]
 
     return all_kp_2d, all_kp_3d, all_vis
 

@@ -106,7 +106,7 @@ def process_example(
     num_frames: int,
     person_idx: int,
     run_dir: str,
-    landmarker=None,
+    landmarker,
 ) -> dict[str, Any]:
     """Process one CMU Panoptic example end-to-end with MediaPipe pipeline.
 
@@ -122,7 +122,7 @@ def process_example(
         num_frames: Number of frames to process.
         person_idx: Which person to track (0 = first).
         run_dir: Output directory for results.
-        landmarker: Pre-loaded MediaPipe PoseLandmarker. If None, loads per call.
+        landmarker: Pre-loaded MediaPipe PoseLandmarker from load_landmarker().
 
     Returns:
         Dict of evaluation metrics, or empty dict on failure.

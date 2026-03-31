@@ -110,7 +110,7 @@ def process_example(
     num_frames: int,
     person_idx: int,
     run_dir: str,
-    models: MotionBertModels | None = None,
+    models: MotionBertModels,
 ) -> dict[str, Any]:
     """Process one CMU Panoptic example end-to-end with MotionBERT pipeline.
 
@@ -125,7 +125,7 @@ def process_example(
         num_frames: Number of frames to process.
         person_idx: Which person to track (0 = first).
         run_dir: Output directory for results.
-        models: Pre-loaded MotionBertModels. If None, models are loaded per call.
+        models: Pre-loaded MotionBertModels from load_all_models().
 
     Returns:
         Dict of evaluation metrics, or empty dict on failure.
