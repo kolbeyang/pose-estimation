@@ -584,56 +584,6 @@ def _iqr_filtered_median(values: np.ndarray, k: float = 1.5) -> float:
 _RELIABLE_BONES_FOR_SCALE: set[int] = {10, 11, 12, 13, 14, 15}
 
 
-def _depth_heuristic_fallback(
-    root_relative_m: np.ndarray,
-    kp_2d: np.ndarray,
-    fx: float, fy: float, cx: float, cy: float,
-) -> np.ndarray:
-    """Fallback depth estimation when solvePnP fails or has insufficient points.
-
-    Estimates root depth from pairwise Y-axis correspondences between 3D and 2D
-    joints, then back-projects root XY from the 2D hip position.
-
-    Args:
-        root_relative_m: (16, 3) root-relative positions in meters. [3D:SKELETON_16]
-        kp_2d: (16, 2) 2D pixel coordinates. [2D:SKELETON_16]
-        fx, fy, cx, cy: Camera intrinsics.
-
-    Returns:
-        (16, 3) positions in camera coordinates (meters). [3D:SKELETON_16]
-    """
-    tz_candidates: list[float] = []
-    for i in range(NUM_JOINTS):
-        for j in range(NUM_JOINTS):
-            if i == j:
-                continue
-            if np.linalg.norm(kp_2d[i]) <= 1.0 or np.linalg.norm(kp_2d[j]) <= 1.0:
-                continue
-            dy_3d = abs(float(root_relative_m[i, 1]) - float(root_relative_m[j, 1]))
-            if dy_3d < 0.001:
-                continue
-            dv_2d = abs(float(kp_2d[i, 1]) - float(kp_2d[j, 1]))
-            if dv_2d > 5.0:
-                tz_candidates.append(fy * dy_3d / dv_2d)
-
-    if len(tz_candidates) >= 2:
-        tz = _iqr_filtered_median(np.array(tz_candidates))
-        tz = float(np.clip(tz, 1.0, 8.0))
-    else:
-        tz = 3.0
-
-    u_root = float(kp_2d[0, 0])
-    v_root = float(kp_2d[0, 1])
-    tx = (u_root - cx) * tz / fx
-    ty = (v_root - cy) * tz / fy
-
-    cam_3d = root_relative_m.copy()
-    cam_3d[:, 0] += tx
-    cam_3d[:, 1] += ty
-    cam_3d[:, 2] += tz
-    return cam_3d.astype(np.float64)
-
-
 def motionbert_to_camera_space(
     positions_3d_norm: np.ndarray,
     kp_2d: np.ndarray,
@@ -641,9 +591,14 @@ def motionbert_to_camera_space(
 ) -> np.ndarray:
     """Convert MotionBERT normalized output to camera-space meters.
 
-    Estimates bone scale by comparing detected bone lengths against defaults,
-    then uses cv2.solvePnP to find the rigid transform placing the skeleton
-    in camera space. Falls back to a depth heuristic if solvePnP fails.
+    Two-step process:
+    1. Bone-length scale estimation: MotionBERT outputs arbitrary normalized
+       units. Compares detected bone lengths to DEFAULT_BONE_LENGTHS to recover
+       a scale factor that converts to meters.
+    2. Depth estimation: For each joint pair, uses the pinhole camera equation
+       tz = fy * dy_3d / dv_2d to estimate root depth from Y-axis correspondences.
+       Takes the IQR-filtered median of all such estimates, then back-projects
+       root XY from the 2D hip pixel position.
 
     Args:
         positions_3d_norm: (16, 3) MotionBERT-normalized positions. [3D:SKELETON_16]
@@ -679,42 +634,39 @@ def motionbert_to_camera_space(
 
     root_relative_m = root_relative * bone_scale
 
-    # Step 2: solvePnPRansac to find the rigid transform (R, t) from scaled
-    # 3D object points to camera space. RANSAC is used instead of plain
-    # solvePnP because MotionBERT's 3D predictions can have outlier joints
-    # that pull the non-robust solver off (producing wildly wrong depth).
-    #
-    # Note: Unlike MediaPipe (whose 3D output has a well-defined world
-    # coordinate system), MotionBERT produces roughly camera-aligned
-    # coordinates with per-frame noise. The solvePnP rotation corrects
-    # for this misalignment, but the full R+t transform is applied as-is
-    # to match the MediaPipe pattern.
-    K = np.array([
-        [fx, 0, cx],
-        [0, fy, cy],
-        [0, 0, 1],
-    ], dtype=np.float64)
-    dist_coeffs = np.zeros(4, dtype=np.float64)
+    # Step 2: Estimate root depth from pairwise Y-axis correspondences.
+    # For each joint pair (i, j), tz = fy * |dy_3d| / |dv_2d| by the
+    # pinhole camera model. Take IQR-filtered median of all estimates.
+    tz_candidates: list[float] = []
+    for i in range(NUM_JOINTS):
+        for j in range(NUM_JOINTS):
+            if i == j:
+                continue
+            if np.linalg.norm(kp_2d[i]) <= 1.0 or np.linalg.norm(kp_2d[j]) <= 1.0:
+                continue
+            dy_3d = abs(float(root_relative_m[i, 1]) - float(root_relative_m[j, 1]))
+            if dy_3d < 0.001:
+                continue
+            dv_2d = abs(float(kp_2d[i, 1]) - float(kp_2d[j, 1]))
+            if dv_2d > 5.0:
+                tz_candidates.append(fy * dy_3d / dv_2d)
 
-    valid = np.linalg.norm(kp_2d, axis=1) > 1.0
-    if valid.sum() < 4:
-        return _depth_heuristic_fallback(root_relative_m, kp_2d, fx, fy, cx, cy)
+    if len(tz_candidates) >= 2:
+        tz = _iqr_filtered_median(np.array(tz_candidates))
+        tz = float(np.clip(tz, 1.0, 8.0))
+    else:
+        tz = 3.0
 
-    obj_pts = root_relative_m[valid].astype(np.float64)
-    img_pts = kp_2d[valid].astype(np.float64)
+    # Back-project root XY from 2D hip pixel position
+    u_root = float(kp_2d[0, 0])
+    v_root = float(kp_2d[0, 1])
+    tx = (u_root - cx) * tz / fx
+    ty = (v_root - cy) * tz / fy
 
-    success, rvec, tvec, _inliers = cv2.solvePnPRansac(
-        obj_pts, img_pts, K, dist_coeffs, reprojectionError=8.0,
-    )
-
-    if not success:
-        return _depth_heuristic_fallback(root_relative_m, kp_2d, fx, fy, cx, cy)
-
-    # Safety: clip depth to reasonable range [1.0, 8.0] meters
-    tvec[2, 0] = float(np.clip(tvec[2, 0], 1.0, 8.0))
-
-    R, _ = cv2.Rodrigues(rvec)
-    cam_3d = (R @ root_relative_m.T).T + tvec.T
+    cam_3d = root_relative_m.copy()
+    cam_3d[:, 0] += tx
+    cam_3d[:, 1] += ty
+    cam_3d[:, 2] += tz
     return cam_3d.astype(np.float64)
 
 
