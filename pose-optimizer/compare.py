@@ -415,7 +415,6 @@ def _build_summary(common, mp_results, mb_results, mp_dir, mb_dir):
     mb_vel_mean_cm = float(np.mean(mb_vel)) * 100
 
     pos_winner = "MediaPipe" if mp_wins >= mb_wins else "MotionBert"
-    pos_loser_wins = mb_wins if pos_winner == "MediaPipe" else mp_wins
     pos_winner_wins = mp_wins if pos_winner == "MediaPipe" else mb_wins
     vel_winner = "MediaPipe" if mp_vel_wins >= mb_vel_wins else "MotionBert"
     vel_winner_wins = mp_vel_wins if vel_winner == "MediaPipe" else mb_vel_wins
