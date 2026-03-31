@@ -26,13 +26,16 @@ from skeleton import EVAL_JOINTS
 # ---------------------------------------------------------------------------
 
 def root_relative(positions: np.ndarray) -> np.ndarray:
-    """Make positions root-relative (subtract hip position per frame).
+    """Make positions root-relative (subtract Pelvis position per frame).
+
+    Works with any joint layout; typically used with [3D:SKELETON_16] or
+    [3D:SKELETON_16_EVAL] data.
 
     Args:
-        positions: (J, 3) or (F, J, 3).
+        positions: (J, 3) or (F, J, 3) joint positions.
 
     Returns:
-        Same shape, hip-centered.
+        Same shape, Pelvis-centered (joint 0 becomes origin).
     """
     if positions.ndim == 2:
         return positions - positions[0:1]
@@ -157,11 +160,11 @@ def compute_visibility_weights(
     Binary 0/1 weights.
 
     Args:
-        gt_3d_cam: (F, K, 3) ground truth in camera coordinates.
+        gt_3d_cam: (F, 16, 3) ground truth in camera coordinates. [3D:SKELETON_16]
         camera: Camera for projection and frame bounds.
 
     Returns:
-        (F, K) binary visibility weights.
+        (F, 16) binary visibility weights. [VIS:SKELETON_16]
     """
     proj_2d = camera.camera_to_image(gt_3d_cam)  # (F, K, 2)
     return camera.is_in_frame(proj_2d).astype(np.float64)  # (F, K)
@@ -392,25 +395,27 @@ def evaluate(
     """Compute all 9 evaluation metrics.
 
     Both predicted and ground_truth should be in camera space.
+    Internally slices to eval joints [3D:SKELETON_16_EVAL] (14 joints)
+    before computing metrics.
 
     Args:
-        predicted: (N, K, 3) predicted positions.
-        ground_truth: (N, K, 3) ground truth positions.
+        predicted: (N, 16, 3) predicted positions in camera space. [3D:SKELETON_16]
+        ground_truth: (N, 16, 3) ground truth in camera space. [3D:SKELETON_16]
         camera: Camera for VW computation.
         eval_joints: Joint indices to evaluate. Defaults to EVAL_JOINTS.
 
     Returns:
-        Dict with all 9 metrics.
+        Dict with all 9 metrics (MPJPE, P-MPJPE, SI-MPJPE, VW-*, velocity).
     """
     if eval_joints is None:
         eval_joints = EVAL_JOINTS
 
     # Root-relative, then slice to eval joints
-    pred_rr = root_relative(predicted)[:, eval_joints, :]
-    gt_rr = root_relative(ground_truth)[:, eval_joints, :]
+    pred_rr = root_relative(predicted)[:, eval_joints, :]  # [3D:SKELETON_16_EVAL]
+    gt_rr = root_relative(ground_truth)[:, eval_joints, :]  # [3D:SKELETON_16_EVAL]
 
     # Visibility weights (on all joints, then slice)
-    vis = compute_visibility_weights(ground_truth, camera)[:, eval_joints]
+    vis = compute_visibility_weights(ground_truth, camera)[:, eval_joints]  # (F, 14)
 
     results: dict[str, float] = {}
 

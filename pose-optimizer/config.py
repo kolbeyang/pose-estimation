@@ -30,7 +30,8 @@ class OptimizationConfig(BaseModel):
     heatmap_sigma: float = 50.0
     confidence_epsilon: float = 1e-4
 
-    # Per-joint rotation penalty multipliers (relative to rotation_penalty_scalar)
+    # Per-joint rotation penalty multipliers (relative to rotation_penalty_scalar).
+    # Indexed by [SKELETON_16] joint order: Pelvis(0) through RWrist(15).
     rotation_penalty_multipliers: list[float] = Field(default_factory=lambda: [
         3.0,   # 0: Pelvis (root rotation)
         1.0,   # 1: RHip
@@ -102,7 +103,7 @@ def save_config(config: RunConfig, path: str) -> None:
 
 
 def default_single_config() -> RunConfig:
-    """Create a default single-example config."""
+    """Create a default RunConfig with a single example (pose1_sample)."""
     return RunConfig(
         examples=[ExampleConfig()],
         target_fps=10.0,
@@ -110,7 +111,7 @@ def default_single_config() -> RunConfig:
 
 
 def default_full_config() -> RunConfig:
-    """Create a default full-evaluation config with 25 examples."""
+    """Create a default full-evaluation RunConfig with all 25 benchmark examples."""
     from cmu_data import EXAMPLES
     examples = [
         ExampleConfig(

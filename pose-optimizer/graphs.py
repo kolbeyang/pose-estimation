@@ -26,7 +26,12 @@ COORD_NAMES: dict[int, str] = {0: "X", 1: "Y", 2: "Z"}
 
 
 def _save(fig: plt.Figure, path: str) -> None:
-    """Save figure and close."""
+    """Save figure to disk and close the matplotlib figure.
+
+    Args:
+        fig: Matplotlib figure to save.
+        path: Output file path.
+    """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     fig.savefig(path, dpi=120, bbox_inches="tight")
     plt.close(fig)
@@ -45,9 +50,9 @@ def generate_trajectory_graphs(
     """One graph per joint per coordinate: Detector vs Optimized vs GT.
 
     Args:
-        detector_3d: List of (16, 3) detector predictions.
-        optimized_3d: List of (16, 3) optimized predictions.
-        gt_3d: List of (16, 3) or None ground truth.
+        detector_3d: List of (16, 3) detector predictions. [3D:SKELETON_16]
+        optimized_3d: List of (16, 3) optimized predictions. [3D:SKELETON_16]
+        gt_3d: List of (16, 3) or None ground truth. [3D:SKELETON_16]
         output_dir: Directory to save the graphs.
     """
     traj_dir = os.path.join(output_dir, "trajectories")
@@ -82,7 +87,12 @@ def generate_trajectory_graphs(
 # ---------------------------------------------------------------------------
 
 def generate_loss_curve(loss_history: list[float], output_dir: str) -> None:
-    """Line plot of optimization loss over steps."""
+    """Line plot of optimization loss over steps.
+
+    Args:
+        loss_history: List of loss values per optimization step.
+        output_dir: Directory to save the graph.
+    """
     os.makedirs(output_dir, exist_ok=True)
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot(loss_history, "b-", linewidth=1)
@@ -102,7 +112,13 @@ def generate_per_joint_error_bar(
     output_dir: str,
     opt_per_joint: list[float] | None = None,
 ) -> None:
-    """Bar chart of per-joint MPJPE (12 eval joints)."""
+    """Bar chart of per-joint MPJPE for [SKELETON_16_EVAL] joints (14 eval joints).
+
+    Args:
+        det_per_joint: List of per-joint errors for eval joints. [3D:SKELETON_16_EVAL]
+        output_dir: Directory to save the graph.
+        opt_per_joint: Optional optimized per-joint errors. [3D:SKELETON_16_EVAL]
+    """
     os.makedirs(output_dir, exist_ok=True)
     x = np.arange(NUM_EVAL_JOINTS)
 
@@ -135,7 +151,13 @@ def generate_per_frame_mpjpe(
     output_dir: str,
     opt_per_frame: list[float] | None = None,
 ) -> None:
-    """Line plot of per-frame MPJPE over time."""
+    """Line plot of per-frame MPJPE over time.
+
+    Args:
+        det_per_frame: Per-frame MPJPE values for detector.
+        output_dir: Directory to save the graph.
+        opt_per_frame: Optional per-frame MPJPE values for optimized.
+    """
     os.makedirs(output_dir, exist_ok=True)
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot([v * 100 for v in det_per_frame], "b-", alpha=0.8, label="Detector")
@@ -158,7 +180,13 @@ def generate_per_frame_mpjve(
     opt_per_frame: list[float] | None,
     output_dir: str,
 ) -> None:
-    """Line plot of per-frame MPJVE over time."""
+    """Line plot of per-frame MPJVE (velocity error) over time.
+
+    Args:
+        det_per_frame: Per-frame MPJVE values for detector.
+        opt_per_frame: Optional per-frame MPJVE values for optimized.
+        output_dir: Directory to save the graph.
+    """
     os.makedirs(output_dir, exist_ok=True)
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot([v * 100 for v in det_per_frame], "b-", alpha=0.8, label="Detector")
@@ -182,7 +210,14 @@ def generate_bone_lengths_graph(
     gt_bone_lengths: np.ndarray | None = None,
     det_bone_lengths: np.ndarray | None = None,
 ) -> None:
-    """Bar chart of bone lengths: GT / Detector / Optimized."""
+    """Bar chart of bone lengths: GT / Detector / Optimized.
+
+    Args:
+        bone_lengths: (16,) optimized bone lengths for [3D:SKELETON_16].
+        output_dir: Directory to save the graph.
+        gt_bone_lengths: Optional (16,) GT bone lengths.
+        det_bone_lengths: Optional (16,) detector bone lengths.
+    """
     os.makedirs(output_dir, exist_ok=True)
     bone_lengths = np.asarray(bone_lengths)
 
@@ -227,6 +262,16 @@ def generate_summary(
     """Combined multi-panel summary image.
 
     Panels: loss curve, per-joint error, per-frame MPJPE, bone lengths.
+
+    Args:
+        detector_3d: List of (16, 3) detector predictions. [3D:SKELETON_16]
+        optimized_3d: List of (16, 3) optimized predictions. [3D:SKELETON_16]
+        gt_3d: List of (16, 3) or None ground truth. [3D:SKELETON_16]
+        loss_history: List of loss values per step.
+        metrics: Dict with per-joint and per-frame metrics.
+        bone_lengths: (16,) optimized bone lengths.
+        output_dir: Directory to save the summary.
+        title: Optional title for the figure.
     """
     os.makedirs(output_dir, exist_ok=True)
     fig, axes = plt.subplots(2, 2, figsize=(20, 12))
@@ -308,7 +353,12 @@ def generate_aggregate_summary(
     all_metrics: list[dict[str, Any]],
     output_dir: str,
 ) -> None:
-    """Generate cross-example aggregate summary."""
+    """Generate cross-example aggregate summary bar chart.
+
+    Args:
+        all_metrics: List of per-example metrics dicts.
+        output_dir: Directory to save the aggregate summary.
+    """
     os.makedirs(output_dir, exist_ok=True)
 
     names = [m.get("name", f"ex_{i}") for i, m in enumerate(all_metrics)]

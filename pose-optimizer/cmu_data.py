@@ -63,7 +63,15 @@ EXAMPLES: list[tuple[str, str, int, int, int]] = [
 
 
 def get_sequence_dir(data_root: str, sequence_name: str) -> str:
-    """Get sequence directory path."""
+    """Get full sequence directory path.
+
+    Args:
+        data_root: Base data directory.
+        sequence_name: Sequence name (e.g. "171204_pose1_sample").
+
+    Returns:
+        Full path to the sequence directory.
+    """
     return os.path.join(data_root, sequence_name)
 
 
@@ -72,7 +80,16 @@ def get_video_path(
     sequence_name: str,
     camera_name: str,
 ) -> str:
-    """Get HD video file path."""
+    """Get HD video file path.
+
+    Args:
+        data_root: Base data directory.
+        sequence_name: Sequence name.
+        camera_name: Camera name (e.g. "00_00").
+
+    Returns:
+        Full path to the HD video MP4 file.
+    """
     return os.path.join(
         data_root, sequence_name, "hdVideos", f"hd_{camera_name}.mp4"
     )
@@ -134,7 +151,7 @@ def load_ground_truth_frame(
         person_idx: Which person to extract (0 = first).
 
     Returns:
-        (19, 3) array in world coordinates (centimeters), or None if not found.
+        (19, 3) array in world coordinates (centimeters), or None. [3D:COCO19]
     """
     gt_dir: str = os.path.join(sequence_dir, "hdPose3d_stage1_coco19")
     json_path: str = os.path.join(gt_dir, f"body3DScene_{frame_idx:08d}.json")
@@ -180,17 +197,22 @@ def load_ground_truth_sequence(
 ) -> list[np.ndarray | None]:
     """Load ground truth for a sequence of frames.
 
-    Converts from COCO19 to 16-joint skeleton format.
+    Converts from [3D:COCO19] to [3D:SKELETON_16] via coco19_to_skeleton().
+
+    Args:
+        sequence_dir: Path to the sequence directory.
+        frame_indices: List of frame indices to load.
+        person_idx: Which person to extract (0 = first).
 
     Returns:
         List of (16, 3) skeleton arrays in world coordinates (centimeters),
-        or None for missing frames.
+        or None for missing frames. [3D:SKELETON_16]
     """
     results: list[np.ndarray | None] = []
     for fidx in frame_indices:
-        coco19 = load_ground_truth_frame(sequence_dir, fidx, person_idx)
+        coco19 = load_ground_truth_frame(sequence_dir, fidx, person_idx)  # [3D:COCO19] or None
         if coco19 is not None:
-            skel = coco19_to_skeleton(coco19)
+            skel = coco19_to_skeleton(coco19)  # [3D:SKELETON_16]
             results.append(skel)
         else:
             results.append(None)
@@ -236,7 +258,14 @@ def extract_video_frames(
 
 
 def get_video_fps(video_path: str) -> float:
-    """Get the FPS of a video file."""
+    """Get the FPS of a video file.
+
+    Args:
+        video_path: Path to the video file.
+
+    Returns:
+        Frames per second.
+    """
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     cap.release()
@@ -244,7 +273,14 @@ def get_video_fps(video_path: str) -> float:
 
 
 def get_video_frame_count(video_path: str) -> int:
-    """Get the total frame count of a video file."""
+    """Get the total frame count of a video file.
+
+    Args:
+        video_path: Path to the video file.
+
+    Returns:
+        Total number of frames.
+    """
     cap = cv2.VideoCapture(video_path)
     count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()

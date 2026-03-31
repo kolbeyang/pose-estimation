@@ -22,7 +22,9 @@ def _resize_heatmap_to_frame(
     frame_h: int,
     frame_w: int,
 ) -> np.ndarray:
-    """Resize a heatmap to the full video frame using the affine transform.
+    """Resize a single-channel heatmap to the full video frame using the affine.
+
+    Handles both SH (256->64 crop) and synthetic (hm_size = crop_size) affines.
 
     Args:
         heatmap_64: (H_hm, W_hm) single-channel heatmap.
@@ -124,7 +126,16 @@ def _blend_heatmap_additive(
     heatmap: np.ndarray,
     intensity: float = 200.0,
 ) -> np.ndarray:
-    """Additively blend heatmap onto frame using HOT colormap."""
+    """Additively blend heatmap onto frame using HOT colormap.
+
+    Args:
+        frame_bgr: (H, W, 3) uint8 BGR frame.
+        heatmap: (H, W) float32 heatmap (0 to 1 range).
+        intensity: Blend intensity multiplier.
+
+    Returns:
+        (H, W, 3) uint8 BGR frame with heatmap overlay.
+    """
     maxval = float(heatmap.max())
     if maxval < 1e-6:
         return frame_bgr
@@ -140,7 +151,15 @@ def _project_3d_to_2d(
     pts_3d: np.ndarray,
     fx: float, fy: float, cx: float, cy: float,
 ) -> np.ndarray:
-    """Perspective projection: (N, 3) camera-space -> (N, 2) pixels."""
+    """Perspective projection: (N, 3) camera-space -> (N, 2) pixels.
+
+    Args:
+        pts_3d: (N, 3) points in camera coordinates.
+        fx, fy, cx, cy: Camera intrinsics.
+
+    Returns:
+        (N, 2) pixel coordinates.
+    """
     pts = np.asarray(pts_3d, dtype=np.float64)
     Z = np.maximum(pts[:, 2], 0.01)
     u = fx * pts[:, 0] / Z + cx
@@ -155,7 +174,15 @@ def _draw_skeleton_2d(
     thickness: int = 2,
     visible_mask: np.ndarray | None = None,
 ) -> None:
-    """Draw skeleton bones + joint circles on frame (in-place)."""
+    """Draw skeleton bones and joint circles on frame (in-place).
+
+    Args:
+        frame: (H, W, 3) uint8 BGR frame (modified in-place).
+        pts_2d: (16, 2) pixel coordinates. [2D:SKELETON_16]
+        color: BGR color tuple.
+        thickness: Line thickness.
+        visible_mask: (16,) boolean mask; skip invisible joints if provided.
+    """
     h, w = frame.shape[:2]
     for parent, child in BONES:
         if visible_mask is not None and (not visible_mask[parent] or not visible_mask[child]):
@@ -197,14 +224,19 @@ def generate_overlay_video(
         output_path: Path for output .mp4 video.
         frames_rgb: List of (H, W, 3) uint8 RGB frames.
         heatmaps: List of (C, H_hm, W_hm) heatmaps per frame.
-        detector_2d: List of (K, 2) or (K, 3) 2D detections in pixel coords.
-        detector_3d: List of (K, 3) raw 3D positions in camera space.
-        optimized_3d: List of (K, 3) optimized 3D positions in camera space.
+            [HEATMAP:MPII_16] for MotionBERT, [HEATMAP:SKELETON_16] for MediaPipe.
+        detector_2d: List of (16, 2) or (16, 3) 2D detections in pixel coords.
+            [2D:MPII_16] (for MotionBERT) or [2D:SKELETON_16] with vis (for MediaPipe).
+        detector_3d: List of (16, 3) raw 3D positions in camera space.
+            [3D:SKELETON_16]
+        optimized_3d: List of (16, 3) optimized 3D positions in camera space.
+            [3D:SKELETON_16]
         camera_fx, camera_fy, camera_cx, camera_cy: Camera intrinsics.
         affine: (2, 3) affine from crop/heatmap coords to original pixel coords.
         frame_indices: Optional frame indices for labeling.
-        gt_3d: Optional list of (K, 3) ground truth 3D or None.
-        visibility: Optional per-frame visibility/confidence arrays.
+        gt_3d: Optional list of (16, 3) ground truth 3D or None.
+            [3D:SKELETON_16]
+        visibility: Optional per-frame (16,) arrays. [VIS:SKELETON_16]
         visibility_threshold: Threshold for drawing joints.
         intensity: Heatmap blend intensity.
         pipeline_name: Name for legend (e.g. "MotionBERT", "MediaPipe").

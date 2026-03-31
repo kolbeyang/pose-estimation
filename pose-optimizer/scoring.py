@@ -10,8 +10,9 @@ import torch.nn.functional as F
 
 
 # ---------------------------------------------------------------------------
-# Mapping from skeleton 16-joint index to MPII heatmap index.
-# All 16 joints now have direct MPII heatmap mappings.
+# Mapping from [3D:SKELETON_16] joint index to [HEATMAP:MPII_16] channel index.
+# Used when scoring optimizer projections against real Stacked Hourglass heatmaps.
+# All 16 skeleton joints have direct MPII heatmap channel mappings.
 # ---------------------------------------------------------------------------
 SKELETON_TO_MPII_HEATMAP: list[int] = [
     6,     # 0: Pelvis
@@ -51,18 +52,21 @@ def heatmap_score_batch(
 ) -> torch.Tensor:
     """Batched heatmap scoring across all frames.
 
-    For MotionBert (real SH heatmaps): uses MPII mapping to score all 16 joints.
+    For MotionBERT (real SH heatmaps): uses MPII mapping to score all 16 joints.
     For MediaPipe (synthetic heatmaps): scores all 16 joints directly
     (heatmaps have 16 channels matching skeleton indices).
 
     Args:
-        projected_2d_batch: (F, J, 2) projected positions in pixel coords.
+        projected_2d_batch: (F, 16, 2) projected positions in pixel coords.
+            [2D:SKELETON_16]
         heatmaps_batch: (F, C, H, W) heatmaps per frame.
-        affine: (2, 3) affine transform from heatmap_size-crop to original pixels.
-        visibility_batch: (F, J) confidence scores.
+            [HEATMAP:MPII_16] when use_mpii_mapping=True,
+            [HEATMAP:SKELETON_16] when use_mpii_mapping=False.
+        affine: (2, 3) affine transform from heatmap-crop to original pixels.
+        visibility_batch: (F, 16) confidence scores. [VIS:SKELETON_16]
         confidence_epsilon: Floor for low-confidence joints.
         eps: Floor to avoid log(0).
-        use_mpii_mapping: If True, use MPII->skeleton mapping (16 joints).
+        use_mpii_mapping: If True, use MPII->skeleton mapping.
             If False, assume heatmaps are (F, 16, H, W) in skeleton order.
 
     Returns:
@@ -228,7 +232,7 @@ def motion_penalty_position_batch(
     """Penalize large root position jumps between consecutive frames.
 
     Args:
-        all_positions: (F, J, 3) positions.
+        all_positions: (F, 16, 3) positions. [3D:SKELETON_16]
 
     Returns:
         Scalar squared L2 distance sum of root joint.
@@ -248,8 +252,9 @@ def motion_penalty_rotation_batch(
     Uses chord distance.
 
     Args:
-        all_local_rots: (F, J, 3) axis-angle rotations.
-        per_joint_weights: (J,) per-joint penalty weights.
+        all_local_rots: (F, 16, 3) axis-angle rotations. [FK_PARAMS]
+        per_joint_weights: (16,) per-joint penalty weights indexed by
+            [SKELETON_16] joint order.
 
     Returns:
         Scalar penalty.
@@ -281,19 +286,20 @@ def compute_total_score_batch(
     """Fully vectorized scoring across all frames.
 
     Args:
-        all_positions: (F, J, 3) 3D positions.
-        all_projected_2d: (F, J, 2) projected 2D.
-        all_local_rots: (F, J, 3) local rotations.
-        visibility: (F, J) visibility weights.
+        all_positions: (F, 16, 3) 3D positions. [3D:SKELETON_16]
+        all_projected_2d: (F, 16, 2) projected 2D. [2D:SKELETON_16]
+        all_local_rots: (F, 16, 3) local rotations. [FK_PARAMS]
+        visibility: (F, 16) visibility weights. [VIS:SKELETON_16]
         position_penalty_weight: Weight for position penalty.
-        rotation_per_joint_weights: (J,) per-joint rotation penalty weights.
+        rotation_per_joint_weights: (16,) per-joint rotation penalty weights.
         heatmaps: (F, C, H, W) heatmaps.
+            [HEATMAP:MPII_16] or [HEATMAP:SKELETON_16] depending on mode.
         affine: (2, 3) affine transform.
         confidence_epsilon: Floor for low-confidence joints.
         use_mpii_mapping: Whether to use MPII->skeleton joint mapping.
 
     Returns:
-        (total_score, details_dict).
+        Tuple of (total_score tensor, details dict with component values).
     """
     total_heatmap = heatmap_score_batch(
         all_projected_2d, heatmaps, affine, visibility,
@@ -333,18 +339,20 @@ def generate_synthetic_heatmaps(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Generate synthetic Gaussian heatmaps from 2D detections.
 
-    Creates (F, K, heatmap_size, heatmap_size) Gaussian heatmaps and an
-    affine transform mapping heatmap coords to pixel coords.
+    Creates [HEATMAP:SKELETON_16] heatmaps with one Gaussian blob per joint,
+    centered at the detected 2D position.
 
     Args:
-        target_2d: (F, K, 2) 2D detections in pixel coordinates.
+        target_2d: (F, 16, 2) 2D detections in pixel coordinates.
+            [2D:SKELETON_16]
         image_size: (height, width) of the original image.
         heatmap_size: Size of the output heatmaps (default 64).
         sigma: Gaussian sigma in pixel space.
 
     Returns:
         Tuple of:
-            heatmaps: (F, K, heatmap_size, heatmap_size) float32.
+            heatmaps: (F, 16, heatmap_size, heatmap_size) float32.
+                [HEATMAP:SKELETON_16]
             affine: (2, 3) mapping from heatmap coords to pixel coords.
     """
     h, w = image_size

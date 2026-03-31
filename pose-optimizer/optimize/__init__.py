@@ -32,24 +32,27 @@ def optimize(
 ) -> tuple[list[np.ndarray], np.ndarray, list[float]]:
     """Run FK optimization to improve 3D pose estimates.
 
-    For MotionBert: pass heatmaps + affine (real SH heatmaps).
+    For MotionBERT: pass heatmaps + affine (real SH heatmaps).
     For MediaPipe: pass target_2d (synthetic Gaussian heatmaps generated internally).
 
     Args:
-        raw_3d: Per-frame (K, 3) camera-space positions from detector.
+        raw_3d: Per-frame (16, 3) camera-space positions. [3D:SKELETON_16]
         camera: Camera for 3D->2D projection.
         config: Optimization hyperparameters.
-        heatmaps: Per-frame (C, H, W) real SH heatmaps. None for MediaPipe.
+        heatmaps: Per-frame (16, 64, 64) real SH heatmaps. [HEATMAP:MPII_16]
+            None for MediaPipe mode.
         affine: (2, 3) affine from crop to pixel coords. Required with heatmaps.
-        target_2d: Per-frame (K, 2) 2D detections in pixels. For MediaPipe mode.
-        visibility: Per-frame (K,) confidence scores. Defaults to ones.
+        target_2d: Per-frame (16, 2) 2D detections in pixels. [2D:SKELETON_16]
+            For MediaPipe mode.
+        visibility: Per-frame (16,) confidence scores. [VIS:SKELETON_16]
+            Defaults to ones.
         verbose: Print progress.
 
     Returns:
         Tuple of:
-            optimized_3d: list of (K, 3) improved camera-space positions.
-            bone_lengths_final: (K,) final shared bone lengths.
-            loss_history: list of loss values per step.
+            optimized_3d: List of (16, 3) improved camera-space positions. [3D:SKELETON_16]
+            bone_lengths_final: (16,) final shared bone lengths.
+            loss_history: List of loss values per step.
     """
     n_frames = len(raw_3d)
     use_mpii_mapping = True  # Default: real SH heatmaps with MPII mapping
@@ -62,13 +65,13 @@ def optimize(
     if heatmaps is not None and affine is not None:
         # MotionBert mode: real SH heatmaps
         use_mpii_mapping = True
-        heatmaps_np = np.array(heatmaps)
+        heatmaps_np = np.array(heatmaps)  # [HEATMAP:MPII_16]
         affine_np = affine
     elif target_2d is not None:
         # MediaPipe mode: generate synthetic Gaussian heatmaps
         use_mpii_mapping = False
-        target_2d_arr = np.array(target_2d)  # (F, K, 2)
-        heatmaps_np, affine_np = generate_synthetic_heatmaps(
+        target_2d_arr = np.array(target_2d)  # (F, 16, 2) [2D:SKELETON_16]
+        heatmaps_np, affine_np = generate_synthetic_heatmaps(  # [HEATMAP:SKELETON_16]
             target_2d_arr,
             image_size=camera.image_size,
             heatmap_size=64,
@@ -116,15 +119,15 @@ def optimize(
         print(f"    FK roundtrip error: mean={mean_rt*100:.4f} cm, max={max_rt*100:.4f} cm")
 
     # --- Create batched learnable parameters ---
-    param_root_pos = torch.tensor(
+    param_root_pos = torch.tensor(  # [FK_PARAMS] (F, 3)
         np.array(all_root_pos), dtype=torch.float32, requires_grad=True,
-    )  # (F, 3)
-    param_root_rot = torch.tensor(
+    )
+    param_root_rot = torch.tensor(  # [FK_PARAMS] (F, 3)
         np.array(all_root_rot), dtype=torch.float32, requires_grad=True,
-    )  # (F, 3)
-    param_local_rots = torch.tensor(
+    )
+    param_local_rots = torch.tensor(  # [FK_PARAMS] (F, 16, 3)
         np.array(all_local_rots), dtype=torch.float32, requires_grad=True,
-    )  # (F, J, 3)
+    )
 
     # Shared bone lengths: median across frames
     median_bone_lengths = np.median(np.array(all_bone_lengths), axis=0)
@@ -133,8 +136,8 @@ def optimize(
     )
 
     # --- Non-learnable tensors ---
-    visibility_t = torch.tensor(np.array(visibility), dtype=torch.float32)  # (F, J)
-    heatmaps_t = torch.tensor(heatmaps_np, dtype=torch.float32)  # (F, C, H, W)
+    visibility_t = torch.tensor(np.array(visibility), dtype=torch.float32)  # (F, 16) [VIS:SKELETON_16]
+    heatmaps_t = torch.tensor(heatmaps_np, dtype=torch.float32)  # (F, C, H, W) [HEATMAP:MPII_16] or [HEATMAP:SKELETON_16]
     affine_t = torch.tensor(affine_np, dtype=torch.float32)  # (2, 3)
 
     # Apply blur
@@ -165,12 +168,12 @@ def optimize(
         # Batched FK
         all_positions = forward_kinematics_batch(
             param_root_pos, param_root_rot, param_local_rots, param_bone_lengths,
-        )  # (F, J, 3)
+        )  # (F, 16, 3) [3D:SKELETON_16]
 
         # Batched projection
         pos_flat = all_positions.reshape(-1, 3)
         proj_flat = camera.camera_to_image_torch(pos_flat)
-        all_projected_2d = proj_flat.reshape(n_frames, NUM_JOINTS, 2)
+        all_projected_2d = proj_flat.reshape(n_frames, NUM_JOINTS, 2)  # (F, 16, 2) [2D:SKELETON_16]
 
         # Batched scoring
         total_score, details = compute_total_score_batch(

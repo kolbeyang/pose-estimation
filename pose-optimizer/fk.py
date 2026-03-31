@@ -47,13 +47,13 @@ def forward_kinematics(
     """Compute 3D joint positions from FK parameters.
 
     Args:
-        root_pos: (3,) root hip position in camera coordinates.
-        root_rot: (3,) axis-angle rotation for the root joint.
-        local_rots: (NUM_JOINTS, 3) axis-angle local rotations per joint.
-        bone_lengths: (NUM_JOINTS,) scalar bone lengths.
+        root_pos: (3,) root Pelvis position in camera coordinates. [FK_PARAMS]
+        root_rot: (3,) axis-angle rotation for the root joint. [FK_PARAMS]
+        local_rots: (16, 3) axis-angle local rotations per joint. [FK_PARAMS]
+        bone_lengths: (16,) scalar bone lengths. [FK_PARAMS]
 
     Returns:
-        (NUM_JOINTS, 3) world positions of each joint.
+        (16, 3) joint positions in camera coordinates. [3D:SKELETON_16]
     """
     rest_dirs: torch.Tensor = torch.tensor(REST_DIRECTIONS, dtype=torch.float32)
 
@@ -117,13 +117,13 @@ def forward_kinematics_batch(
     """Batch forward kinematics across frames.
 
     Args:
-        root_pos: (F, 3) root positions.
-        root_rot: (F, 3) root axis-angle rotations.
-        local_rots: (F, J, 3) local axis-angle rotations per joint.
-        bone_lengths: (J,) shared bone lengths.
+        root_pos: (F, 3) root Pelvis positions. [FK_PARAMS]
+        root_rot: (F, 3) root axis-angle rotations. [FK_PARAMS]
+        local_rots: (F, 16, 3) local axis-angle rotations per joint. [FK_PARAMS]
+        bone_lengths: (16,) shared bone lengths. [FK_PARAMS]
 
     Returns:
-        (F, J, 3) world positions.
+        (F, 16, 3) joint positions in camera coordinates. [3D:SKELETON_16]
     """
     F_dim: int = root_pos.shape[0]
     rest_dirs: torch.Tensor = torch.tensor(REST_DIRECTIONS, dtype=torch.float32)
@@ -232,13 +232,17 @@ def _rotation_matrix_to_axis_angle(R: np.ndarray) -> np.ndarray:
 def positions_to_fk_params(
     positions: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Convert (NUM_JOINTS, 3) joint positions to FK parameters (inverse FK).
+    """Convert joint positions to FK parameters (inverse FK).
 
     Args:
-        positions: (16, 3) joint positions.
+        positions: (16, 3) joint positions in camera coordinates. [3D:SKELETON_16]
 
     Returns:
-        (root_pos, root_rot, local_rots, bone_lengths) all as numpy arrays.
+        Tuple of [FK_PARAMS]:
+            root_pos: (3,) Pelvis position.
+            root_rot: (3,) axis-angle root rotation.
+            local_rots: (16, 3) axis-angle local rotations per joint.
+            bone_lengths: (16,) scalar bone lengths.
     """
     root_pos: np.ndarray = positions[0].copy()
 

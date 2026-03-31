@@ -64,6 +64,9 @@ class Camera:
     def world_to_camera(self, points_world: np.ndarray) -> np.ndarray:
         """Transform world coordinates to camera coordinates.
 
+        In the pipeline, used on [3D:SKELETON_16] and [3D:COCO19] data,
+        but the function is generic for any (..., 3) points.
+
         Args:
             points_world: (..., 3) positions in world frame.
 
@@ -100,6 +103,9 @@ class Camera:
     def camera_to_image(self, points_cam: np.ndarray) -> np.ndarray:
         """Project 3D camera-space point(s) to 2D image coordinates (numpy).
 
+        In the pipeline, projects [3D:SKELETON_16] -> [2D:SKELETON_16],
+        but the function is generic for any (..., 3) points.
+
         Args:
             points_cam: (3,) or (..., 3) in camera coordinates (Z > 0 forward).
 
@@ -130,6 +136,9 @@ class Camera:
 
     def camera_to_image_torch(self, points_cam: torch.Tensor) -> torch.Tensor:
         """Differentiable 3D camera-space -> 2D projection.
+
+        In the optimization loop, projects [3D:SKELETON_16] -> [2D:SKELETON_16],
+        but the function is generic for any (..., 3) tensors.
 
         Args:
             points_cam: (3,) or (..., 3) batch of points.
