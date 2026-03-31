@@ -15,11 +15,11 @@
     "motionbert_conf_threshold": 0.0,
     "optimization": {
         "num_steps": 5,
-        "learning_rate": 0.002,
+        "learning_rate": 0.0005,
         "bone_length_lr": 0.0001,
         "position_penalty_weight": 500.0,
         "rotation_penalty_scalar": 10.0,
-        "heatmap_blur_sigma": 4.0,
+        "heatmap_blur_sigma": 12.0,
         "heatmap_sigma": 50.0
     }
 }
