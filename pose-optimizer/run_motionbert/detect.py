@@ -537,49 +537,24 @@ def _iqr_filtered_median(values: np.ndarray, k: float = 1.5) -> float:
 _RELIABLE_BONES_FOR_SCALE: set[int] = {10, 11, 12, 13, 14, 15}
 
 
-def motionbert_to_camera_space(
-    positions_3d_norm: np.ndarray,
+def _depth_heuristic_fallback(
+    root_relative_m: np.ndarray,
     kp_2d: np.ndarray,
     fx: float, fy: float, cx: float, cy: float,
 ) -> np.ndarray:
-    """Convert MotionBERT normalized output to camera-space meters.
+    """Fallback depth estimation when solvePnP fails or has insufficient points.
 
-    Estimates bone scale by comparing detected bone lengths against defaults,
-    then estimates root depth from 2D-3D correspondences.
+    Estimates root depth from pairwise Y-axis correspondences between 3D and 2D
+    joints, then back-projects root XY from the 2D hip position.
 
     Args:
-        positions_3d_norm: (16, 3) MotionBERT-normalized positions. [3D:SKELETON_16]
+        root_relative_m: (16, 3) root-relative positions in meters. [3D:SKELETON_16]
         kp_2d: (16, 2) 2D pixel coordinates. [2D:SKELETON_16]
         fx, fy, cx, cy: Camera intrinsics.
 
     Returns:
         (16, 3) positions in camera coordinates (meters). [3D:SKELETON_16]
     """
-    from skeleton import PARENTS, DEFAULT_BONE_LENGTHS
-
-    root_relative = positions_3d_norm - positions_3d_norm[0:1]
-    reliable_ratios: list[float] = []
-    all_ratios: list[float] = []
-    for j in range(1, NUM_JOINTS):
-        p = int(PARENTS[j])
-        det_bl = float(np.linalg.norm(root_relative[j] - root_relative[p]))
-        ref_bl = float(DEFAULT_BONE_LENGTHS[j])
-        if det_bl > 1e-4 and ref_bl > 1e-4:
-            ratio = ref_bl / det_bl
-            all_ratios.append(ratio)
-            if j in _RELIABLE_BONES_FOR_SCALE:
-                reliable_ratios.append(ratio)
-
-    if len(reliable_ratios) >= 4:
-        bone_scale = _iqr_filtered_median(np.array(reliable_ratios))
-    elif all_ratios:
-        bone_scale = _iqr_filtered_median(np.array(all_ratios))
-    else:
-        bone_scale = 1.0
-
-    root_relative_m = root_relative * bone_scale
-
-    # Estimate depth
     tz_candidates: list[float] = []
     for i in range(NUM_JOINTS):
         for j in range(NUM_JOINTS):
@@ -609,6 +584,90 @@ def motionbert_to_camera_space(
     cam_3d[:, 0] += tx
     cam_3d[:, 1] += ty
     cam_3d[:, 2] += tz
+    return cam_3d.astype(np.float64)
+
+
+def motionbert_to_camera_space(
+    positions_3d_norm: np.ndarray,
+    kp_2d: np.ndarray,
+    fx: float, fy: float, cx: float, cy: float,
+) -> np.ndarray:
+    """Convert MotionBERT normalized output to camera-space meters.
+
+    Estimates bone scale by comparing detected bone lengths against defaults,
+    then uses cv2.solvePnP to find the rigid transform placing the skeleton
+    in camera space. Falls back to a depth heuristic if solvePnP fails.
+
+    Args:
+        positions_3d_norm: (16, 3) MotionBERT-normalized positions. [3D:SKELETON_16]
+        kp_2d: (16, 2) 2D pixel coordinates. [2D:SKELETON_16]
+        fx, fy, cx, cy: Camera intrinsics.
+
+    Returns:
+        (16, 3) positions in camera coordinates (meters). [3D:SKELETON_16]
+    """
+    from skeleton import PARENTS, DEFAULT_BONE_LENGTHS
+
+    # Step 1: Bone-length-based scale estimation (MotionBERT output is not in
+    # real-world units, so we recover meters from bone length ratios).
+    root_relative = positions_3d_norm - positions_3d_norm[0:1]
+    reliable_ratios: list[float] = []
+    all_ratios: list[float] = []
+    for j in range(1, NUM_JOINTS):
+        p = int(PARENTS[j])
+        det_bl = float(np.linalg.norm(root_relative[j] - root_relative[p]))
+        ref_bl = float(DEFAULT_BONE_LENGTHS[j])
+        if det_bl > 1e-4 and ref_bl > 1e-4:
+            ratio = ref_bl / det_bl
+            all_ratios.append(ratio)
+            if j in _RELIABLE_BONES_FOR_SCALE:
+                reliable_ratios.append(ratio)
+
+    if len(reliable_ratios) >= 4:
+        bone_scale = _iqr_filtered_median(np.array(reliable_ratios))
+    elif all_ratios:
+        bone_scale = _iqr_filtered_median(np.array(all_ratios))
+    else:
+        bone_scale = 1.0
+
+    root_relative_m = root_relative * bone_scale
+
+    # Step 2: solvePnPRansac to find the rigid transform (R, t) from scaled
+    # 3D object points to camera space. RANSAC is used instead of plain
+    # solvePnP because MotionBERT's 3D predictions can have outlier joints
+    # that pull the non-robust solver off (producing wildly wrong depth).
+    #
+    # Note: Unlike MediaPipe (whose 3D output has a well-defined world
+    # coordinate system), MotionBERT produces roughly camera-aligned
+    # coordinates with per-frame noise. The solvePnP rotation corrects
+    # for this misalignment, but the full R+t transform is applied as-is
+    # to match the MediaPipe pattern.
+    K = np.array([
+        [fx, 0, cx],
+        [0, fy, cy],
+        [0, 0, 1],
+    ], dtype=np.float64)
+    dist_coeffs = np.zeros(4, dtype=np.float64)
+
+    valid = np.linalg.norm(kp_2d, axis=1) > 1.0
+    if valid.sum() < 4:
+        return _depth_heuristic_fallback(root_relative_m, kp_2d, fx, fy, cx, cy)
+
+    obj_pts = root_relative_m[valid].astype(np.float64)
+    img_pts = kp_2d[valid].astype(np.float64)
+
+    success, rvec, tvec, _inliers = cv2.solvePnPRansac(
+        obj_pts, img_pts, K, dist_coeffs, reprojectionError=8.0,
+    )
+
+    if not success:
+        return _depth_heuristic_fallback(root_relative_m, kp_2d, fx, fy, cx, cy)
+
+    # Safety: clip depth to reasonable range [1.0, 8.0] meters
+    tvec[2, 0] = float(np.clip(tvec[2, 0], 1.0, 8.0))
+
+    R, _ = cv2.Rodrigues(rvec)
+    cam_3d = (R @ root_relative_m.T).T + tvec.T
     return cam_3d.astype(np.float64)
 
 
