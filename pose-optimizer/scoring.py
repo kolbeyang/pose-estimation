@@ -97,9 +97,6 @@ def heatmap_score_batch(
     # Crop coords -> heatmap coords -> [-1, 1] for grid_sample
     # crop_size = hm_size * (crop_px / hm_px), typically 256->64 so /4
     # But we want to be general: grid_sample expects [-1, 1] over the heatmap
-    crop_to_hm_x = hm_w / (sx * hm_w)  # simplifies but keeping general
-    crop_to_hm_y = hm_h / (sy * hm_h)
-
     # Actually: the affine maps heatmap-crop to pixels. The crop is typically
     # at crop_size (e.g. 256). The heatmap is at hm_size (e.g. 64).
     # So crop_coord -> hm_coord = crop_coord * hm_size / crop_size

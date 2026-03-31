@@ -14,7 +14,7 @@
     "sh_batch_size": 32,
     "motionbert_conf_threshold": 0.0,
     "optimization": {
-        "num_steps": 50,
+        "num_steps": 10,
         "learning_rate": 0.002,
         "bone_length_lr": 0.0001,
         "position_penalty_weight": 500.0,
