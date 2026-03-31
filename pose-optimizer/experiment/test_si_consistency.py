@@ -61,7 +61,7 @@ def load_example(example_name, output_dir="output/motionbert_2026_03_30_18_57"):
     return gt_arr, raw_arr, opt_arr, camera
 
 
-def test_si_scale_minimizes_mpjpe(pred_rr, gt_rr):
+def check_si_scale_minimizes_mpjpe(pred_rr, gt_rr):
     """Test 1: SI-MPJPE scale factor actually minimizes MPJPE."""
     s = optimal_scale(pred_rr, gt_rr)
     si_val = mpjpe(s * pred_rr, gt_rr)
@@ -80,7 +80,7 @@ def test_si_scale_minimizes_mpjpe(pred_rr, gt_rr):
     return True, f"OK: scale={s:.4f}, SI-MPJPE={si_val*100:.4f} cm"
 
 
-def test_vw_si_consistent_with_vw_mpjpe(pred_rr, gt_rr, weights):
+def check_vw_si_consistent_with_vw_mpjpe(pred_rr, gt_rr, weights):
     """Test 2: VW-SI-MPJPE is consistent with VW-MPJPE after scaling."""
     s = _optimal_scale_weighted(pred_rr, gt_rr, weights)
     scaled_pred = s * pred_rr
@@ -100,7 +100,7 @@ def test_vw_si_consistent_with_vw_mpjpe(pred_rr, gt_rr, weights):
     return True, f"OK: scale={s:.4f}, VW-SI-MPJPE={vw_si_val*100:.4f} cm"
 
 
-def test_scale_1_worse_than_optimal(pred_rr, gt_rr, weights):
+def check_scale_1_worse_than_optimal(pred_rr, gt_rr, weights):
     """Test 3: Scale=1.0 gives result >= optimal."""
     s = _optimal_scale_weighted(pred_rr, gt_rr, weights)
     optimal_val = vw_si_mpjpe(pred_rr, gt_rr, weights)
@@ -112,7 +112,7 @@ def test_scale_1_worse_than_optimal(pred_rr, gt_rr, weights):
     return True, f"OK: scale=1.0 gives {scale1_val*100:.4f} cm >= optimal {optimal_val*100:.4f} cm (scale={s:.4f})"
 
 
-def test_optimization_doesnt_hurt_scale_invariant(gt_arr, raw_arr, opt_arr, camera):
+def check_optimization_doesnt_hurt_scale_invariant(gt_arr, raw_arr, opt_arr, camera):
     """Test 4: If optimization improves raw MPJPE, does SI-MPJPE also improve?"""
     pred_rr = root_relative(raw_arr)[:, EVAL_JOINTS, :]
     opt_rr = root_relative(opt_arr)[:, EVAL_JOINTS, :]
@@ -147,7 +147,7 @@ def test_optimization_doesnt_hurt_scale_invariant(gt_arr, raw_arr, opt_arr, came
 
 def main():
     print("=" * 70)
-    print("  SI-MPJPE Metric Consistency Tests")
+    print("  SI-MPJPE Metric Consistency Checks")
     print("=" * 70)
 
     # Load a few examples
@@ -169,28 +169,28 @@ def main():
         vis = compute_visibility_weights(gt_arr, camera)[:, EVAL_JOINTS]
 
         # Test 1
-        ok, msg = test_si_scale_minimizes_mpjpe(pred_rr, gt_rr)
+        ok, msg = check_si_scale_minimizes_mpjpe(pred_rr, gt_rr)
         status = "PASS" if ok else "FAIL"
         print(f"  Test 1 (SI scale minimizes MPJPE): {status} - {msg}")
         if not ok:
             all_passed = False
 
         # Test 2
-        ok, msg = test_vw_si_consistent_with_vw_mpjpe(pred_rr, gt_rr, vis)
+        ok, msg = check_vw_si_consistent_with_vw_mpjpe(pred_rr, gt_rr, vis)
         status = "PASS" if ok else "FAIL"
         print(f"  Test 2 (VW-SI consistent with VW-MPJPE): {status} - {msg}")
         if not ok:
             all_passed = False
 
         # Test 3
-        ok, msg = test_scale_1_worse_than_optimal(pred_rr, gt_rr, vis)
+        ok, msg = check_scale_1_worse_than_optimal(pred_rr, gt_rr, vis)
         status = "PASS" if ok else "FAIL"
         print(f"  Test 3 (scale=1.0 >= optimal): {status} - {msg}")
         if not ok:
             all_passed = False
 
         # Test 4
-        ok, msg = test_optimization_doesnt_hurt_scale_invariant(gt_arr, raw_arr, opt_arr, camera)
+        ok, msg = check_optimization_doesnt_hurt_scale_invariant(gt_arr, raw_arr, opt_arr, camera)
         status = "PASS" if ok else "FAIL"
         print(f"  Test 4 (optimization SI consistency): {status}")
         for line in msg.split("\n"):
