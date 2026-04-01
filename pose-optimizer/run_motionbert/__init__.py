@@ -225,6 +225,7 @@ def process_example(
         heatmaps=heatmaps,
         affine=affine,
         visibility=visibility,
+        verbose=False,
     )
 
     # --- 6. Evaluate ---

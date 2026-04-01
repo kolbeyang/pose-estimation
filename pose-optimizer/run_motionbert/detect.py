@@ -4,6 +4,7 @@ Adapted for the unified pose-optimizer.
 """
 
 import copy
+import logging
 import os
 import sys
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
 
 # Add parent dir to path for skeleton imports
 _PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -63,7 +66,7 @@ def load_all_models() -> MotionBertModels:
 
     # YOLO
     yolo = YOLO("yolov8n.pt")
-    print(f"  Loaded YOLOv8n")
+    logger.info("Loaded YOLOv8n")
 
     # Stacked Hourglass
     try:
@@ -80,13 +83,13 @@ def load_all_models() -> MotionBertModels:
             raise RuntimeError("Stacked Hourglass weights not found.")
     hourglass = hourglass.to(device)
     hourglass.eval()
-    print(f"  Loaded Stacked Hourglass (8-stack, pretrained) on {device}")
+    logger.info("Loaded Stacked Hourglass (8-stack, pretrained) on %s", device)
 
     # MotionBERT
     motionbert = load_motionbert_model()
     motionbert = motionbert.to(device)
 
-    print(f"  All models loaded on {device}")
+    logger.info("All models loaded on %s", device)
     return MotionBertModels(
         yolo=yolo, hourglass=hourglass, motionbert=motionbert, device=device,
     )
@@ -144,7 +147,7 @@ def detect_person_bbox(
     h, w = frames_rgb[0].shape[:2]
     bboxes: list[np.ndarray] = []
 
-    print(f"  Detecting persons in {len(frames_rgb)} frames ({w}x{h})...")
+    logger.info("Detecting persons in %d frames (%dx%d)...", len(frames_rgb), w, h)
     for frame in frames_rgb:
         results = yolo(frame, classes=[0], verbose=False)
         detections = results[0].boxes
@@ -164,8 +167,10 @@ def detect_person_bbox(
         all_bboxes[:, 2].max(), all_bboxes[:, 3].max(),
     ], dtype=np.float32)
 
-    print(f"  Union bbox: ({union_bbox[0]:.0f}, {union_bbox[1]:.0f}) - "
-          f"({union_bbox[2]:.0f}, {union_bbox[3]:.0f})")
+    logger.info(
+        "Union bbox: (%.0f, %.0f) - (%.0f, %.0f)",
+        union_bbox[0], union_bbox[1], union_bbox[2], union_bbox[3],
+    )
     return union_bbox
 
 
@@ -311,7 +316,7 @@ def run_hourglass(
 
     # Batched inference
     all_heatmaps: list[np.ndarray] = []
-    print(f"  Running Stacked Hourglass on {n_frames} frames (batch_size={batch_size})...")
+    logger.info("Running Stacked Hourglass on %d frames (batch_size=%d)...", n_frames, batch_size)
 
     with torch.no_grad():
         for start in tqdm(range(0, n_frames, batch_size), desc="  2D Pose"):
@@ -329,7 +334,7 @@ def run_hourglass(
                 heatmaps_flip_batch = output_flip[-1].cpu().numpy()
             except RuntimeError as e:
                 if device.type != "cpu":
-                    print(f"  WARNING: {device} failed ({e}), falling back to CPU")
+                    logger.warning("%s failed (%s), falling back to CPU", device, e)
                     model = model.to("cpu")
                     device = torch.device("cpu")
                     inp = torch.from_numpy(np.stack(batch_imgs))
@@ -419,7 +424,7 @@ def load_motionbert_model() -> torch.nn.Module:
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     model.load_state_dict(state_dict, strict=True)
     model.eval()
-    print("  Loaded MotionBERT-Lite (global)")
+    logger.info("Loaded MotionBERT-Lite (global)")
     return model
 
 
@@ -498,7 +503,7 @@ def run_motionbert(
     Returns:
         (N, 16, 3) normalized MotionBERT output. [3D:SKELETON_16]
     """
-    print(f"  MotionBERT on {device}")
+    logger.info("MotionBERT on %s", device)
 
     n_frames = len(keypoints_2d_list)
 
@@ -516,12 +521,16 @@ def run_motionbert(
                     keypoints_17[i, j, :] = 0.0
                     n_zeroed += 1
     n_total = n_frames * 17
-    print(f"  Confidence threshold={conf_threshold}: zeroed {n_zeroed}/{n_total} "
-          f"({100*n_zeroed/n_total:.1f}%)")
+    logger.info(
+        "Confidence threshold=%.2f: zeroed %d/%d (%.1f%%)",
+        conf_threshold, n_zeroed, n_total, 100 * n_zeroed / n_total,
+    )
 
     keypoints_norm, cs_params = crop_scale(keypoints_17)
-    print(f"  crop_scale: scale={cs_params['scale']:.1f} "
-          f"offset=({cs_params['xs']:.1f}, {cs_params['ys']:.1f})")
+    logger.info(
+        "crop_scale: scale=%.1f offset=(%.1f, %.1f)",
+        cs_params['scale'], cs_params['xs'], cs_params['ys'],
+    )
 
     clip_len = 243
     if n_frames > clip_len:
@@ -529,14 +538,14 @@ def run_motionbert(
         n_frames = clip_len
 
     input_tensor = torch.from_numpy(keypoints_norm).unsqueeze(0).to(device)
-    print(f"  Running MotionBERT on {n_frames} frames...")
+    logger.info("Running MotionBERT on %d frames...", n_frames)
 
     with torch.no_grad():
         try:
             output_3d = model(input_tensor)
         except RuntimeError as e:
             if device.type != "cpu":
-                print(f"  WARNING: {device} failed ({e}), falling back to CPU")
+                logger.warning("%s failed (%s), falling back to CPU", device, e)
                 model = model.to("cpu")
                 input_tensor = input_tensor.to("cpu")
                 output_3d = model(input_tensor)
@@ -546,9 +555,11 @@ def run_motionbert(
     positions_3d = output_3d.cpu().numpy()[0]  # (N, 17, 3) [3D:MOTIONBERT_17]
     positions_3d[0, 0, 2] = 0
 
-    print(f"  MotionBERT raw output: {positions_3d.shape}")
-    print(f"  Root Z range (norm): {positions_3d[:, 0, 2].min():.4f} to "
-          f"{positions_3d[:, 0, 2].max():.4f}")
+    logger.info("MotionBERT raw output: %s", positions_3d.shape)
+    logger.info(
+        "Root Z range (norm): %.4f to %.4f",
+        positions_3d[:, 0, 2].min(), positions_3d[:, 0, 2].max(),
+    )
 
     # Strip Head joint -> 16 joints
     positions_3d = strip_head_joint(positions_3d)  # [3D:SKELETON_16]

@@ -6,8 +6,11 @@ Based on MotionBert's batched optimizer with support for both real SH heatmaps
 
 from __future__ import annotations
 
+import logging
 import numpy as np
 import torch
+
+logger = logging.getLogger(__name__)
 
 from camera import Camera
 from config import OptimizationConfig
@@ -84,7 +87,7 @@ def optimize(
 
     # --- Initialize FK parameters ---
     if verbose:
-        print(f"  Initializing FK parameters for {n_frames} frames...")
+        logger.info("Initializing FK parameters for %d frames...", n_frames)
 
     all_root_pos: list[np.ndarray] = []
     all_root_rot: list[np.ndarray] = []
@@ -116,7 +119,7 @@ def optimize(
     if verbose:
         mean_rt = float(np.mean(roundtrip_errors))
         max_rt = float(np.max(roundtrip_errors))
-        print(f"    FK roundtrip error: mean={mean_rt*100:.4f} cm, max={max_rt*100:.4f} cm")
+        logger.info("FK roundtrip error: mean=%.4f cm, max=%.4f cm", mean_rt * 100, max_rt * 100)
 
     # --- Create batched learnable parameters ---
     param_root_pos = torch.tensor(  # [FK_PARAMS] (F, 3)
@@ -160,7 +163,7 @@ def optimize(
     num_steps = config.num_steps
 
     if verbose:
-        print(f"  Optimising {n_frames} frames for {num_steps} steps (batched)...")
+        logger.info("Optimising %d frames for %d steps (batched)...", n_frames, num_steps)
 
     for step in range(num_steps):
         optimizer.zero_grad()
@@ -197,12 +200,10 @@ def optimize(
         loss_history.append(float(loss.item()))
 
         if verbose and (step % 20 == 0 or step == num_steps - 1):
-            print(
-                f"    Step {step:4d}/{num_steps}  "
-                f"loss={loss.item():.1f}  "
-                f"heatmap={details['heatmap']:.1f}  "
-                f"pos_p={details['pos_penalty']:.4f}  "
-                f"rot_p={details['rot_penalty']:.4f}"
+            logger.info(
+                "Step %4d/%d  loss=%.1f  heatmap=%.1f  pos_p=%.4f  rot_p=%.4f",
+                step, num_steps, loss.item(),
+                details['heatmap'], details['pos_penalty'], details['rot_penalty'],
             )
 
     # --- Extract final positions ---

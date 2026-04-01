@@ -3,9 +3,12 @@
 Adapted for the unified pose-optimizer.
 """
 
+import logging
 import os
 import sys
 import urllib.request
+
+logger = logging.getLogger(__name__)
 
 import cv2
 import mediapipe as mp
@@ -33,7 +36,7 @@ def _ensure_model() -> None:
     """Download the MediaPipe pose landmarker model if missing."""
     if os.path.exists(_MODEL_PATH):
         return
-    print(f"    Downloading pose model to {_MODEL_PATH}...")
+    logger.info("Downloading pose model to %s...", _MODEL_PATH)
     urllib.request.urlretrieve(_MODEL_URL, _MODEL_PATH)
 
 
@@ -51,7 +54,7 @@ def load_landmarker() -> vision.PoseLandmarker:
         output_segmentation_masks=False,
     )
     landmarker = vision.PoseLandmarker.create_from_options(options)
-    print("  Loaded MediaPipe PoseLandmarker")
+    logger.info("Loaded MediaPipe PoseLandmarker")
     return landmarker
 
 

@@ -212,6 +212,7 @@ def process_example(
         config=config.optimization,
         target_2d=kp_2d,
         visibility=visibility,
+        verbose=False,
     )
 
     # --- 6. Evaluate ---

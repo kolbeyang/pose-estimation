@@ -8,10 +8,13 @@ Overlays on original video frames:
   5. Blue skeleton: GT 3D projected to 2D (if available)
 """
 
+import logging
 import os
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from skeleton import BONES, NUM_JOINTS
 
@@ -242,7 +245,7 @@ def generate_overlay_video(
         pipeline_name: Name for legend (e.g. "MotionBERT", "MediaPipe").
     """
     if not frames_rgb:
-        print("  WARNING: No frames for overlay video.")
+        logger.warning("No frames for overlay video.")
         return
 
     n_frames = len(frames_rgb)
@@ -319,4 +322,4 @@ def generate_overlay_video(
         writer.write(frame_bgr)
 
     writer.release()
-    print(f"  Saved overlay video: {output_path} ({n_frames} frames)")
+    logger.info("Saved overlay video: %s (%d frames)", output_path, n_frames)

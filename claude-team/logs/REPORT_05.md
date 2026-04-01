@@ -106,3 +106,55 @@ From PLAN.md (reproduced and expanded):
 5. **`data_root` validation on startup.** Currently fails at first example if `data_root` is wrong. A check at the start of `run_pipeline()` — `if not os.path.isdir(config.data_root): raise ValueError(...)` — gives a fast, clear error before models are loaded.
 
 6. **Frame count reliability.** `get_video_frame_count()` uses `CAP_PROP_FRAME_COUNT` which returns metadata-reported count, not actual readable frames (pose2, pose3 are known examples where these differ). A fallback — if count exceeds some sanity threshold or is 0, scan sequentially — would improve robustness. Alternatively, document that auto-discovery frame counts are upper bounds.
+
+---
+
+## Iteration 2 Fixes
+
+**Date:** 2026-04-01
+
+**TODO item fixed:** Phase 5 — Incomplete logging refactor (submodule `print()` calls)
+
+### Files changed
+
+**`pose-optimizer/run_motionbert/detect.py`**
+- Added `import logging` and `logger = logging.getLogger(__name__)` at module top.
+- Converted all 12 remaining `print()` calls to `logger.info()` or `logger.warning()`:
+  - Load messages in `load_all_models()`: YOLOv8n loaded, Stacked Hourglass loaded, all models loaded.
+  - `detect_person_bbox()`: detecting persons progress, union bbox result.
+  - `run_hourglass()`: running SH message, device fallback warning.
+  - `load_motionbert_model()`: MotionBERT-Lite loaded message.
+  - `run_motionbert()`: device info, confidence zeroing stats, crop_scale params, running message, device fallback warning, raw output shape, root Z range.
+
+**`pose-optimizer/run_mediapipe/detect.py`**
+- Added `import logging` and `logger = logging.getLogger(__name__)` at module top.
+- Converted 2 `print()` calls to `logger.info()`:
+  - `_ensure_model()`: downloading model message.
+  - `load_landmarker()`: loaded PoseLandmarker message.
+
+**`pose-optimizer/optimize/__init__.py`**
+- Added `import logging` and `logger = logging.getLogger(__name__)` at module top.
+- Converted all 4 `print()` calls (all gated on `verbose=True`) to `logger.info()`:
+  - FK initialization message.
+  - FK roundtrip error stats.
+  - Optimization start message.
+  - Per-step loss/heatmap/penalty progress line (every 20 steps).
+
+**`pose-optimizer/overlay_video.py`**
+- Added `import logging` and `logger = logging.getLogger(__name__)` at module top.
+- Converted 2 `print()` calls:
+  - No-frames warning → `logger.warning()`.
+  - Saved video confirmation → `logger.info()`.
+
+**`pose-optimizer/run_motionbert/__init__.py`**
+- Added `verbose=False` to the `optimize()` call to suppress optimizer step-progress output.
+
+**`pose-optimizer/run_mediapipe/__init__.py`**
+- Added `verbose=False` to the `optimize()` call to suppress optimizer step-progress output.
+
+### Preserved as `print()`
+- The per-example VW-SI-MPJPE summary line in both pipeline `__init__.py` files (`[name] Det VW-SI-MPJPE: X.XX cm  Opt VW-SI-MPJPE: X.XX cm`) remains a bare `print()` so it always appears regardless of log level, as specified.
+
+### TODO.md updates
+- Phase 5 logging item marked `[x]`.
+- "First auto-discovered example too large" item marked `[~]` (won't fix — dataset ordering issue, not a code bug).
