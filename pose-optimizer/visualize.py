@@ -11,7 +11,6 @@ import json
 import sys
 
 import matplotlib
-matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 import matplotlib.animation as animation
