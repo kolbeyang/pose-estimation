@@ -29,6 +29,8 @@
     "data_root": "data/panoptic-toolbox",
     "output_dir": null,
     "target_fps": 10.0,
+    "generate_graphs": true,
+    "generate_video": true,
     "optimization": {
         "num_steps": 50,
         "learning_rate": 0.001,

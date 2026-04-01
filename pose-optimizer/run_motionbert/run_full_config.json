@@ -29,6 +29,8 @@
     "data_root": "data/panoptic-toolbox",
     "output_dir": null,
     "target_fps": 10.0,
+    "generate_graphs": true,
+    "generate_video": true,
     "sh_batch_size": 32,
     "motionbert_conf_threshold": 0.0,
     "optimization": {

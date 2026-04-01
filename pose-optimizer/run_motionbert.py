@@ -5,6 +5,7 @@ Usage:
     uv run python run_motionbert.py run_motionbert/run_single_config.json
 """
 
+import logging
 import sys
 
 from config import load_config
@@ -12,6 +13,12 @@ from run_motionbert import run_pipeline
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
     if len(sys.argv) < 2:
         print("Usage: uv run python run_motionbert.py <config.json>")
         sys.exit(1)

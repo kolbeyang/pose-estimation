@@ -288,6 +288,50 @@ def get_video_frame_count(video_path: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Auto-discovery
+# ---------------------------------------------------------------------------
+
+def discover_examples(data_root: str) -> list:
+    """Discover all processable sequences in data_root.
+
+    Used when config.examples is empty. For each subdirectory in data_root
+    that contains hdVideos/hd_00_00.mp4, creates an ExampleConfig covering
+    the full video (start_frame=0, num_frames=total_frames, camera="00_00",
+    person_idx=0).
+
+    Args:
+        data_root: Base data directory (e.g. "/mnt/data/panoptic-toolbox").
+
+    Returns:
+        List of ExampleConfig objects, sorted by sequence name.
+    """
+    from config import ExampleConfig  # local import to avoid circular import
+
+    results = []
+    if not os.path.isdir(data_root):
+        return results
+
+    for seq_name in sorted(os.listdir(data_root)):
+        seq_dir = os.path.join(data_root, seq_name)
+        if not os.path.isdir(seq_dir):
+            continue
+        video_path = get_video_path(data_root, seq_name, "00_00")
+        if not os.path.exists(video_path):
+            continue
+        total_frames = get_video_frame_count(video_path)
+        if total_frames < 2:
+            continue
+        results.append(ExampleConfig(
+            sequence=seq_name,
+            camera="00_00",
+            start_frame=0,
+            num_frames=total_frames,
+            person_idx=0,
+        ))
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Download helpers
 # ---------------------------------------------------------------------------
 

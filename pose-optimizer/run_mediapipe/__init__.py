@@ -4,6 +4,7 @@ Full pipeline: config -> load data -> MediaPipe -> synthetic heatmaps -> optimiz
 """
 
 import json
+import logging
 import os
 import sys
 from datetime import datetime
@@ -18,6 +19,7 @@ if _PARENT_DIR not in sys.path:
 
 from camera import Camera
 from cmu_data import (
+    discover_examples,
     extract_video_frames,
     get_sequence_dir,
     get_video_path,
@@ -48,6 +50,8 @@ from overlay_video import generate_overlay_video
 from scoring import generate_synthetic_heatmaps
 from skeleton import JOINT_NAMES, EVAL_JOINTS, NUM_JOINTS, PARENTS
 
+logger = logging.getLogger(__name__)
+
 
 def _example_name(seq: str, start: int) -> str:
     """Build a short example name from sequence name and start frame."""
@@ -77,7 +81,7 @@ def _find_camera_calibration(
         return cameras[cam_name_full]
     for cname, cal in cameras.items():
         if cname.startswith("00_00"):
-            print(f"    WARNING: Camera {camera_name} not found, falling back to {cname}")
+            logger.warning("Camera %s not found, falling back to %s", camera_name, cname)
             return cal
     raise ValueError(f"Camera {camera_name} not found in calibration")
 
@@ -128,18 +132,18 @@ def process_example(
         Dict of evaluation metrics, or empty dict on failure.
     """
     name = _example_name(seq_name, start_frame)
-    print(f"\n{'='*60}")
-    print(f"  Processing: {name}")
-    print(f"  Sequence: {seq_name}, Camera: {camera_name}")
-    print(f"  Frames: {start_frame}-{start_frame + num_frames - 1}, Person: {person_idx}")
-    print(f"{'='*60}")
+    logger.info("=" * 60)
+    logger.info("Processing: %s", name)
+    logger.info("Sequence: %s, Camera: %s", seq_name, camera_name)
+    logger.info("Frames: %d-%d, Person: %d", start_frame, start_frame + num_frames - 1, person_idx)
+    logger.info("=" * 60)
 
     data_root = config.data_root
     seq_dir = get_sequence_dir(data_root, seq_name)
     video_path = get_video_path(data_root, seq_name, camera_name)
 
     # --- 1. Load camera calibration ---
-    print("\n  [1/7] Loading camera calibration...")
+    logger.info("[1/7] Loading camera calibration...")
     cameras = load_calibration(seq_dir)
     cam_calib = _find_camera_calibration(cameras, camera_name)
 
@@ -149,33 +153,33 @@ def process_example(
     fx, fy = float(K[0, 0]), float(K[1, 1])
     cx, cy = float(K[0, 2]), float(K[1, 2])
     resolution = cam_calib["resolution"]
-    print(f"    fx={fx:.1f} fy={fy:.1f} cx={cx:.1f} cy={cy:.1f} res={resolution}")
+    logger.info("    fx=%.1f fy=%.1f cx=%.1f cy=%.1f res=%s", fx, fy, cx, cy, resolution)
 
     camera = Camera.from_panoptic_calibration(K, R, t, resolution)
 
     # --- 2. Extract video frames ---
-    print("\n  [2/7] Extracting video frames...")
+    logger.info("[2/7] Extracting video frames...")
     video_fps = 30.0
     frame_step = max(1, int(round(video_fps / config.target_fps)))
     frame_indices = list(range(start_frame, start_frame + num_frames, frame_step))
-    print(f"    {len(frame_indices)} frames (step={frame_step}, target {config.target_fps} fps)")
+    logger.info("    %d frames (step=%d, target %.1f fps)", len(frame_indices), frame_step, config.target_fps)
 
     frames_rgb = extract_video_frames(video_path, frame_indices)
     if len(frames_rgb) < len(frame_indices):
-        print(f"    WARNING: Only got {len(frames_rgb)}/{len(frame_indices)} frames from video")
+        logger.warning("Only got %d/%d frames from video", len(frames_rgb), len(frame_indices))
         frame_indices = frame_indices[:len(frames_rgb)]
     if len(frames_rgb) < 2:
-        print("    ERROR: Need at least 2 frames. Skipping.")
+        logger.error("Need at least 2 frames. Skipping.")
         return {}
 
     # --- 3. Run MediaPipe ---
-    print(f"\n  [3/7] Running MediaPipe on {len(frames_rgb)} frames...")
+    logger.info("[3/7] Running MediaPipe on %d frames...", len(frames_rgb))
     kp_2d, kp_3d, visibility = detect_poses(frames_rgb, landmarker=landmarker)  # [2D:SKELETON_16], [3D:SKELETON_16], [VIS:SKELETON_16]
     n_detected = sum(1 for v in visibility if v.mean() > 0.3)
-    print(f"    Detected poses in {n_detected}/{len(frames_rgb)} frames")
+    logger.info("    Detected poses in %d/%d frames", n_detected, len(frames_rgb))
 
     # --- 4. Convert to camera coordinates ---
-    print("\n  [4/7] Converting to camera coordinates...")
+    logger.info("[4/7] Converting to camera coordinates...")
     det_cam_positions: list[np.ndarray] = []  # list of [3D:SKELETON_16] (16, 3), camera-space meters
     for i in range(len(frames_rgb)):
         pos_cam = mediapipe_3d_to_camera(  # [3D:SKELETON_16]
@@ -184,10 +188,10 @@ def process_example(
         det_cam_positions.append(pos_cam)
 
     z_vals = [float(pos[0, 2]) for pos in det_cam_positions]
-    print(f"    Detector root Z range: {min(z_vals):.2f} to {max(z_vals):.2f} m")
+    logger.info("    Detector root Z range: %.2f to %.2f m", min(z_vals), max(z_vals))
 
     # Ground truth -> camera space
-    print("    Loading ground truth...")
+    logger.info("    Loading ground truth...")
     gt_world = load_ground_truth_sequence(seq_dir, frame_indices, person_idx)
     gt_cam: list[np.ndarray | None] = []  # list of [3D:SKELETON_16] (16, 3), camera-space meters
     for gt in gt_world:
@@ -197,20 +201,10 @@ def process_example(
         else:
             gt_cam.append(None)
     n_gt = sum(1 for g in gt_cam if g is not None)
-    print(f"    Ground truth available for {n_gt}/{len(frame_indices)} frames")
+    logger.info("    Ground truth available for %d/%d frames", n_gt, len(frame_indices))
 
     # --- 5. Optimize ---
-    print(f"\n  [5/7] Running FK optimization...")
-
-    # Generate synthetic heatmaps for overlay video (we pass target_2d to optimizer
-    # which generates its own, but we also need them for overlay)
-    target_2d_arr = np.array(kp_2d)  # (F, 16, 2) [2D:SKELETON_16]
-    synthetic_heatmaps, synthetic_affine = generate_synthetic_heatmaps(  # [HEATMAP:SKELETON_16]
-        target_2d_arr,
-        image_size=camera.image_size,
-        heatmap_size=64,
-        sigma=config.optimization.heatmap_sigma,
-    )
+    logger.info("[5/7] Running FK optimization...")
 
     optimized_3d, bone_lengths_final, loss_history = optimize(
         raw_3d=det_cam_positions,
@@ -221,7 +215,7 @@ def process_example(
     )
 
     # --- 6. Evaluate ---
-    print(f"\n  [6/7] Evaluating...")
+    logger.info("[6/7] Evaluating...")
     metrics: dict[str, Any] = {"name": name}
 
     gt_indices = [i for i, g in enumerate(gt_cam) if g is not None]
@@ -272,24 +266,28 @@ def process_example(
         metrics["gt_bone_lengths"] = gt_bl.tolist()
         metrics["det_bone_lengths"] = det_bl.tolist()
 
-        print(f"    Det MPJPE:       {metrics['det_mpjpe']*100:.2f} cm")
-        print(f"    Opt MPJPE:       {metrics['opt_mpjpe']*100:.2f} cm")
-        print(f"    Det SI-MPJPE:    {metrics['det_si_mpjpe']*100:.2f} cm")
-        print(f"    Opt SI-MPJPE:    {metrics['opt_si_mpjpe']*100:.2f} cm")
-        print(f"    Det VW-SI-MPJPE: {metrics['det_vw_si_mpjpe']*100:.2f} cm")
-        print(f"    Opt VW-SI-MPJPE: {metrics['opt_vw_si_mpjpe']*100:.2f} cm")
+        # Log secondary metrics
+        logger.info("    Det MPJPE:    %.2f cm", metrics['det_mpjpe'] * 100)
+        logger.info("    Opt MPJPE:    %.2f cm", metrics['opt_mpjpe'] * 100)
+        logger.info("    Det SI-MPJPE: %.2f cm", metrics['det_si_mpjpe'] * 100)
+        logger.info("    Opt SI-MPJPE: %.2f cm", metrics['opt_si_mpjpe'] * 100)
         if "det_mpjve" in metrics:
-            print(f"    Det MPJVE:       {metrics['det_mpjve']*100:.2f} cm/f")
-            print(f"    Opt MPJVE:       {metrics['opt_mpjve']*100:.2f} cm/f")
+            logger.info("    Det MPJVE:    %.2f cm/f", metrics['det_mpjve'] * 100)
+            logger.info("    Opt MPJVE:    %.2f cm/f", metrics['opt_mpjve'] * 100)
+
+        # Per-example VW-SI-MPJPE summary (always printed)
+        print(
+            f"[{name}] "
+            f"Det VW-SI-MPJPE: {metrics['det_vw_si_mpjpe'] * 100:.2f} cm  "
+            f"Opt VW-SI-MPJPE: {metrics['opt_vw_si_mpjpe'] * 100:.2f} cm"
+        )
     else:
-        print("    No ground truth available for evaluation.")
+        logger.info("    No ground truth available for evaluation.")
 
     # --- 7. Save results ---
-    print(f"\n  [7/7] Saving results...")
+    logger.info("[7/7] Saving results...")
     example_dir = os.path.join(run_dir, name)
-    graphs_dir = os.path.join(example_dir, "graphs")
     os.makedirs(example_dir, exist_ok=True)
-    os.makedirs(graphs_dir, exist_ok=True)
 
     # results.json -- structured per plan Phase 6 spec
     _METRIC_KEYS = [
@@ -315,7 +313,7 @@ def process_example(
     results_path = os.path.join(example_dir, "results.json")
     with open(results_path, "w") as f:
         json.dump(results_data, f, indent=2, default=str)
-    print(f"    Saved results: {results_path}")
+    logger.info("    Saved results: %s", results_path)
 
     # trajectories.json
     traj_data = {
@@ -328,74 +326,86 @@ def process_example(
     traj_path = os.path.join(example_dir, "trajectories.json")
     with open(traj_path, "w") as f:
         json.dump(traj_data, f, indent=2)
-    print(f"    Saved trajectories: {traj_path}")
+    logger.info("    Saved trajectories: %s", traj_path)
 
     # Graphs
-    generate_trajectory_graphs(det_cam_positions, optimized_3d, gt_cam, graphs_dir)
-    generate_loss_curve(loss_history, graphs_dir)
-    generate_bone_lengths_graph(
-        bone_lengths_final, graphs_dir,
-        gt_bone_lengths=np.array(metrics["gt_bone_lengths"]) if "gt_bone_lengths" in metrics else None,
-        det_bone_lengths=np.array(metrics["det_bone_lengths"]) if "det_bone_lengths" in metrics else None,
-    )
-    if "det_per_joint" in metrics:
-        generate_per_joint_error_bar(
-            metrics["det_per_joint"], graphs_dir,
-            opt_per_joint=metrics.get("opt_per_joint"),
+    if config.generate_graphs:
+        graphs_dir = os.path.join(example_dir, "graphs")
+        os.makedirs(graphs_dir, exist_ok=True)
+        generate_trajectory_graphs(det_cam_positions, optimized_3d, gt_cam, graphs_dir)
+        generate_loss_curve(loss_history, graphs_dir)
+        generate_bone_lengths_graph(
+            bone_lengths_final, graphs_dir,
+            gt_bone_lengths=np.array(metrics["gt_bone_lengths"]) if "gt_bone_lengths" in metrics else None,
+            det_bone_lengths=np.array(metrics["det_bone_lengths"]) if "det_bone_lengths" in metrics else None,
         )
-    if "det_per_frame_mpjpe" in metrics:
-        generate_per_frame_mpjpe(
-            metrics["det_per_frame_mpjpe"], graphs_dir,
-            opt_per_frame=metrics.get("opt_per_frame_mpjpe"),
+        if "det_per_joint" in metrics:
+            generate_per_joint_error_bar(
+                metrics["det_per_joint"], graphs_dir,
+                opt_per_joint=metrics.get("opt_per_joint"),
+            )
+        if "det_per_frame_mpjpe" in metrics:
+            generate_per_frame_mpjpe(
+                metrics["det_per_frame_mpjpe"], graphs_dir,
+                opt_per_frame=metrics.get("opt_per_frame_mpjpe"),
+            )
+        if "det_per_frame_mpjve" in metrics:
+            generate_per_frame_mpjve(
+                metrics["det_per_frame_mpjve"],
+                metrics.get("opt_per_frame_mpjve"),
+                graphs_dir,
+            )
+        generate_summary(
+            det_cam_positions, optimized_3d, gt_cam,
+            loss_history, metrics, bone_lengths_final,
+            graphs_dir, title=name,
         )
-    if "det_per_frame_mpjve" in metrics:
-        generate_per_frame_mpjve(
-            metrics["det_per_frame_mpjve"],
-            metrics.get("opt_per_frame_mpjve"),
-            graphs_dir,
-        )
-    generate_summary(
-        det_cam_positions, optimized_3d, gt_cam,
-        loss_history, metrics, bone_lengths_final,
-        graphs_dir, title=name,
-    )
-    print(f"    Saved graphs: {graphs_dir}")
+        logger.info("    Saved graphs: %s", graphs_dir)
+
+        # summary.png copy to example root
+        summary_src = os.path.join(graphs_dir, "summary.png")
+        summary_dst = os.path.join(example_dir, "summary.png")
+        if os.path.exists(summary_src) and not os.path.exists(summary_dst):
+            import shutil
+            shutil.copy2(summary_src, summary_dst)
 
     # Overlay video -- use synthetic heatmaps for visualization
-    overlay_path = os.path.join(example_dir, "overlay_video.mp4")
+    if config.generate_video:
+        target_2d_arr = np.array(kp_2d)  # (F, 16, 2) [2D:SKELETON_16]
+        synthetic_heatmaps, synthetic_affine = generate_synthetic_heatmaps(  # [HEATMAP:SKELETON_16]
+            target_2d_arr,
+            image_size=camera.image_size,
+            heatmap_size=64,
+            sigma=config.optimization.heatmap_sigma,
+        )
 
-    # For overlay, build per-frame 2D detection arrays with visibility as 3rd column
-    detector_2d_with_vis = []
-    for i in range(len(frames_rgb)):
-        kp_with_vis = np.zeros((NUM_JOINTS, 3), dtype=np.float64)
-        kp_with_vis[:, :2] = kp_2d[i]
-        kp_with_vis[:, 2] = visibility[i]
-        detector_2d_with_vis.append(kp_with_vis)
+        overlay_path = os.path.join(example_dir, "overlay_video.mp4")
 
-    generate_overlay_video(
-        output_path=overlay_path,
-        frames_rgb=frames_rgb,
-        heatmaps=[synthetic_heatmaps[i] for i in range(len(frames_rgb))],
-        detector_2d=detector_2d_with_vis,
-        detector_3d=det_cam_positions,
-        optimized_3d=optimized_3d,
-        camera_fx=fx,
-        camera_fy=fy,
-        camera_cx=cx,
-        camera_cy=cy,
-        affine=synthetic_affine,
-        frame_indices=frame_indices[:len(frames_rgb)],
-        gt_3d=gt_cam,
-        visibility=visibility,
-        pipeline_name="MediaPipe",
-    )
+        # For overlay, build per-frame 2D detection arrays with visibility as 3rd column
+        detector_2d_with_vis = []
+        for i in range(len(frames_rgb)):
+            kp_with_vis = np.zeros((NUM_JOINTS, 3), dtype=np.float64)
+            kp_with_vis[:, :2] = kp_2d[i]
+            kp_with_vis[:, 2] = visibility[i]
+            detector_2d_with_vis.append(kp_with_vis)
 
-    # summary.png copy
-    summary_src = os.path.join(graphs_dir, "summary.png")
-    summary_dst = os.path.join(example_dir, "summary.png")
-    if os.path.exists(summary_src) and not os.path.exists(summary_dst):
-        import shutil
-        shutil.copy2(summary_src, summary_dst)
+        generate_overlay_video(
+            output_path=overlay_path,
+            frames_rgb=frames_rgb,
+            heatmaps=[synthetic_heatmaps[i] for i in range(len(frames_rgb))],
+            detector_2d=detector_2d_with_vis,
+            detector_3d=det_cam_positions,
+            optimized_3d=optimized_3d,
+            camera_fx=fx,
+            camera_fy=fy,
+            camera_cx=cx,
+            camera_cy=cy,
+            affine=synthetic_affine,
+            frame_indices=frame_indices[:len(frames_rgb)],
+            gt_3d=gt_cam,
+            visibility=visibility,
+            pipeline_name="MediaPipe",
+        )
 
     return metrics
 
@@ -417,17 +427,24 @@ def run_pipeline(config: RunConfig) -> None:
 
     os.makedirs(run_dir, exist_ok=True)
 
-    print("=" * 60)
-    print("  MediaPipe Pose Estimation Pipeline")
-    print(f"  {len(config.examples)} examples to process")
-    print(f"  Run: {run_dir}")
-    print("=" * 60)
+    # Auto-discover examples if none specified
+    examples = config.examples
+    if not examples:
+        logger.info("No examples specified — auto-discovering sequences in %s", config.data_root)
+        examples = discover_examples(config.data_root)
+        logger.info("Found %d sequences", len(examples))
 
-    print("\n  Loading MediaPipe model...")
+    logger.info("=" * 60)
+    logger.info("MediaPipe Pose Estimation Pipeline")
+    logger.info("%d examples to process", len(examples))
+    logger.info("Run: %s", run_dir)
+    logger.info("=" * 60)
+
+    logger.info("Loading MediaPipe model...")
     landmarker = load_landmarker()
 
     all_metrics: list[dict[str, Any]] = []
-    for example in config.examples:
+    for example in examples:
         try:
             metrics = process_example(
                 config,
@@ -442,7 +459,7 @@ def run_pipeline(config: RunConfig) -> None:
             if metrics:
                 all_metrics.append(metrics)
         except Exception as e:
-            print(f"\n  ERROR processing {example.sequence}_{example.start_frame}: {e}")
+            logger.error("ERROR processing %s_%d: %s", example.sequence, example.start_frame, e)
             import traceback
             traceback.print_exc()
             continue
@@ -452,7 +469,7 @@ def run_pipeline(config: RunConfig) -> None:
     if all_metrics:
         generate_aggregate_summary(all_metrics, run_dir)
 
-    print(f"\n{'='*60}")
-    print(f"  Done. {len(all_metrics)}/{len(config.examples)} examples processed.")
-    print(f"  Results: {run_dir}")
-    print(f"{'='*60}")
+    logger.info("=" * 60)
+    logger.info("Done. %d/%d examples processed.", len(all_metrics), len(examples))
+    logger.info("Results: %s", run_dir)
+    logger.info("=" * 60)
