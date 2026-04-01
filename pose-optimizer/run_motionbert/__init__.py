@@ -26,12 +26,10 @@ from cmu_data import (
     load_calibration,
     load_ground_truth_sequence,
 )
-from config import RunConfig, load_config
+from config import RunConfig
 from evaluate import (
     evaluate,
-    compute_visibility_weights,
     mpjpe_per_joint,
-    mpjve_per_joint,
     root_relative,
 )
 from graphs import (
@@ -295,14 +293,15 @@ def process_example(
             logger.info("    Det MPJVE:    %.2f cm/f", metrics['det_mpjve'] * 100)
             logger.info("    Opt MPJVE:    %.2f cm/f", metrics['opt_mpjve'] * 100)
 
-        # Per-example VW-SI-MPJPE summary (always printed)
-        print(
-            f"[{name}] "
-            f"Det VW-SI-MPJPE: {metrics['det_vw_si_mpjpe'] * 100:.2f} cm  "
-            f"Opt VW-SI-MPJPE: {metrics['opt_vw_si_mpjpe'] * 100:.2f} cm"
-        )
     else:
         logger.info("    No ground truth available for evaluation.")
+
+    # Per-example summary (always printed regardless of GT availability)
+    det_vw = metrics.get("det_vw_si_mpjpe")
+    opt_vw = metrics.get("opt_vw_si_mpjpe")
+    det_str = f"{det_vw * 100:.2f} cm" if det_vw is not None else "N/A"
+    opt_str = f"{opt_vw * 100:.2f} cm" if opt_vw is not None else "N/A"
+    print(f"[{name}] Det VW-SI-MPJPE: {det_str}  Opt VW-SI-MPJPE: {opt_str}")
 
     # --- 7. Save results ---
     logger.info("[7/7] Saving results...")
@@ -461,10 +460,8 @@ def run_pipeline(config: RunConfig) -> None:
             )
             if metrics:
                 all_metrics.append(metrics)
-        except Exception as e:
-            logger.error("ERROR processing %s_%d: %s", example.sequence, example.start_frame, e)
-            import traceback
-            traceback.print_exc()
+        except Exception:
+            logger.exception("ERROR processing %s_%d", example.sequence, example.start_frame)
             continue
 
     # Aggregate summary

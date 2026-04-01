@@ -158,3 +158,50 @@ From PLAN.md (reproduced and expanded):
 ### TODO.md updates
 - Phase 5 logging item marked `[x]`.
 - "First auto-discovered example too large" item marked `[~]` (won't fix — dataset ordering issue, not a code bug).
+
+---
+
+## Iteration 3 Fixes
+
+**Date:** 2026-04-01
+
+**Source:** NITPICK_REPORT_05.md — Issues 1, 2, 3
+
+### Issue 1 — Stale imports removed (BLOCKING)
+
+**Files:** `pose-optimizer/run_motionbert/__init__.py`, `pose-optimizer/run_mediapipe/__init__.py`
+
+Confirmed by grep that `load_config`, `compute_visibility_weights`, and `mpjve_per_joint` appeared only on their import lines in both files. All three were removed:
+
+- `load_config` dropped from `from config import RunConfig, load_config` — now `from config import RunConfig`.
+- `compute_visibility_weights` and `mpjve_per_joint` dropped from the `evaluate` import block, which now imports only `evaluate`, `mpjpe_per_joint`, and `root_relative`.
+
+### Issue 2 — Per-example summary always fires
+
+**Files:** `pose-optimizer/run_motionbert/__init__.py`, `pose-optimizer/run_mediapipe/__init__.py`
+
+The `print()` summary was inside the `if len(gt_indices) >= 2:` block and was silently skipped when no GT was available. Moved the print outside the block (after the `else` branch). When GT is absent, `metrics.get("det_vw_si_mpjpe")` returns `None` and the print shows `N/A`:
+
+```
+[sequence_0] Det VW-SI-MPJPE: N/A  Opt VW-SI-MPJPE: N/A
+```
+
+When GT is present, the values are formatted as before:
+
+```
+[sequence_0] Det VW-SI-MPJPE: 12.34 cm  Opt VW-SI-MPJPE: 10.56 cm
+```
+
+Every processed example now produces exactly one summary line regardless of GT availability.
+
+### Issue 3 — traceback.print_exc() replaced with logger.exception()
+
+**Files:** `pose-optimizer/run_motionbert/__init__.py`, `pose-optimizer/run_mediapipe/__init__.py`
+
+The `except Exception as e` handler was using `logger.error(...)` + `traceback.print_exc()`, writing stack traces directly to stderr and bypassing the logging system. Replaced with a single `logger.exception(...)` call which logs the full traceback at ERROR level through the logging framework. The `import traceback` inline import and `traceback.print_exc()` lines were removed. The `except` clause no longer binds `e` since `logger.exception` captures the active exception automatically.
+
+### TODO.md updates
+
+- Phase 5 stale imports item marked `[x]`.
+- Phase 5 per-example summary item marked `[x]`.
+- Phase 5 traceback item marked `[x]`.
