@@ -478,7 +478,7 @@ def generate_cross_pipeline_metrics_comparison(
     mb_opt_pos = _avg(all_mb_metrics, "opt_vw_si_mpjpe")
     mp_det_pos = _avg(all_mp_metrics, "det_vw_si_mpjpe")
     mp_opt_pos = _avg(all_mp_metrics, "opt_vw_si_mpjpe")
-    if all(v is not None for v in [mb_det_pos, mb_opt_pos, mp_det_pos, mp_opt_pos]):
+    if mb_det_pos is not None and mb_opt_pos is not None and mp_det_pos is not None and mp_opt_pos is not None:
         metric_groups.append((mb_det_pos * 100, mb_opt_pos * 100, mp_det_pos * 100, mp_opt_pos * 100))
         labels.append("VW-SI-MPJPE (cm)")
 
@@ -487,7 +487,7 @@ def generate_cross_pipeline_metrics_comparison(
     mb_opt_vel = _avg(all_mb_metrics, "opt_vw_si_mpjve")
     mp_det_vel = _avg(all_mp_metrics, "det_vw_si_mpjve")
     mp_opt_vel = _avg(all_mp_metrics, "opt_vw_si_mpjve")
-    if all(v is not None for v in [mb_det_vel, mb_opt_vel, mp_det_vel, mp_opt_vel]):
+    if mb_det_vel is not None and mb_opt_vel is not None and mp_det_vel is not None and mp_opt_vel is not None:
         metric_groups.append((mb_det_vel * 100, mb_opt_vel * 100, mp_det_vel * 100, mp_opt_vel * 100))
         labels.append("VW-SI-MPJVE (cm/f)")
 
