@@ -347,6 +347,180 @@ def generate_summary(
 # Aggregate summary
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Cross-pipeline comparison graphs (Phase 4)
+# ---------------------------------------------------------------------------
+
+# Consistent color scheme for cross-pipeline graphs
+COLOR_GT = "#4285F4"          # Blue (Google blue)
+COLOR_MB_RAW = "#FFCC80"      # Light Orange
+COLOR_MB_OPT = "#FF9800"      # Orange
+COLOR_MP_RAW = "#EF9A9A"      # Light Red
+COLOR_MP_OPT = "#F44336"      # Red
+
+
+def generate_cross_pipeline_per_joint_position(
+    all_mb_metrics: list[dict[str, Any]],
+    all_mp_metrics: list[dict[str, Any]],
+    output_dir: str,
+) -> None:
+    """Bar chart of per-joint VW-SI-MPJPE averaged across examples, 4 bars per joint.
+
+    Args:
+        all_mb_metrics: List of per-example MotionBERT metrics.
+        all_mp_metrics: List of per-example MediaPipe metrics.
+        output_dir: Directory to save the graph.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Collect per-joint VW-SI-MPJPE across examples and average
+    mb_det_all = [m["det_vw_si_mpjpe_per_joint"] for m in all_mb_metrics if "det_vw_si_mpjpe_per_joint" in m]
+    mb_opt_all = [m["opt_vw_si_mpjpe_per_joint"] for m in all_mb_metrics if "opt_vw_si_mpjpe_per_joint" in m]
+    mp_det_all = [m["det_vw_si_mpjpe_per_joint"] for m in all_mp_metrics if "det_vw_si_mpjpe_per_joint" in m]
+    mp_opt_all = [m["opt_vw_si_mpjpe_per_joint"] for m in all_mp_metrics if "opt_vw_si_mpjpe_per_joint" in m]
+
+    if not (mb_det_all and mb_opt_all and mp_det_all and mp_opt_all):
+        return
+
+    mb_det = np.mean(mb_det_all, axis=0) * 100  # to cm
+    mb_opt = np.mean(mb_opt_all, axis=0) * 100
+    mp_det = np.mean(mp_det_all, axis=0) * 100
+    mp_opt = np.mean(mp_opt_all, axis=0) * 100
+
+    x = np.arange(NUM_EVAL_JOINTS)
+    width = 0.2
+
+    fig, ax = plt.subplots(figsize=(16, 6))
+    ax.bar(x - 1.5 * width, mb_det, width, color=COLOR_MB_RAW, label="MotionBERT Raw")
+    ax.bar(x - 0.5 * width, mb_opt, width, color=COLOR_MB_OPT, label="MotionBERT Optimized")
+    ax.bar(x + 0.5 * width, mp_det, width, color=COLOR_MP_RAW, label="MediaPipe Raw")
+    ax.bar(x + 1.5 * width, mp_opt, width, color=COLOR_MP_OPT, label="MediaPipe Optimized")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel("VW-SI-MPJPE (cm)")
+    ax.set_title("Position Error Per-Joint: MotionBERT vs MediaPipe")
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3, axis="y")
+    _save(fig, os.path.join(output_dir, "cross_pipeline_per_joint_position.png"))
+
+
+def generate_cross_pipeline_per_joint_velocity(
+    all_mb_metrics: list[dict[str, Any]],
+    all_mp_metrics: list[dict[str, Any]],
+    output_dir: str,
+) -> None:
+    """Bar chart of per-joint VW-SI-MPJVE averaged across examples, 4 bars per joint.
+
+    Args:
+        all_mb_metrics: List of per-example MotionBERT metrics.
+        all_mp_metrics: List of per-example MediaPipe metrics.
+        output_dir: Directory to save the graph.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    mb_det_all = [m["det_vw_si_mpjve_per_joint"] for m in all_mb_metrics if "det_vw_si_mpjve_per_joint" in m]
+    mb_opt_all = [m["opt_vw_si_mpjve_per_joint"] for m in all_mb_metrics if "opt_vw_si_mpjve_per_joint" in m]
+    mp_det_all = [m["det_vw_si_mpjve_per_joint"] for m in all_mp_metrics if "det_vw_si_mpjve_per_joint" in m]
+    mp_opt_all = [m["opt_vw_si_mpjve_per_joint"] for m in all_mp_metrics if "opt_vw_si_mpjve_per_joint" in m]
+
+    if not (mb_det_all and mb_opt_all and mp_det_all and mp_opt_all):
+        return
+
+    mb_det = np.mean(mb_det_all, axis=0) * 100
+    mb_opt = np.mean(mb_opt_all, axis=0) * 100
+    mp_det = np.mean(mp_det_all, axis=0) * 100
+    mp_opt = np.mean(mp_opt_all, axis=0) * 100
+
+    x = np.arange(NUM_EVAL_JOINTS)
+    width = 0.2
+
+    fig, ax = plt.subplots(figsize=(16, 6))
+    ax.bar(x - 1.5 * width, mb_det, width, color=COLOR_MB_RAW, label="MotionBERT Raw")
+    ax.bar(x - 0.5 * width, mb_opt, width, color=COLOR_MB_OPT, label="MotionBERT Optimized")
+    ax.bar(x + 0.5 * width, mp_det, width, color=COLOR_MP_RAW, label="MediaPipe Raw")
+    ax.bar(x + 1.5 * width, mp_opt, width, color=COLOR_MP_OPT, label="MediaPipe Optimized")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel("VW-SI-MPJVE (cm/frame)")
+    ax.set_title("Velocity Error Per-Joint: MotionBERT vs MediaPipe")
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3, axis="y")
+    _save(fig, os.path.join(output_dir, "cross_pipeline_per_joint_velocity.png"))
+
+
+def generate_cross_pipeline_metrics_comparison(
+    all_mb_metrics: list[dict[str, Any]],
+    all_mp_metrics: list[dict[str, Any]],
+    output_dir: str,
+) -> None:
+    """Bar chart comparing aggregate VW-SI-MPJPE and VW-SI-MPJVE across pipelines.
+
+    4 bars per metric group: MB Raw, MB Opt, MP Raw, MP Opt.
+
+    Args:
+        all_mb_metrics: List of per-example MotionBERT metrics.
+        all_mp_metrics: List of per-example MediaPipe metrics.
+        output_dir: Directory to save the graph.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    def _avg(metrics_list: list[dict], key: str) -> float | None:
+        vals = [m[key] for m in metrics_list if key in m]
+        return float(np.mean(vals)) if vals else None
+
+    metric_groups = []
+    labels = []
+
+    # VW-SI-MPJPE
+    mb_det_pos = _avg(all_mb_metrics, "det_vw_si_mpjpe")
+    mb_opt_pos = _avg(all_mb_metrics, "opt_vw_si_mpjpe")
+    mp_det_pos = _avg(all_mp_metrics, "det_vw_si_mpjpe")
+    mp_opt_pos = _avg(all_mp_metrics, "opt_vw_si_mpjpe")
+    if all(v is not None for v in [mb_det_pos, mb_opt_pos, mp_det_pos, mp_opt_pos]):
+        metric_groups.append((mb_det_pos * 100, mb_opt_pos * 100, mp_det_pos * 100, mp_opt_pos * 100))
+        labels.append("VW-SI-MPJPE (cm)")
+
+    # VW-SI-MPJVE
+    mb_det_vel = _avg(all_mb_metrics, "det_vw_si_mpjve")
+    mb_opt_vel = _avg(all_mb_metrics, "opt_vw_si_mpjve")
+    mp_det_vel = _avg(all_mp_metrics, "det_vw_si_mpjve")
+    mp_opt_vel = _avg(all_mp_metrics, "opt_vw_si_mpjve")
+    if all(v is not None for v in [mb_det_vel, mb_opt_vel, mp_det_vel, mp_opt_vel]):
+        metric_groups.append((mb_det_vel * 100, mb_opt_vel * 100, mp_det_vel * 100, mp_opt_vel * 100))
+        labels.append("VW-SI-MPJVE (cm/f)")
+
+    if not metric_groups:
+        return
+
+    x = np.arange(len(metric_groups))
+    width = 0.18
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for i, (mb_d, mb_o, mp_d, mp_o) in enumerate(metric_groups):
+        ax.bar(x[i] - 1.5 * width, mb_d, width, color=COLOR_MB_RAW,
+               label="MotionBERT Raw" if i == 0 else "")
+        ax.bar(x[i] - 0.5 * width, mb_o, width, color=COLOR_MB_OPT,
+               label="MotionBERT Optimized" if i == 0 else "")
+        ax.bar(x[i] + 0.5 * width, mp_d, width, color=COLOR_MP_RAW,
+               label="MediaPipe Raw" if i == 0 else "")
+        ax.bar(x[i] + 1.5 * width, mp_o, width, color=COLOR_MP_OPT,
+               label="MediaPipe Optimized" if i == 0 else "")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=10)
+    ax.set_ylabel("Error")
+    ax.set_title("Metrics Comparison: MotionBERT vs MediaPipe (avg across examples)")
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3, axis="y")
+    _save(fig, os.path.join(output_dir, "cross_pipeline_metrics_comparison.png"))
+
+
+# ---------------------------------------------------------------------------
+# Aggregate summary
+# ---------------------------------------------------------------------------
+
 def generate_aggregate_summary(
     all_metrics: list[dict[str, Any]],
     output_dir: str,

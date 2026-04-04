@@ -26,10 +26,19 @@ from cmu_data import (
     load_ground_truth_sequence,
 )
 from config import RunConfig, load_config
-from evaluate import evaluate, mpjpe_per_joint
+from evaluate import (
+    evaluate,
+    compute_visibility_weights,
+    mpjpe_per_joint,
+    vw_si_mpjpe_per_joint,
+    vw_si_mpjve_per_joint,
+)
 from graphs import (
     generate_aggregate_summary,
     generate_bone_lengths_graph,
+    generate_cross_pipeline_metrics_comparison,
+    generate_cross_pipeline_per_joint_position,
+    generate_cross_pipeline_per_joint_velocity,
     generate_loss_curve,
     generate_per_frame_mpjpe,
     generate_per_frame_mpjve,
@@ -119,6 +128,14 @@ def _evaluate_and_collect_metrics(
     metrics["det_per_joint"] = mpjpe_per_joint(det_eval, gt_eval).tolist()
     metrics["opt_per_joint"] = mpjpe_per_joint(opt_eval, gt_eval).tolist()
 
+    # Per-joint VW-SI-MPJPE and VW-SI-MPJVE (for cross-pipeline graphs)
+    vis = compute_visibility_weights(gt_arr, camera)[:, EVAL_JOINTS]
+    metrics["det_vw_si_mpjpe_per_joint"] = vw_si_mpjpe_per_joint(det_eval, gt_eval, vis).tolist()
+    metrics["opt_vw_si_mpjpe_per_joint"] = vw_si_mpjpe_per_joint(opt_eval, gt_eval, vis).tolist()
+    if len(gt_indices) >= 3:
+        metrics["det_vw_si_mpjve_per_joint"] = vw_si_mpjve_per_joint(det_eval, gt_eval, vis).tolist()
+        metrics["opt_vw_si_mpjve_per_joint"] = vw_si_mpjve_per_joint(opt_eval, gt_eval, vis).tolist()
+
     # Per-frame MPJPE
     metrics["det_per_frame_mpjpe"] = [
         float(np.mean(np.linalg.norm(det_eval[i] - gt_eval[i], axis=-1)))
@@ -187,6 +204,10 @@ def _save_results(
         "per_joint": {
             "det_per_joint": metrics.get("det_per_joint", []),
             "opt_per_joint": metrics.get("opt_per_joint", []),
+            "det_vw_si_mpjpe_per_joint": metrics.get("det_vw_si_mpjpe_per_joint", []),
+            "opt_vw_si_mpjpe_per_joint": metrics.get("opt_vw_si_mpjpe_per_joint", []),
+            "det_vw_si_mpjve_per_joint": metrics.get("det_vw_si_mpjve_per_joint", []),
+            "opt_vw_si_mpjve_per_joint": metrics.get("opt_vw_si_mpjve_per_joint", []),
             "det_per_frame_mpjpe": metrics.get("det_per_frame_mpjpe", []),
             "opt_per_frame_mpjpe": metrics.get("opt_per_frame_mpjpe", []),
             "gt_bone_lengths": metrics.get("gt_bone_lengths", []),
@@ -598,8 +619,20 @@ def main(config_path: str) -> None:
 
     # --- 6. Cross-pipeline graphs ---
     if config.graphs and run_motionbert and run_mediapipe:
-        # Phase 4 will implement cross-pipeline graphs here
-        logger.info("Cross-pipeline graphs will be generated in Phase 4.")
+        logger.info("Generating cross-pipeline comparison graphs...")
+        cross_dir = os.path.join(run_dir, "cross_pipeline_graphs")
+        os.makedirs(cross_dir, exist_ok=True)
+
+        if config.graphs.position_error_per_joint_improvement:
+            generate_cross_pipeline_per_joint_position(all_mb_metrics, all_mp_metrics, cross_dir)
+
+        if config.graphs.velocity_error_per_joint_improvement:
+            generate_cross_pipeline_per_joint_velocity(all_mb_metrics, all_mp_metrics, cross_dir)
+
+        if config.graphs.metrics_comparison:
+            generate_cross_pipeline_metrics_comparison(all_mb_metrics, all_mp_metrics, cross_dir)
+
+        logger.info("Saved cross-pipeline graphs: %s", cross_dir)
     elif config.graphs:
         logger.warning("Cross-pipeline graphs require both motionbert and mediapipe sections in config; skipping")
 

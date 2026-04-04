@@ -383,6 +383,73 @@ def mpjve_per_joint(predicted: np.ndarray, target: np.ndarray) -> np.ndarray:
     return np.mean(np.linalg.norm(pred_vel - tgt_vel, axis=-1), axis=0)
 
 
+def vw_si_mpjpe_per_joint(
+    predicted: np.ndarray,
+    target: np.ndarray,
+    weights: np.ndarray,
+) -> np.ndarray:
+    """Per-joint VW-SI-MPJPE: visibility-weighted, scale-independent position error.
+
+    Finds the global optimal scale (weighted), then computes per-joint
+    weighted mean error.
+
+    Args:
+        predicted: (F, J, 3) joint positions in camera coordinates.
+        target: (F, J, 3) ground truth in camera coordinates.
+        weights: (F, J) per-joint per-frame visibility weights.
+
+    Returns:
+        (J,) VW-SI-MPJPE per joint.
+    """
+    s = _optimal_scale_weighted(predicted, target, weights)
+    scaled = s * predicted
+    errors = np.linalg.norm(scaled - target, axis=-1)  # (F, J)
+    n_joints = predicted.shape[1]
+    result = np.zeros(n_joints)
+    for j in range(n_joints):
+        w_sum = float(weights[:, j].sum())
+        if w_sum < 1e-12:
+            result[j] = float(np.mean(errors[:, j]))
+        else:
+            result[j] = float(np.sum(errors[:, j] * weights[:, j]) / w_sum)
+    return result
+
+
+def vw_si_mpjve_per_joint(
+    predicted: np.ndarray,
+    target: np.ndarray,
+    weights: np.ndarray,
+) -> np.ndarray:
+    """Per-joint VW-SI-MPJVE: visibility-weighted, scale-independent velocity error.
+
+    Finds the global optimal scale (weighted), then computes per-joint
+    weighted mean velocity error.
+
+    Args:
+        predicted: (F, J, 3) joint positions in camera coordinates.
+        target: (F, J, 3) ground truth in camera coordinates.
+        weights: (F, J) per-joint per-frame visibility weights.
+
+    Returns:
+        (J,) VW-SI-MPJVE per joint.
+    """
+    s = _optimal_scale_weighted(predicted, target, weights)
+    scaled = s * predicted
+    pred_vel = _velocities(scaled)
+    tgt_vel = _velocities(target)
+    errors = np.linalg.norm(pred_vel - tgt_vel, axis=-1)  # (F-1, J)
+    vel_weights = np.minimum(weights[:-1], weights[1:])  # (F-1, J)
+    n_joints = predicted.shape[1]
+    result = np.zeros(n_joints)
+    for j in range(n_joints):
+        w_sum = float(vel_weights[:, j].sum())
+        if w_sum < 1e-12:
+            result[j] = float(np.mean(errors[:, j]))
+        else:
+            result[j] = float(np.sum(errors[:, j] * vel_weights[:, j]) / w_sum)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # 2D Reprojected MPJPE
 # ---------------------------------------------------------------------------
