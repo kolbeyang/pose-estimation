@@ -502,7 +502,7 @@ def evaluate(
     """Compute all 10 evaluation metrics.
 
     Both predicted and ground_truth should be in camera space.
-    Internally slices to eval joints [3D:SKELETON_16_EVAL] (14 joints)
+    Internally slices to eval joints [3D:SKELETON_16_EVAL] (15 joints)
     before computing metrics.
 
     Args:
@@ -523,7 +523,7 @@ def evaluate(
     gt_eval = ground_truth[:, eval_joints, :]  # [3D:SKELETON_16_EVAL]
 
     # Visibility weights (on all joints, then slice)
-    vis = compute_visibility_weights(ground_truth, camera)[:, eval_joints]  # (F, 14)
+    vis = compute_visibility_weights(ground_truth, camera)[:, eval_joints]  # (F, 15)
 
     results: dict[str, float] = {}
 
