@@ -55,9 +55,40 @@ class OptimizationConfig(BaseModel):
         return np.array(self.rotation_penalty_multipliers) * self.rotation_penalty_scalar
 
 
+class PipelineGraphConfig(BaseModel):
+    """Per-pipeline graph toggles."""
+
+    all_examples_per_joint_mpjpe: bool = True
+    per_example_per_joint_mpjpe: bool = True
+
+
+class PipelineConfig(BaseModel):
+    """Per-pipeline configuration."""
+
+    is_generate_heatmap_videos: bool = True
+    graphs: PipelineGraphConfig = Field(default_factory=PipelineGraphConfig)
+
+
+class CrossPipelineGraphConfig(BaseModel):
+    """Cross-pipeline comparison graph toggles (only when both pipelines run)."""
+
+    per_example_mediapipe_vs_motionbert: bool = True
+    position_error_per_joint_improvement: bool = True
+    velocity_error_per_joint_improvement: bool = True
+    metrics_comparison: bool = True
+
+
 class RunConfig(BaseModel):
     """Top-level run configuration."""
 
+    # Pipeline toggles -- if present, that pipeline runs
+    mediapipe: PipelineConfig | None = None
+    motionbert: PipelineConfig | None = None
+
+    # Cross-pipeline graphs -- only valid if both pipelines present
+    graphs: CrossPipelineGraphConfig | None = None
+
+    # Shared settings
     examples: list[ExampleConfig] = Field(default_factory=lambda: [])
     data_root: str = "data/panoptic-toolbox"
     output_dir: str | None = None

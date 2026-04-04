@@ -352,12 +352,14 @@ def generate_summary(
 def generate_aggregate_summary(
     all_metrics: list[dict[str, Any]],
     output_dir: str,
+    prefix: str = "",
 ) -> None:
     """Generate cross-example aggregate summary bar chart.
 
     Args:
         all_metrics: List of per-example metrics dicts.
         output_dir: Directory to save the aggregate summary.
+        prefix: Optional prefix for output filename (e.g. "motionbert").
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -398,4 +400,5 @@ def generate_aggregate_summary(
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3, axis="y")
 
-    _save(fig, os.path.join(output_dir, "aggregate_summary.png"))
+    filename = f"{prefix}_aggregate_summary.png" if prefix else "aggregate_summary.png"
+    _save(fig, os.path.join(output_dir, filename))

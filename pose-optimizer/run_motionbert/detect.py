@@ -40,6 +40,17 @@ _SH_RGB_MEAN: np.ndarray = np.array([0.4404, 0.4440, 0.4327], dtype=np.float32)
 
 
 @dataclass
+class Detection2DModels:
+    """Pre-loaded models for YOLO + Stacked Hourglass 2D detection only.
+
+    Used by the shared heatmap generation step (both pipelines).
+    """
+    yolo: Any  # ultralytics.YOLO
+    hourglass: torch.nn.Module
+    device: torch.device
+
+
+@dataclass
 class MotionBertModels:
     """Pre-loaded models for the MotionBERT detection pipeline.
 
@@ -50,6 +61,41 @@ class MotionBertModels:
     hourglass: torch.nn.Module
     motionbert: torch.nn.Module
     device: torch.device
+
+
+def load_yolo_sh_models() -> Detection2DModels:
+    """Load YOLO and Stacked Hourglass models for 2D heatmap generation.
+
+    Returns:
+        Detection2DModels container with YOLO + SH on the best device.
+    """
+    from ultralytics import YOLO
+    from stacked_hourglass import hg8
+
+    device = _get_device()
+
+    # YOLO
+    yolo = YOLO("yolov8n.pt")
+    logger.info("Loaded YOLOv8n")
+
+    # Stacked Hourglass
+    try:
+        hourglass = hg8(pretrained=True)
+    except RuntimeError:
+        hourglass = hg8(pretrained=False)
+        cached_path = os.path.join(
+            torch.hub.get_dir(), "checkpoints", "bearpaw_hg8-90e5d470.pth",
+        )
+        if os.path.exists(cached_path):
+            state_dict = torch.load(cached_path, map_location="cpu", weights_only=False)
+            hourglass.load_state_dict(state_dict)
+        else:
+            raise RuntimeError("Stacked Hourglass weights not found.")
+    hourglass = hourglass.to(device)
+    hourglass.eval()
+    logger.info("Loaded Stacked Hourglass (8-stack, pretrained) on %s", device)
+
+    return Detection2DModels(yolo=yolo, hourglass=hourglass, device=device)
 
 
 def load_all_models() -> MotionBertModels:
@@ -685,6 +731,63 @@ def motionbert_to_camera_space(
 # Pipeline Wrapper
 # ---------------------------------------------------------------------------
 
+def detect_2d_poses(
+    frames_rgb: list[np.ndarray],
+    models: Detection2DModels,
+    sh_batch_size: int = 32,
+) -> tuple[
+    list[np.ndarray],  # kp_2d (16, 2) pixel coords [2D:SKELETON_16]
+    list[np.ndarray],  # visibility (16,) [VIS:SKELETON_16]
+    list[np.ndarray],  # heatmaps (16, 64, 64) [HEATMAP:MPII_16]
+    list[np.ndarray],  # mpii_kp_2d (16, 3) raw MPII [2D:MPII_16]
+    np.ndarray,        # affine (2, 3)
+]:
+    """Run YOLO + Stacked Hourglass for 2D heatmap generation.
+
+    Shared between both MotionBERT and MediaPipe pipelines.
+
+    Args:
+        frames_rgb: List of (H, W, 3) uint8 RGB frames.
+        models: Pre-loaded Detection2DModels from load_yolo_sh_models().
+        sh_batch_size: Batch size for Stacked Hourglass inference.
+
+    Returns:
+        Tuple of:
+            kp_2d: List of (16, 2) pixel coordinates. [2D:SKELETON_16]
+            visibility: List of (16,) confidence scores. [VIS:SKELETON_16]
+            heatmaps: List of (16, 64, 64) SH heatmaps. [HEATMAP:MPII_16]
+            mpii_kp_2d: List of (16, 3) MPII 2D keypoints with confidence. [2D:MPII_16]
+            affine: (2, 3) affine transform from crop to pixel coords.
+    """
+    # 1. YOLO person detection
+    union_bbox = detect_person_bbox(frames_rgb, yolo=models.yolo)
+
+    # 2. Stacked Hourglass
+    all_keypoints_2d, all_heatmaps, affine = run_hourglass(
+        frames_rgb, union_bbox,
+        model=models.hourglass,
+        device=models.device,
+        batch_size=sh_batch_size,
+    )
+
+    # 3. Convert MPII 2D to skeleton 2D
+    kp_2d_list: list[np.ndarray] = []  # list of [2D:SKELETON_16] (16, 2)
+    visibility_list: list[np.ndarray] = []  # list of [VIS:SKELETON_16] (16,)
+    for kp_mpii in all_keypoints_2d:
+        kp_17 = mpii_to_skeleton(kp_mpii)  # [2D:MPII_17]
+        kp_16 = strip_head_joint(kp_17)  # [2D:SKELETON_16]
+        kp_2d_list.append(kp_16[:, :2])
+        visibility_list.append(kp_16[:, 2])
+
+    return (
+        kp_2d_list,
+        visibility_list,
+        all_heatmaps,
+        all_keypoints_2d,
+        affine,
+    )
+
+
 def detect_poses(
     frames_rgb: list[np.ndarray],
     models: MotionBertModels,
@@ -718,15 +821,12 @@ def detect_poses(
             affine: (2, 3) affine mapping crop to pixel coords.
             positions_3d_norm: (N, 16, 3) MotionBERT normalized. [3D:SKELETON_16]
     """
-    # 1. YOLO person detection
-    union_bbox = detect_person_bbox(frames_rgb, yolo=models.yolo)
-
-    # 2. Stacked Hourglass
-    all_keypoints_2d, all_heatmaps, affine = run_hourglass(
-        frames_rgb, union_bbox,
-        model=models.hourglass,
-        device=models.device,
-        batch_size=sh_batch_size,
+    # 1+2. YOLO + Stacked Hourglass (shared 2D detection)
+    d2d_models = Detection2DModels(
+        yolo=models.yolo, hourglass=models.hourglass, device=models.device,
+    )
+    kp_2d_list, visibility_list, all_heatmaps, all_keypoints_2d, affine = detect_2d_poses(
+        frames_rgb, d2d_models, sh_batch_size=sh_batch_size,
     )
 
     # 3. MotionBERT
@@ -736,15 +836,6 @@ def detect_poses(
         device=models.device,
         conf_threshold=conf_threshold,
     )
-
-    # 4. Convert MPII 2D to skeleton 2D
-    kp_2d_list: list[np.ndarray] = []  # list of [2D:SKELETON_16] (16, 2)
-    visibility_list: list[np.ndarray] = []  # list of [VIS:SKELETON_16] (16,)
-    for kp_mpii in all_keypoints_2d:
-        kp_17 = mpii_to_skeleton(kp_mpii)  # [2D:MPII_17]
-        kp_16 = strip_head_joint(kp_17)  # [2D:SKELETON_16]
-        kp_2d_list.append(kp_16[:, :2])
-        visibility_list.append(kp_16[:, 2])
 
     return (
         kp_2d_list,
