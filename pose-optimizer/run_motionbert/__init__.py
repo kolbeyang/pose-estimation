@@ -30,7 +30,6 @@ from config import RunConfig
 from evaluate import (
     evaluate,
     mpjpe_per_joint,
-    root_relative,
 )
 from graphs import (
     generate_aggregate_summary,
@@ -247,28 +246,28 @@ def process_example(
         for k, v in opt_metrics.items():
             metrics[f"opt_{k}"] = v
 
-        # Per-joint breakdown
-        det_rr = root_relative(det_arr)[:, EVAL_JOINTS, :]  # [3D:SKELETON_16_EVAL]
-        gt_rr = root_relative(gt_arr)[:, EVAL_JOINTS, :]  # [3D:SKELETON_16_EVAL]
-        opt_rr = root_relative(opt_arr)[:, EVAL_JOINTS, :]  # [3D:SKELETON_16_EVAL]
-        metrics["det_per_joint"] = mpjpe_per_joint(det_rr, gt_rr).tolist()
-        metrics["opt_per_joint"] = mpjpe_per_joint(opt_rr, gt_rr).tolist()
+        # Per-joint breakdown (camera coordinates, not root-relative)
+        det_eval = det_arr[:, EVAL_JOINTS, :]  # [3D:SKELETON_16_EVAL]
+        gt_eval = gt_arr[:, EVAL_JOINTS, :]  # [3D:SKELETON_16_EVAL]
+        opt_eval = opt_arr[:, EVAL_JOINTS, :]  # [3D:SKELETON_16_EVAL]
+        metrics["det_per_joint"] = mpjpe_per_joint(det_eval, gt_eval).tolist()
+        metrics["opt_per_joint"] = mpjpe_per_joint(opt_eval, gt_eval).tolist()
 
         # Per-frame MPJPE
         metrics["det_per_frame_mpjpe"] = [
-            float(np.mean(np.linalg.norm(det_rr[i] - gt_rr[i], axis=-1)))
+            float(np.mean(np.linalg.norm(det_eval[i] - gt_eval[i], axis=-1)))
             for i in range(len(gt_indices))
         ]
         metrics["opt_per_frame_mpjpe"] = [
-            float(np.mean(np.linalg.norm(opt_rr[i] - gt_rr[i], axis=-1)))
+            float(np.mean(np.linalg.norm(opt_eval[i] - gt_eval[i], axis=-1)))
             for i in range(len(gt_indices))
         ]
 
         # Per-frame MPJVE (velocity error)
         if len(gt_indices) >= 3:
-            det_vel = np.diff(det_rr, axis=0)
-            gt_vel = np.diff(gt_rr, axis=0)
-            opt_vel = np.diff(opt_rr, axis=0)
+            det_vel = np.diff(det_eval, axis=0)
+            gt_vel = np.diff(gt_eval, axis=0)
+            opt_vel = np.diff(opt_eval, axis=0)
             metrics["det_per_frame_mpjve"] = [
                 float(np.mean(np.linalg.norm(det_vel[i] - gt_vel[i], axis=-1)))
                 for i in range(len(det_vel))

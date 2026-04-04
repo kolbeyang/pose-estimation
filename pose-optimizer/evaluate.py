@@ -410,9 +410,9 @@ def evaluate(
     if eval_joints is None:
         eval_joints = EVAL_JOINTS
 
-    # Root-relative, then slice to eval joints
-    pred_rr = root_relative(predicted)[:, eval_joints, :]  # [3D:SKELETON_16_EVAL]
-    gt_rr = root_relative(ground_truth)[:, eval_joints, :]  # [3D:SKELETON_16_EVAL]
+    # Slice to eval joints (evaluate in camera coordinates, not root-relative)
+    pred_eval = predicted[:, eval_joints, :]  # [3D:SKELETON_16_EVAL]
+    gt_eval = ground_truth[:, eval_joints, :]  # [3D:SKELETON_16_EVAL]
 
     # Visibility weights (on all joints, then slice)
     vis = compute_visibility_weights(ground_truth, camera)[:, eval_joints]  # (F, 14)
@@ -420,18 +420,18 @@ def evaluate(
     results: dict[str, float] = {}
 
     # Position metrics
-    results["mpjpe"] = mpjpe(pred_rr, gt_rr)
-    results["p_mpjpe"] = p_mpjpe(pred_rr, gt_rr)
-    results["si_mpjpe"] = si_mpjpe(pred_rr, gt_rr)
-    results["vw_mpjpe"] = vw_mpjpe(pred_rr, gt_rr, vis)
-    results["vw_si_mpjpe"] = vw_si_mpjpe(pred_rr, gt_rr, vis)
+    results["mpjpe"] = mpjpe(pred_eval, gt_eval)
+    results["p_mpjpe"] = p_mpjpe(pred_eval, gt_eval)
+    results["si_mpjpe"] = si_mpjpe(pred_eval, gt_eval)
+    results["vw_mpjpe"] = vw_mpjpe(pred_eval, gt_eval, vis)
+    results["vw_si_mpjpe"] = vw_si_mpjpe(pred_eval, gt_eval, vis)
 
     # Velocity metrics (need >= 2 frames)
     if predicted.shape[0] >= 2:
-        results["mpjve"] = mpjve(pred_rr, gt_rr)
-        results["si_mpjve"] = si_mpjve(pred_rr, gt_rr)
-        results["vw_mpjve"] = vw_mpjve(pred_rr, gt_rr, vis)
-        results["vw_si_mpjve"] = vw_si_mpjve(pred_rr, gt_rr, vis)
+        results["mpjve"] = mpjve(pred_eval, gt_eval)
+        results["si_mpjve"] = si_mpjve(pred_eval, gt_eval)
+        results["vw_mpjve"] = vw_mpjve(pred_eval, gt_eval, vis)
+        results["vw_si_mpjve"] = vw_si_mpjve(pred_eval, gt_eval, vis)
     else:
         results["mpjve"] = 0.0
         results["si_mpjve"] = 0.0

@@ -26,7 +26,7 @@ from cmu_data import (
     load_ground_truth_sequence,
 )
 from config import RunConfig, load_config
-from evaluate import evaluate, mpjpe_per_joint, root_relative
+from evaluate import evaluate, mpjpe_per_joint
 from graphs import (
     generate_aggregate_summary,
     generate_bone_lengths_graph,
@@ -112,28 +112,28 @@ def _evaluate_and_collect_metrics(
     for k, v in opt_metrics.items():
         metrics[f"opt_{k}"] = v
 
-    # Per-joint breakdown (root-relative for per-joint analysis)
-    det_rr = root_relative(det_arr)[:, EVAL_JOINTS, :]
-    gt_rr = root_relative(gt_arr)[:, EVAL_JOINTS, :]
-    opt_rr = root_relative(opt_arr)[:, EVAL_JOINTS, :]
-    metrics["det_per_joint"] = mpjpe_per_joint(det_rr, gt_rr).tolist()
-    metrics["opt_per_joint"] = mpjpe_per_joint(opt_rr, gt_rr).tolist()
+    # Per-joint breakdown (camera coordinates, not root-relative)
+    det_eval = det_arr[:, EVAL_JOINTS, :]
+    gt_eval = gt_arr[:, EVAL_JOINTS, :]
+    opt_eval = opt_arr[:, EVAL_JOINTS, :]
+    metrics["det_per_joint"] = mpjpe_per_joint(det_eval, gt_eval).tolist()
+    metrics["opt_per_joint"] = mpjpe_per_joint(opt_eval, gt_eval).tolist()
 
     # Per-frame MPJPE
     metrics["det_per_frame_mpjpe"] = [
-        float(np.mean(np.linalg.norm(det_rr[i] - gt_rr[i], axis=-1)))
+        float(np.mean(np.linalg.norm(det_eval[i] - gt_eval[i], axis=-1)))
         for i in range(len(gt_indices))
     ]
     metrics["opt_per_frame_mpjpe"] = [
-        float(np.mean(np.linalg.norm(opt_rr[i] - gt_rr[i], axis=-1)))
+        float(np.mean(np.linalg.norm(opt_eval[i] - gt_eval[i], axis=-1)))
         for i in range(len(gt_indices))
     ]
 
     # Per-frame MPJVE
     if len(gt_indices) >= 3:
-        det_vel = np.diff(det_rr, axis=0)
-        gt_vel = np.diff(gt_rr, axis=0)
-        opt_vel = np.diff(opt_rr, axis=0)
+        det_vel = np.diff(det_eval, axis=0)
+        gt_vel = np.diff(gt_eval, axis=0)
+        opt_vel = np.diff(opt_eval, axis=0)
         metrics["det_per_frame_mpjve"] = [
             float(np.mean(np.linalg.norm(det_vel[i] - gt_vel[i], axis=-1)))
             for i in range(len(det_vel))
