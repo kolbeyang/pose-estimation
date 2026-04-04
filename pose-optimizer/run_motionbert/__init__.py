@@ -291,6 +291,9 @@ def process_example(
         if "det_mpjve" in metrics:
             logger.info("    Det MPJVE:    %.2f cm/f", metrics['det_mpjve'] * 100)
             logger.info("    Opt MPJVE:    %.2f cm/f", metrics['opt_mpjve'] * 100)
+        if "det_reprojected_mpjpe_2d" in metrics:
+            logger.info("    Det 2D-MPJPE: %.2f px", metrics['det_reprojected_mpjpe_2d'])
+            logger.info("    Opt 2D-MPJPE: %.2f px", metrics['opt_reprojected_mpjpe_2d'])
 
     else:
         logger.info("    No ground truth available for evaluation.")
@@ -311,6 +314,7 @@ def process_example(
     _METRIC_KEYS = [
         "mpjpe", "p_mpjpe", "si_mpjpe", "vw_mpjpe", "vw_si_mpjpe",
         "mpjve", "si_mpjve", "vw_mpjve", "vw_si_mpjve",
+        "reprojected_mpjpe_2d",
     ]
     results_data: dict[str, Any] = {
         "model": "motionbert",
