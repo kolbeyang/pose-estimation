@@ -39,7 +39,6 @@ from graphs import (
 )
 from optimize import optimize
 from overlay_video import generate_overlay_video
-from scoring import generate_synthetic_heatmaps
 from skeleton import JOINT_NAMES, EVAL_JOINTS, NUM_JOINTS, PARENTS
 
 logger = logging.getLogger(__name__)
@@ -318,7 +317,6 @@ def main(config_path: str) -> None:
         detect_2d_poses,
         run_motionbert as run_mb_3d,
         motionbert_to_camera_space,
-        Detection2DModels,
     )
 
     logger.info("Loading YOLO + Stacked Hourglass models...")
@@ -332,8 +330,12 @@ def main(config_path: str) -> None:
         mb_model = mb_model.to(mb_device)
 
     mp_landmarker = None
+    mp_detect_poses = None
+    mediapipe_3d_to_camera = None
     if run_mediapipe:
-        from run_mediapipe.detect import load_landmarker, detect_poses as mp_detect_poses, mediapipe_3d_to_camera
+        from run_mediapipe.detect import load_landmarker, detect_poses as _mp_detect_poses, mediapipe_3d_to_camera as _mp_3d_to_cam
+        mp_detect_poses = _mp_detect_poses
+        mediapipe_3d_to_camera = _mp_3d_to_cam
         logger.info("Loading MediaPipe model...")
         mp_landmarker = load_landmarker()
 
@@ -502,6 +504,7 @@ def main(config_path: str) -> None:
 
             # --- 5. MediaPipe pipeline ---
             if run_mediapipe:
+                assert mp_detect_poses is not None and mediapipe_3d_to_camera is not None
                 logger.info("[5/7] Running MediaPipe pipeline...")
                 mp_kp_2d, mp_kp_3d, mp_visibility = mp_detect_poses(frames_rgb, landmarker=mp_landmarker)
                 n_detected = sum(1 for v in mp_visibility if v.mean() > 0.3)
@@ -601,6 +604,17 @@ def main(config_path: str) -> None:
         generate_aggregate_summary(all_mb_metrics, run_dir, prefix="motionbert")
     if all_mp_metrics:
         generate_aggregate_summary(all_mp_metrics, run_dir, prefix="mediapipe")
+
+    # --- 8. Run-level results.json ---
+    run_results: dict[str, Any] = {"config": config.model_dump()}
+    if all_mb_metrics:
+        run_results["motionbert"] = all_mb_metrics
+    if all_mp_metrics:
+        run_results["mediapipe"] = all_mp_metrics
+    run_results_path = os.path.join(run_dir, "results.json")
+    with open(run_results_path, "w") as f:
+        json.dump(run_results, f, indent=2, default=str)
+    logger.info("Saved run-level results: %s", run_results_path)
 
     if mp_landmarker is not None:
         mp_landmarker.close()

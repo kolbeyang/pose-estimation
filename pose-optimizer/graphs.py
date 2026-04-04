@@ -15,10 +15,8 @@ import numpy as np
 from skeleton import (
     JOINT_NAMES,
     NUM_JOINTS,
-    EVAL_JOINTS,
     EVAL_JOINT_NAMES,
     NUM_EVAL_JOINTS,
-    PARENTS,
 )
 
 
@@ -70,7 +68,7 @@ def generate_trajectory_graphs(
             ax.plot(frames, opt[:, j, c], "r-", label="Optimized", alpha=0.8)
             if any(has_gt):
                 gt_vals = [
-                    gt_3d[i][j, c] if gt_3d[i] is not None else np.nan
+                    g[j, c] if (g := gt_3d[i]) is not None else np.nan
                     for i in range(n)
                 ]
                 ax.plot(frames, gt_vals, "b--", label="Ground Truth", alpha=0.7)
@@ -112,7 +110,7 @@ def generate_per_joint_error_bar(
     output_dir: str,
     opt_per_joint: list[float] | None = None,
 ) -> None:
-    """Bar chart of per-joint MPJPE for [SKELETON_16_EVAL] joints (14 eval joints).
+    """Bar chart of per-joint MPJPE for [SKELETON_16_EVAL] joints (15 eval joints).
 
     Args:
         det_per_joint: List of per-joint errors for eval joints. [SKELETON_16_EVAL]
@@ -130,10 +128,10 @@ def generate_per_joint_error_bar(
         ax.bar(x + width / 2, [v * 100 for v in opt_per_joint],
                width, color="forestgreen", alpha=0.7, label="Optimized")
         ax.legend()
-        ax.set_title("Per-Joint Error (Detector vs Optimized, 14 eval joints)")
+        ax.set_title("Per-Joint Error (Detector vs Optimized, 15 eval joints)")
     else:
         ax.bar(x, [v * 100 for v in det_per_joint], color="steelblue", alpha=0.7)
-        ax.set_title("Per-Joint Error (Detector, 14 eval joints)")
+        ax.set_title("Per-Joint Error (Detector, 15 eval joints)")
 
     ax.set_xticks(x)
     ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=45, ha="right", fontsize=8)
@@ -250,9 +248,9 @@ def generate_bone_lengths_graph(
 # ---------------------------------------------------------------------------
 
 def generate_summary(
-    detector_3d: list[np.ndarray],
-    optimized_3d: list[np.ndarray],
-    gt_3d: list[np.ndarray | None],
+    _detector_3d: list[np.ndarray],
+    _optimized_3d: list[np.ndarray],
+    _gt_3d: list[np.ndarray | None],
     loss_history: list[float],
     metrics: dict[str, Any],
     bone_lengths: np.ndarray,

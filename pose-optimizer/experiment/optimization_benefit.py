@@ -154,7 +154,7 @@ def plot_per_joint_improvement(mp_results, mb_results, common, out_dir):
     """Per-joint: how much does the optimizer help each joint?"""
     from skeleton import EVAL_JOINT_NAMES
 
-    # det_per_joint and opt_per_joint are lists of 14 values (EVAL_JOINTS)
+    # det_per_joint and opt_per_joint are lists of 15 values (EVAL_JOINTS)
     mp_det_joints = np.zeros(len(EVAL_JOINT_NAMES))
     mp_opt_joints = np.zeros(len(EVAL_JOINT_NAMES))
     mb_det_joints = np.zeros(len(EVAL_JOINT_NAMES))
