@@ -24,7 +24,7 @@ SKELETON_TO_MPII_HEATMAP: list[int] = [
     5,  # 6: LAnkle
     7,  # 7: Spine -- MPII Thorax (mapped to Spine in our skeleton)
     8,  # 8: Neck (Base of Neck) -- MPII Upper Neck
-    9,  # 9: Head -- MPII Head Top
+    9,  # 9: Nose -- MPII Head Top
     13,  # 10: LShoulder
     14,  # 11: LElbow
     15,  # 12: LWrist
@@ -54,9 +54,7 @@ def heatmap_score_batch(
 ) -> torch.Tensor:
     """Batched heatmap scoring across all frames.
 
-    For MotionBERT (real SH heatmaps): uses MPII mapping to score all 16 joints.
-    For MediaPipe (synthetic heatmaps): scores all 16 joints directly
-    (heatmaps have 16 channels matching skeleton indices).
+    Both pipelines use real SH heatmaps with MPII mapping to score all 16 joints.
 
     Args:
         projected_2d_batch: (F, 16, 2) projected positions in pixel coords.
