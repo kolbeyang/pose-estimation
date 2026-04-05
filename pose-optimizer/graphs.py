@@ -352,11 +352,11 @@ def generate_summary(
 # ---------------------------------------------------------------------------
 
 # Consistent color scheme for cross-pipeline graphs
-COLOR_GT = "#4285F4"          # Blue (Google blue)
-COLOR_MB_RAW = "#FFCC80"      # Light Orange
-COLOR_MB_OPT = "#FF9800"      # Orange
-COLOR_MP_RAW = "#EF9A9A"      # Light Red
-COLOR_MP_OPT = "#F44336"      # Red
+COLOR_GT = "#5871CA"          # Blue
+COLOR_MB_RAW = "#FFA2DB"      # Light Pink
+COLOR_MB_OPT = "#FF389C"      # Pink
+COLOR_MP_RAW = "#FFB199"      # Light Orange
+COLOR_MP_OPT = "#FF7A21"      # Orange
 
 
 def generate_cross_pipeline_per_joint_position(

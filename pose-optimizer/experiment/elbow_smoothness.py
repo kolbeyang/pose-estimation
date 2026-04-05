@@ -18,11 +18,11 @@ import numpy as np
 
 
 # Consistent color scheme
-COLOR_GT = "#4285F4"          # Blue
-COLOR_MB_RAW = "#FFCC80"      # Light Orange
-COLOR_MB_OPT = "#FF9800"      # Orange
-COLOR_MP_RAW = "#EF9A9A"      # Light Red
-COLOR_MP_OPT = "#F44336"      # Red
+COLOR_GT = "#5871CA"          # Blue
+COLOR_MB_RAW = "#FFA2DB"      # Light Pink
+COLOR_MB_OPT = "#FF389C"      # Pink
+COLOR_MP_RAW = "#FFB199"      # Light Orange
+COLOR_MP_OPT = "#FF7A21"      # Orange
 
 # Line styles for dimensions: solid, wide dash, narrow dash
 STYLE_X = {"linestyle": "-", "linewidth": 1.5}
