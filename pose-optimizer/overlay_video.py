@@ -25,12 +25,10 @@ def _resize_heatmap_to_frame(
     frame_h: int,
     frame_w: int,
 ) -> np.ndarray:
-    """Resize a single-channel heatmap to the full video frame using the affine.
-
-    Handles both SH (256->64 crop) and synthetic (hm_size = crop_size) affines.
+    """Resize a single-channel 64x64 SH heatmap to the full video frame using the affine.
 
     Args:
-        heatmap_64: (H_hm, W_hm) single-channel heatmap.
+        heatmap_64: (64, 64) single-channel heatmap from Stacked Hourglass.
         affine: (2, 3) affine transform (crop coords -> original pixel coords).
         frame_h: Full frame height.
         frame_w: Full frame width.
@@ -43,59 +41,11 @@ def _resize_heatmap_to_frame(
     tx = float(affine[0, 2])
     ty = float(affine[1, 2])
 
-    hm_h, hm_w = heatmap_64.shape
-
-    # For SH: affine maps [0..255] crop coords to pixels; heatmap is 64x64 (1/4 crop)
-    # For synthetic: affine maps heatmap coords directly to pixels
-    # Compute crop region size in original pixel space
-    # SH: crop is 256x256, so crop_w = 256 * sx
-    # Synthetic: crop_w = hm_w * sx (since crop == heatmap size)
-    # We detect this by checking if hm_w is much smaller than the effective crop
-    # Actually, the simplest approach: the affine maps from some coord space to pixels.
-    # For SH, that space is 256x256. For synthetic, it's hm_size x hm_size.
-    # In both cases: the heatmap covers the full crop.
-    # For SH: crop pixel extent = 256*sx, heatmap is 64 of those pixels -> upscale 4x
-    # For synthetic: crop pixel extent = hm_w*sx
-
-    # We can just compute: destination size from the affine
-    # For SH: the crop is 256 units wide, affine maps 0..255 to a pixel range
-    # The heatmap covers that entire 256-unit crop at 64px resolution
-    # So we resize the heatmap to the crop's pixel size
-
-    # For SH, affine sx ~= (crop_pixel_size / 256).
-    # crop_pixel_size = 256 * sx. heatmap is 64 -> resize to crop_pixel_size
-    # For synthetic, sx = image_w / hm_w. crop_pixel_size = hm_w * sx = image_w.
-    # That's the full image -- correct for synthetic (no crop).
-
-    # Detect if this is SH (crop_to_hm_ratio=4) or synthetic (ratio=1)
-    # SH: 256/64=4. For SH, the full crop in pixel space is 256*sx.
-    # For synthetic, the full crop in pixel space is hm_w * sx.
-    # We'll just scale up proportionally.
-
-    # How many crop units does this heatmap cover?
-    # For SH: the heatmap covers 256 crop units at 64px resolution (ratio 4)
-    # For synthetic: the heatmap covers hm_w crop units at hm_w px resolution (ratio 1)
-
-    # Let's just assume: the crop size in crop-units = max(256, hm_w*4) for SH detection
-    # Actually the simplest reliable method: try both and detect from the affine.
-    # The affine encodes sx = crop_pixel_extent / crop_coord_range.
-    # If crop_coord_range is 256 (SH), crop_w_px = 256 * sx.
-    # If crop_coord_range is hm_w (synthetic), crop_w_px = hm_w * sx.
-    # We can tell by checking: does hm_w * sx give a reasonable crop size?
-    # If sx >> 1 (like 20+), it's synthetic (maps 64 hm coords to 1920 pixels).
-    # If sx < 5, it's SH (maps 256 crop coords to ~1000 pixels, so sx ~ 4).
-
-    # Use heuristic: if sx > 5, treat as synthetic (crop_units = hm_w)
-    # else treat as SH (crop_units = 256, hm covers 256 crop units at 64 res)
-
-    if sx > 5.0:
-        # Synthetic: affine maps [0, hm_w] to pixels directly
-        crop_w = int(round(hm_w * sx))
-        crop_h = int(round(hm_h * sy))
-    else:
-        # SH: affine maps [0, 255] crop to pixels, heatmap is 64x64 of 256x256
-        crop_w = max(1, int(round(256 * sx)))
-        crop_h = max(1, int(round(256 * sy)))
+    # The affine maps [0..255] crop coords to original pixel coords.
+    # The heatmap is 64x64, covering the full 256x256 crop at 1/4 resolution.
+    # Compute crop region size in pixels and resize heatmap to fill it.
+    crop_w = max(1, int(round(256 * sx)))
+    crop_h = max(1, int(round(256 * sy)))
 
     resized = cv2.resize(
         heatmap_64, (crop_w, crop_h), interpolation=cv2.INTER_LINEAR
