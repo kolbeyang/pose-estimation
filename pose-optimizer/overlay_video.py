@@ -1,7 +1,7 @@
 """Unified overlay video generation for both MotionBert and MediaPipe pipelines.
 
 Overlays on original video frames:
-  1. Heatmap overlay (real SH or synthetic Gaussian, HOT colormap)
+  1. Heatmap overlay (Stacked Hourglass, HOT colormap)
   2. Yellow dots at raw 2D detection positions
   3. Green skeleton: raw 3D projected to 2D
   4. Red skeleton: optimized 3D projected to 2D
