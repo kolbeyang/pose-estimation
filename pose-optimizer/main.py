@@ -130,6 +130,8 @@ def _evaluate_and_collect_metrics(
 
     # Per-joint VW-SI-MPJPE and VW-SI-MPJVE (for cross-pipeline graphs)
     vis = compute_visibility_weights(gt_arr, camera)[:, EVAL_JOINTS]
+    # Per-joint visible frame counts: how many frames each eval joint was visible
+    metrics["per_joint_visible_frames"] = vis.sum(axis=0).astype(int).tolist()
     metrics["det_vw_si_mpjpe_per_joint"] = vw_si_mpjpe_per_joint(det_eval, gt_eval, vis).tolist()
     metrics["opt_vw_si_mpjpe_per_joint"] = vw_si_mpjpe_per_joint(opt_eval, gt_eval, vis).tolist()
     if len(gt_indices) >= 3:
@@ -202,6 +204,7 @@ def _save_results(
         "metrics": {k: metrics[f"opt_{k}"] for k in _METRIC_KEYS if f"opt_{k}" in metrics},
         "raw_metrics": {k: metrics[f"det_{k}"] for k in _METRIC_KEYS if f"det_{k}" in metrics},
         "per_joint": {
+            "per_joint_visible_frames": metrics.get("per_joint_visible_frames", []),
             "det_per_joint": metrics.get("det_per_joint", []),
             "opt_per_joint": metrics.get("opt_per_joint", []),
             "det_vw_si_mpjpe_per_joint": metrics.get("det_vw_si_mpjpe_per_joint", []),
@@ -467,10 +470,11 @@ def main(config_path: str) -> None:
 
                 # Optimize
                 logger.info("    Running FK optimization (MotionBERT)...")
+                mb_opt_config = config.optimization_for_pipeline("motionbert")
                 opt_mb, bl_mb, loss_mb = optimize(
                     raw_3d=det_cam_positions_mb,
                     camera=camera,
-                    config=config.optimization,
+                    config=mb_opt_config,
                     heatmaps=heatmaps,
                     affine=affine,
                     visibility=visibility,
@@ -545,10 +549,11 @@ def main(config_path: str) -> None:
 
                 # Optimize using SH heatmaps (same as MotionBERT!)
                 logger.info("    Running FK optimization (MediaPipe)...")
+                mp_opt_config = config.optimization_for_pipeline("mediapipe")
                 opt_mp, bl_mp, loss_mp = optimize(
                     raw_3d=det_cam_positions_mp,
                     camera=camera,
-                    config=config.optimization,
+                    config=mp_opt_config,
                     heatmaps=heatmaps,
                     affine=affine,
                     visibility=visibility,

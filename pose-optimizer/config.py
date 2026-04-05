@@ -21,11 +21,14 @@ class OptimizationConfig(BaseModel):
 
     num_steps: int = 50
     learning_rate: float = 0.002
-    bone_length_lr: float = 0.0001
+    bone_length_lr: float = 0.001
     position_penalty_weight: float = 500.0
     rotation_penalty_scalar: float = 10.0
     heatmap_blur_sigma: float = 4.0
+    heatmap_blur_sigma_start: float | None = None
+    heatmap_blur_sigma_end: float | None = None
     confidence_epsilon: float = 1e-4
+    anchor_weight: float = 0.0
 
     # Per-joint rotation penalty multipliers (relative to rotation_penalty_scalar).
     # Indexed by [SKELETON_16] joint order: Pelvis(0) through RWrist(15).
@@ -66,6 +69,8 @@ class PipelineConfig(BaseModel):
 
     is_generate_heatmap_videos: bool = True
     graphs: PipelineGraphConfig = Field(default_factory=PipelineGraphConfig)
+    # Per-pipeline optimization overrides (merged on top of shared optimization config)
+    optimization: dict | None = None
 
 
 class CrossPipelineGraphConfig(BaseModel):
@@ -103,6 +108,25 @@ class RunConfig(BaseModel):
     generate_video: bool = True
 
     model_config = {"json_schema_extra": {"examples": []}}
+
+    def optimization_for_pipeline(self, pipeline_name: str) -> OptimizationConfig:
+        """Get optimization config for a specific pipeline.
+
+        Merges pipeline-specific overrides on top of the shared optimization config.
+
+        Args:
+            pipeline_name: "motionbert" or "mediapipe".
+
+        Returns:
+            OptimizationConfig with any per-pipeline overrides applied.
+        """
+        pipeline_cfg = getattr(self, pipeline_name, None)
+        if pipeline_cfg is None or pipeline_cfg.optimization is None:
+            return self.optimization
+        # Merge: start from shared config dict, overlay pipeline overrides
+        base = self.optimization.model_dump()
+        base.update(pipeline_cfg.optimization)
+        return OptimizationConfig.model_validate(base)
 
 
 def load_config(path: str) -> RunConfig:

@@ -1,6 +1,21 @@
 {
-    "motionbert": {},
-    "mediapipe": {},
+    "motionbert": {
+        "optimization": {
+            "num_steps": 50,
+            "learning_rate": 0.001,
+            "bone_length_lr": 0.005,
+            "heatmap_blur_sigma_start": 16.0,
+            "heatmap_blur_sigma_end": 4.0
+        }
+    },
+    "mediapipe": {
+        "optimization": {
+            "num_steps": 25,
+            "heatmap_blur_sigma": 16.0,
+            "learning_rate": 0.0005,
+            "anchor_weight": 1000.0
+        }
+    },
     "graphs": {},
     "examples": [
         {

@@ -10,8 +10,10 @@
         }
     ],
     "optimization": {
-        "num_steps": 10,
-        "heatmap_blur_sigma": 16.0,
-        "learning_rate": 0.0005
+        "num_steps": 25,
+        "learning_rate": 0.001,
+        "bone_length_lr": 0.005,
+        "heatmap_blur_sigma_start": 16.0,
+        "heatmap_blur_sigma_end": 4.0
     }
 }

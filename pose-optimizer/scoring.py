@@ -175,6 +175,8 @@ def compute_total_score_batch(
     heatmaps: torch.Tensor,
     affine: torch.Tensor,
     confidence_epsilon: float = 1e-4,
+    anchor_positions: torch.Tensor | None = None,
+    anchor_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Fully vectorized scoring across all frames.
 
@@ -188,6 +190,9 @@ def compute_total_score_batch(
         heatmaps: (F, C, H, W) SH heatmaps. [HEATMAP:MPII_16]
         affine: (2, 3) affine transform.
         confidence_epsilon: Floor for low-confidence joints.
+        anchor_positions: (F, 16, 3) initial positions to anchor to. [3D:SKELETON_16]
+            If None or anchor_weight=0, no anchor penalty is applied.
+        anchor_weight: Weight for anchor penalty (higher = less movement from init).
 
     Returns:
         Tuple of (total_score tensor, details dict with component values).
@@ -210,10 +215,17 @@ def compute_total_score_batch(
         total_heatmap - position_penalty_weight * total_pos_penalty - total_rot_penalty
     )
 
+    anchor_penalty_val = 0.0
+    if anchor_positions is not None and anchor_weight > 0:
+        anchor_penalty = ((all_positions - anchor_positions) ** 2).sum()
+        total_score = total_score - anchor_weight * anchor_penalty
+        anchor_penalty_val = float(anchor_penalty.item())
+
     details: dict[str, float] = {
         "heatmap": float(total_heatmap.item()),
         "pos_penalty": float(total_pos_penalty.item()),
         "rot_penalty": float(total_rot_penalty.item()),
+        "anchor_penalty": anchor_penalty_val,
         "total": float(total_score.item()),
     }
     return total_score, details
