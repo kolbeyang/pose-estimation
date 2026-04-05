@@ -1,10 +1,8 @@
-"""Unified scoring functions for FK optimization.
+"""Scoring functions for FK optimization.
 
-Supports both real Stacked Hourglass heatmaps (MotionBert) and synthetic
-Gaussian heatmaps (MediaPipe) through a single grid_sample-based pipeline.
+Uses real Stacked Hourglass heatmaps with MPII joint mapping.
 """
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -50,7 +48,6 @@ def heatmap_score_batch(
     visibility_batch: torch.Tensor,
     confidence_epsilon: float = 1e-4,
     eps: float = 1e-8,
-    use_mpii_mapping: bool = True,
 ) -> torch.Tensor:
     """Batched heatmap scoring across all frames.
 
@@ -59,15 +56,11 @@ def heatmap_score_batch(
     Args:
         projected_2d_batch: (F, 16, 2) projected positions in pixel coords.
             [2D:SKELETON_16]
-        heatmaps_batch: (F, C, H, W) heatmaps per frame.
-            [HEATMAP:MPII_16] when use_mpii_mapping=True,
-            [HEATMAP:SKELETON_16] when use_mpii_mapping=False.
+        heatmaps_batch: (F, C, H, W) SH heatmaps per frame. [HEATMAP:MPII_16]
         affine: (2, 3) affine transform from heatmap-crop to original pixels.
         visibility_batch: (F, 16) confidence scores. [VIS:SKELETON_16]
         confidence_epsilon: Floor for low-confidence joints.
         eps: Floor to avoid log(0).
-        use_mpii_mapping: If True, use MPII->skeleton mapping.
-            If False, assume heatmaps are (F, 16, H, W) in skeleton order.
 
     Returns:
         Scalar total score across all frames.
@@ -81,27 +74,17 @@ def heatmap_score_batch(
     tx = affine[0, 2]
     ty = affine[1, 2]
 
-    if use_mpii_mapping:
-        # MotionBert mode: all 16 joints with MPII heatmaps
-        hm_proj = projected_2d_batch[:, _HM_SKEL_INDICES, :]  # (F, 16, 2)
-        hm_conf = visibility_batch[:, _HM_SKEL_INDICES]  # (F, 16)
-        hm_selected = heatmaps_batch[:, _HM_MPII_INDICES, :, :]  # (F, 16, H, W)
-        n_joints = 16
-    else:
-        # MediaPipe mode: all 16 joints directly
-        hm_proj = projected_2d_batch  # (F, 16, 2)
-        hm_conf = visibility_batch  # (F, 16)
-        hm_selected = heatmaps_batch  # (F, 16, H, W)
-        n_joints = hm_proj.shape[1]
+    # Map skeleton joints to MPII heatmap channels
+    hm_proj = projected_2d_batch[:, _HM_SKEL_INDICES, :]  # (F, 16, 2)
+    hm_conf = visibility_batch[:, _HM_SKEL_INDICES]  # (F, 16)
+    hm_selected = heatmaps_batch[:, _HM_MPII_INDICES, :, :]  # (F, 16, H, W)
+    n_joints = 16
 
     # Convert pixel coords to normalized grid coords via inverse affine
     x_crop = (hm_proj[:, :, 0] - tx) / sx  # (F, n_joints)
     y_crop = (hm_proj[:, :, 1] - ty) / sy
 
-    if use_mpii_mapping:
-        crop_to_hm_ratio = 4.0  # SH: 256 -> 64
-    else:
-        crop_to_hm_ratio = 1.0  # synthetic: heatmap size = crop size
+    crop_to_hm_ratio = 4.0  # SH: 256 -> 64
 
     hm_x = x_crop / crop_to_hm_ratio  # (F, n_joints)
     hm_y = y_crop / crop_to_hm_ratio
@@ -192,7 +175,6 @@ def compute_total_score_batch(
     heatmaps: torch.Tensor,
     affine: torch.Tensor,
     confidence_epsilon: float = 1e-4,
-    use_mpii_mapping: bool = True,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Fully vectorized scoring across all frames.
 
@@ -203,11 +185,9 @@ def compute_total_score_batch(
         visibility: (F, 16) visibility weights. [VIS:SKELETON_16]
         position_penalty_weight: Weight for position penalty.
         rotation_per_joint_weights: (16,) per-joint rotation penalty weights.
-        heatmaps: (F, C, H, W) heatmaps.
-            [HEATMAP:MPII_16] or [HEATMAP:SKELETON_16] depending on mode.
+        heatmaps: (F, C, H, W) SH heatmaps. [HEATMAP:MPII_16]
         affine: (2, 3) affine transform.
         confidence_epsilon: Floor for low-confidence joints.
-        use_mpii_mapping: Whether to use MPII->skeleton joint mapping.
 
     Returns:
         Tuple of (total_score tensor, details dict with component values).
@@ -218,7 +198,6 @@ def compute_total_score_batch(
         affine,
         visibility,
         confidence_epsilon=confidence_epsilon,
-        use_mpii_mapping=use_mpii_mapping,
     )
 
     total_pos_penalty = motion_penalty_position_batch(all_positions)
@@ -238,80 +217,6 @@ def compute_total_score_batch(
         "total": float(total_score.item()),
     }
     return total_score, details
-
-
-# ---------------------------------------------------------------------------
-# Synthetic heatmap generation (for MediaPipe)
-# ---------------------------------------------------------------------------
-
-
-def generate_synthetic_heatmaps(
-    target_2d: np.ndarray,
-    image_size: tuple[int, int],
-    heatmap_size: int = 64,
-    sigma: float = 50.0,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Generate synthetic Gaussian heatmaps from 2D detections.
-
-    Creates [HEATMAP:SKELETON_16] heatmaps with one Gaussian blob per joint,
-    centered at the detected 2D position.
-
-    Args:
-        target_2d: (F, 16, 2) 2D detections in pixel coordinates.
-            [2D:SKELETON_16]
-        image_size: (height, width) of the original image.
-        heatmap_size: Size of the output heatmaps (default 64).
-        sigma: Gaussian sigma in pixel space.
-
-    Returns:
-        Tuple of:
-            heatmaps: (F, 16, heatmap_size, heatmap_size) float32.
-                [HEATMAP:SKELETON_16]
-            affine: (2, 3) mapping from heatmap coords to pixel coords.
-    """
-    h, w = image_size
-    n_frames, n_joints = target_2d.shape[0], target_2d.shape[1]
-
-    # Affine: maps [0, heatmap_size-1] to [0, image_size-1]
-    # So pixel = affine @ [hm_x, hm_y, 1]
-    sx = w / heatmap_size
-    sy = h / heatmap_size
-    affine = np.array(
-        [
-            [sx, 0, 0],
-            [0, sy, 0],
-        ],
-        dtype=np.float32,
-    )
-
-    # Convert sigma from pixel space to heatmap space (per-axis for non-square images)
-    sigma_hm_x = sigma / sx
-    sigma_hm_y = sigma / sy
-
-    # Create coordinate grids
-    yy, xx = np.mgrid[0:heatmap_size, 0:heatmap_size]  # (H, W) each
-    xx = xx.astype(np.float32)
-    yy = yy.astype(np.float32)
-
-    heatmaps = np.zeros(
-        (n_frames, n_joints, heatmap_size, heatmap_size), dtype=np.float32
-    )
-
-    for f in range(n_frames):
-        for j in range(n_joints):
-            # Convert pixel coords to heatmap coords
-            cx_hm = target_2d[f, j, 0] / sx
-            cy_hm = target_2d[f, j, 1] / sy
-
-            # Gaussian blob (circular in pixel space, elliptical in heatmap space)
-            heatmaps[f, j] = np.exp(
-                -(
-                    (xx - cx_hm) ** 2 / (2 * sigma_hm_x**2)
-                    + (yy - cy_hm) ** 2 / (2 * sigma_hm_y**2)
-                )
-            )
-
-    return heatmaps, affine
 
 
 # ---------------------------------------------------------------------------

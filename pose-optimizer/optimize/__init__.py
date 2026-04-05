@@ -1,7 +1,6 @@
 """Pure-function optimizer: optimize(raw_3d, camera, ...) -> improved_3d.
 
-Based on MotionBert's batched optimizer with support for both real SH heatmaps
-(MotionBert) and synthetic Gaussian heatmaps (MediaPipe).
+Batched FK optimizer using real Stacked Hourglass heatmaps for scoring.
 """
 
 from __future__ import annotations
@@ -17,7 +16,6 @@ from config import OptimizationConfig
 from fk import forward_kinematics, forward_kinematics_batch, positions_to_fk_params
 from scoring import (
     compute_total_score_batch,
-    generate_synthetic_heatmaps,
     apply_blur,
 )
 from skeleton import NUM_JOINTS
@@ -27,26 +25,19 @@ def optimize(
     raw_3d: list[np.ndarray],
     camera: Camera,
     config: OptimizationConfig,
-    heatmaps: list[np.ndarray] | None = None,
-    affine: np.ndarray | None = None,
-    target_2d: list[np.ndarray] | None = None,
+    heatmaps: list[np.ndarray],
+    affine: np.ndarray,
     visibility: list[np.ndarray] | None = None,
     verbose: bool = True,
 ) -> tuple[list[np.ndarray], np.ndarray, list[float]]:
     """Run FK optimization to improve 3D pose estimates.
 
-    For MotionBERT: pass heatmaps + affine (real SH heatmaps).
-    For MediaPipe: pass target_2d (synthetic Gaussian heatmaps generated internally).
-
     Args:
         raw_3d: Per-frame (16, 3) camera-space positions. [3D:SKELETON_16]
         camera: Camera for 3D->2D projection.
         config: Optimization hyperparameters.
-        heatmaps: Per-frame (16, 64, 64) real SH heatmaps. [HEATMAP:MPII_16]
-            None for MediaPipe mode.
-        affine: (2, 3) affine from crop to pixel coords. Required with heatmaps.
-        target_2d: Per-frame (16, 2) 2D detections in pixels. [2D:SKELETON_16]
-            For MediaPipe mode.
+        heatmaps: Per-frame (16, 64, 64) SH heatmaps. [HEATMAP:MPII_16]
+        affine: (2, 3) affine from crop to pixel coords.
         visibility: Per-frame (16,) confidence scores. [VIS:SKELETON_16]
             Defaults to ones.
         verbose: Print progress.
@@ -58,32 +49,13 @@ def optimize(
             loss_history: List of loss values per step.
     """
     n_frames = len(raw_3d)
-    use_mpii_mapping = True  # Default: real SH heatmaps with MPII mapping
 
     # Default visibility to ones
     if visibility is None:
         visibility = [np.ones(NUM_JOINTS) for _ in range(n_frames)]
 
-    # Determine heatmap mode
-    if heatmaps is not None and affine is not None:
-        # MotionBert mode: real SH heatmaps
-        use_mpii_mapping = True
-        heatmaps_np = np.array(heatmaps)  # [HEATMAP:MPII_16]
-        affine_np = affine
-    elif target_2d is not None:
-        # MediaPipe mode: generate synthetic Gaussian heatmaps
-        use_mpii_mapping = False
-        target_2d_arr = np.array(target_2d)  # (F, 16, 2) [2D:SKELETON_16]
-        heatmaps_np, affine_np = generate_synthetic_heatmaps(  # [HEATMAP:SKELETON_16]
-            target_2d_arr,
-            image_size=camera.image_size,
-            heatmap_size=64,
-            sigma=config.heatmap_sigma,
-        )
-    else:
-        raise ValueError(
-            "Either (heatmaps + affine) or target_2d must be provided."
-        )
+    heatmaps_np = np.array(heatmaps)  # [HEATMAP:MPII_16]
+    affine_np = affine
 
     # --- Initialize FK parameters ---
     if verbose:
@@ -186,7 +158,6 @@ def optimize(
             heatmaps=heatmaps_t,
             affine=affine_t,
             confidence_epsilon=config.confidence_epsilon,
-            use_mpii_mapping=use_mpii_mapping,
         )
 
         loss = -total_score

@@ -25,7 +25,6 @@ class OptimizationConfig(BaseModel):
     position_penalty_weight: float = 500.0
     rotation_penalty_scalar: float = 10.0
     heatmap_blur_sigma: float = 4.0
-    heatmap_sigma: float = 50.0
     confidence_epsilon: float = 1e-4
 
     # Per-joint rotation penalty multipliers (relative to rotation_penalty_scalar).
