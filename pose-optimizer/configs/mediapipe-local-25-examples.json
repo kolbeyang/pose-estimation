@@ -1,5 +1,13 @@
 {
-  "mediapipe": {},
+  "mediapipe": {
+    "is_generate_heatmap_videos": false,
+    "optimization": {
+      "num_steps": 50,
+      "heatmap_blur_sigma": 4.0,
+      "learning_rate": 0.0005,
+      "anchor_weight": 200.0
+    }
+  },
   "examples": [
     {
       "sequence": "171204_pose1_sample",

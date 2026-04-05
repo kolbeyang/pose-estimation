@@ -1,7 +1,7 @@
 {
     "motionbert": {
         "optimization": {
-            "num_steps": 50,
+            "num_steps": 100,
             "learning_rate": 0.001,
             "bone_length_lr": 0.005,
             "heatmap_blur_sigma_start": 16.0,
@@ -10,10 +10,10 @@
     },
     "mediapipe": {
         "optimization": {
-            "num_steps": 25,
-            "heatmap_blur_sigma": 16.0,
+            "num_steps": 50,
+            "heatmap_blur_sigma": 4.0,
             "learning_rate": 0.0005,
-            "anchor_weight": 1000.0
+            "anchor_weight": 200.0
         }
     },
     "graphs": {},
@@ -27,7 +27,7 @@
         }
     ],
     "optimization": {
-        "num_steps": 10,
+        "num_steps": 50,
         "heatmap_blur_sigma": 16.0,
         "learning_rate": 0.0005
     }

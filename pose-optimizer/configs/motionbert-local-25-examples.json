@@ -1,5 +1,14 @@
 {
-  "motionbert": {},
+  "motionbert": {
+    "is_generate_heatmap_videos": false,
+    "optimization": {
+      "num_steps": 100,
+      "learning_rate": 0.001,
+      "bone_length_lr": 0.005,
+      "heatmap_blur_sigma_start": 16.0,
+      "heatmap_blur_sigma_end": 4.0
+    }
+  },
   "examples": [
     {
       "sequence": "171204_pose1_sample",
