@@ -510,7 +510,7 @@ def generate_cross_pipeline_metrics_comparison(
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=10)
-    ax.set_ylabel("Error")
+    ax.set_ylabel("Error (see x-axis for units)")
     ax.set_title("Metrics Comparison: MotionBERT vs MediaPipe (avg across examples)")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3, axis="y")
