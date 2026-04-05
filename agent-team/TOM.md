@@ -133,14 +133,15 @@ architect_alex(SPEC, ...any_other_required_context)
 is_task_complete = false
 
 # Orchestration loop
-while !is_task_complete:
-  developer_dave(SPEC, TODO, ...any_other_required_context)
-  evaluator_eve(SPEC, TODO, ...any_other_required_context)
+for PHASE in PLAN:
+  while !is_task_complete:
+    developer_dave(SPEC, PLAN, PHASE, TODO, ...any_other_required_context)
+    evaluator_eve(SPEC, PLAN, PHASE, TODO, ...any_other_required_context)
 
-  if (TODO.unfinished_todos.length == 0 && Eve's testing report looks good):
-    # Final check
-    is_nathan_approve = nit_pick_nathan(SPEC, ...any_other_required_context)
-    is_task_complete = is_nathan_approve || tom_determines_nits_are_valid(TODO)
+    if (TODO.unfinished_todos.length == 0 && Eve's testing report looks good):
+      # Final check
+      is_nathan_approve = nit_pick_nathan(SPEC, PLAN, PHASE, ...any_other_required_context)
+      is_task_complete = is_nathan_approve || tom_determines_nits_are_valid(TODO)
 
 write_final_report()
 ```
