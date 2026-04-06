@@ -186,6 +186,8 @@
       "person_idx": 0
     }
   ],
+  "generate_video": false,
+  "generate_graphs": false,
   "optimization": {
     "num_steps": 10,
     "heatmap_blur_sigma": 16.0,

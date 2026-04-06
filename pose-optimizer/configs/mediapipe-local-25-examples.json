@@ -185,6 +185,8 @@
       "person_idx": 0
     }
   ],
+  "generate_video": false,
+  "generate_graphs": false,
   "optimization": {
     "num_steps": 50
   }
