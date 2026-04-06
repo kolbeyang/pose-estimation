@@ -462,7 +462,7 @@ def main(config_path: str) -> None:
 
                 # Convert to camera coordinates
                 det_cam_positions_mb: list[np.ndarray] = []
-                for i in range(len(frames_rgb)):
+                for i in range(len(positions_3d_norm)):
                     pos_cam = motionbert_to_camera_space(
                         positions_3d_norm[i], kp_2d[i], fx, fy, cx, cy,
                     )
