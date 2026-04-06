@@ -172,8 +172,10 @@ def optimize(
 
         # Compute per-step blurred heatmaps if annealing
         if use_blur_annealing:
+            blur_start: float = config.heatmap_blur_sigma_start  # type: ignore[assignment]
+            blur_end: float = config.heatmap_blur_sigma_end  # type: ignore[assignment]
             t = step / max(num_steps - 1, 1)
-            sigma = config.heatmap_blur_sigma_start + (config.heatmap_blur_sigma_end - config.heatmap_blur_sigma_start) * t
+            sigma = blur_start + (blur_end - blur_start) * t
             if sigma > 0:
                 heatmaps_step = apply_blur(heatmaps_raw_t, sigma)
             else:
