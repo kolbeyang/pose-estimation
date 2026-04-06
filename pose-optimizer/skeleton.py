@@ -5,19 +5,22 @@ Three categories of joints in the optimizer's canonical 16-joint skeleton:
   Category 1 (12 Eval joints): indices 1-6, 10-15.
       Directly detected by all systems (MotionBERT, MediaPipe, CMU GT).
 
-  Category 2 (2 Synthesized joints): indices 0 (Pelvis), 8 (Neck).
+  Category 2 (2 Synthesized Eval joints): indices 0 (Pelvis), 8 (Neck).
       Direct in MotionBERT + CMU GT, synthesized as midpoints for MediaPipe.
 
-  Category 3 (Optimization-only): index 7 (Spine, FK-internal),
-      index 9 (Head -- Head Top for MotionBERT, Nose for MediaPipe).
-      Excluded from evaluation.
+  Category 3 (Synthesized Eval joint): index 9 (Nose).
+      MotionBERT: synthesized as 30% from Neck toward Head Top.
+      MediaPipe: MP[0] (Nose) direct.
+      CMU GT: COCO[1] (Nose) direct.
+
+  FK-internal only: index 7 (Spine). Excluded from evaluation.
 
 Skeleton 16-joint order [SKELETON_16]:
     Pelvis(0), RHip(1), RKnee(2), RAnkle(3), LHip(4), LKnee(5), LAnkle(6),
-    Spine(7), Neck(8), Head(9), LShoulder(10), LElbow(11), LWrist(12),
+    Spine(7), Neck(8), Nose(9), LShoulder(10), LElbow(11), LWrist(12),
     RShoulder(13), RElbow(14), RWrist(15).
 
-Head joint (old index 10) has been removed. All indices >= 10 are shifted down by 1.
+15 eval joints (all except Spine(7)).
 """
 
 import numpy as np
@@ -34,7 +37,7 @@ JOINT_NAMES: list[str] = [
     "LAnkle",       # 6
     "Spine",        # 7
     "Neck",         # 8  (Base of Neck)
-    "Head",         # 9  (Head Top / Nose, mode-dependent)
+    "Nose",         # 9  (Nose: synthesized for MB, direct for MP/GT)
     "LShoulder",    # 10
     "LElbow",       # 11
     "LWrist",       # 12
@@ -43,9 +46,9 @@ JOINT_NAMES: list[str] = [
     "RWrist",       # 15
 ]
 
-# Eval joints: 14 joints (12 direct + Pelvis + Neck).  [SKELETON_16_EVAL] indices.
-# Excluded: Spine(7) = FK-internal, Head(9) = differs per pipeline.
-EVAL_JOINTS: list[int] = [0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13, 14, 15]
+# Eval joints: 15 joints (12 direct + Pelvis + Neck + Nose).  [SKELETON_16_EVAL] indices.
+# Excluded: Spine(7) = FK-internal only.
+EVAL_JOINTS: list[int] = [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
 EVAL_JOINT_NAMES: list[str] = [JOINT_NAMES[j] for j in EVAL_JOINTS]
 NUM_EVAL_JOINTS: int = len(EVAL_JOINTS)
 
@@ -68,7 +71,7 @@ DEFAULT_BONE_LENGTHS: np.ndarray = np.array([
     0.40,   # 6: LKnee -> LAnkle
     0.22,   # 7: Pelvis -> Spine
     0.22,   # 8: Spine -> Neck
-    0.12,   # 9: Neck -> Head
+    0.08,   # 9: Neck -> Nose
     0.18,   # 10: Neck -> LShoulder
     0.28,   # 11: LShoulder -> LElbow
     0.25,   # 12: LElbow -> LWrist
@@ -89,7 +92,7 @@ REST_DIRECTIONS: np.ndarray = np.array([
     [0, 1, 0],       # 6: LKnee -> LAnkle
     [0, -1, 0],      # 7: Pelvis -> Spine
     [0, -1, 0],      # 8: Spine -> Neck
-    [0, -1, 0],      # 9: Neck -> Head
+    [0, -0.5, -0.866],  # 9: Neck -> Nose (forward and slightly up)
     [1, 0, 0],       # 10: Neck -> LShoulder
     [0, 1, 0],       # 11: LShoulder -> LElbow
     [0, 1, 0],       # 12: LElbow -> LWrist
@@ -156,7 +159,8 @@ def mpii_to_skeleton(keypoints_mpii: np.ndarray) -> np.ndarray:
     skel[5] = keypoints_mpii[4]   # LKnee
     skel[6] = keypoints_mpii[5]   # LAnkle
     skel[8] = keypoints_mpii[8]   # Neck = MPII Upper Neck
-    skel[9] = keypoints_mpii[9]   # Head = MPII Head Top
+    # Nose synthesized as 30% of the way from base of neck to head top
+    skel[9] = skel[8] + 0.3 * (keypoints_mpii[9] - skel[8])  # Nose (synthesized)
     skel[10] = keypoints_mpii[9]  # Head duplicate (removed by strip_head_joint)
     skel[11] = keypoints_mpii[13]  # LShoulder
     skel[12] = keypoints_mpii[14]  # LElbow
@@ -194,7 +198,7 @@ def coco19_to_skeleton(joints19: np.ndarray) -> np.ndarray:
     skel[6] = joints19[8]                            # LAnkle
     skel[7] = (joints19[2] + joints19[0]) / 2.0     # Spine (midpoint, FK-internal)
     skel[8] = joints19[0]                            # Neck <- COCO Neck
-    skel[9] = joints19[1]                            # Head <- Nose
+    skel[9] = joints19[1]                            # Nose <- COCO[1]
     skel[10] = joints19[3]                           # LShoulder
     skel[11] = joints19[4]                           # LElbow
     skel[12] = joints19[5]                           # LWrist
@@ -246,7 +250,7 @@ def mediapipe_to_skeleton(landmarks: np.ndarray) -> np.ndarray:
     skel[4] = landmarks[23]          # LHip
     skel[5] = landmarks[25]          # LKnee
     skel[6] = landmarks[27]          # LAnkle
-    skel[9] = landmarks[0]           # Head (Nose landmark)
+    skel[9] = landmarks[0]           # Nose (MP[0] direct)
     skel[10] = landmarks[11]         # LShoulder
     skel[11] = landmarks[13]         # LElbow
     skel[12] = landmarks[15]         # LWrist
@@ -285,7 +289,7 @@ def mediapipe_visibility_to_skeleton(visibility: np.ndarray) -> np.ndarray:
     skel_vis[7] = min(visibility[23], visibility[24],
                       visibility[11], visibility[12])    # Spine
     skel_vis[8] = min(visibility[11], visibility[12])    # Neck
-    skel_vis[9] = visibility[0]                          # Head (Nose)
+    skel_vis[9] = visibility[0]                          # Nose
     skel_vis[10] = visibility[11]                        # LShoulder
     skel_vis[11] = visibility[13]                        # LElbow
     skel_vis[12] = visibility[15]                        # LWrist

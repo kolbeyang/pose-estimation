@@ -1,15 +1,16 @@
-"""Evaluation metrics: MPJPE, P-MPJPE, SI-MPJPE, VW variants, velocity metrics.
+"""Evaluation metrics: MPJPE, P-MPJPE, SI-MPJPE, VW variants, velocity metrics, 2D reprojection.
 
-All 9 metrics:
-  1. MPJPE           - Mean Per-Joint Position Error
-  2. P-MPJPE         - Procrustes-aligned MPJPE
-  3. SI-MPJPE        - Scale-Independent MPJPE
-  4. VW-MPJPE        - Visibility-Weighted MPJPE
-  5. VW-SI-MPJPE     - Visibility-Weighted Scale-Independent MPJPE
-  6. MPJVE           - Mean Per-Joint Velocity Error
-  7. SI-MPJVE        - Scale-Independent MPJVE
-  8. VW-MPJVE        - Visibility-Weighted MPJVE
-  9. VW-SI-MPJVE     - Visibility-Weighted Scale-Independent MPJVE
+All 10 metrics:
+  1. MPJPE               - Mean Per-Joint Position Error
+  2. P-MPJPE             - Procrustes-aligned MPJPE
+  3. SI-MPJPE            - Scale-Independent MPJPE
+  4. VW-MPJPE            - Visibility-Weighted MPJPE
+  5. VW-SI-MPJPE         - Visibility-Weighted Scale-Independent MPJPE
+  6. MPJVE               - Mean Per-Joint Velocity Error
+  7. SI-MPJVE            - Scale-Independent MPJVE
+  8. VW-MPJVE            - Visibility-Weighted MPJVE
+  9. VW-SI-MPJVE         - Visibility-Weighted Scale-Independent MPJVE
+ 10. reprojected_mpjpe_2d - 2D Reprojected MPJPE (pixels)
 """
 
 from __future__ import annotations
@@ -64,8 +65,8 @@ def optimal_scale(predicted: np.ndarray, target: np.ndarray) -> float:
     Single global scalar across all frames.
 
     Args:
-        predicted: (F, J, 3) root-relative.
-        target: (F, J, 3) root-relative.
+        predicted: (F, J, 3) joint positions (camera coordinates).
+        target: (F, J, 3) joint positions (camera coordinates).
 
     Returns:
         Optimal scale factor.
@@ -88,8 +89,8 @@ def _optimal_scale_weighted(
     """Find optimal scale s minimizing visibility-weighted MPJPE.
 
     Args:
-        predicted: (F, J, 3) root-relative.
-        target: (F, J, 3) root-relative.
+        predicted: (F, J, 3) joint positions (camera coordinates).
+        target: (F, J, 3) joint positions (camera coordinates).
         weights: (F, J) per-joint per-frame weights.
 
     Returns:
@@ -210,8 +211,8 @@ def si_mpjpe(predicted: np.ndarray, target: np.ndarray) -> float:
     Single global scale across all frames.
 
     Args:
-        predicted: (F, J, 3) root-relative.
-        target: (F, J, 3) root-relative.
+        predicted: (F, J, 3) joint positions (camera coordinates).
+        target: (F, J, 3) joint positions (camera coordinates).
 
     Returns:
         Scalar SI-MPJPE.
@@ -252,8 +253,8 @@ def vw_si_mpjpe(
     This is the primary evaluation metric.
 
     Args:
-        predicted: (F, J, 3) root-relative.
-        target: (F, J, 3) root-relative.
+        predicted: (F, J, 3) joint positions (camera coordinates).
+        target: (F, J, 3) joint positions (camera coordinates).
         weights: (F, J) visibility weights.
 
     Returns:
@@ -293,8 +294,8 @@ def si_mpjve(predicted: np.ndarray, target: np.ndarray) -> float:
     Finds optimal scale on positions, applies to velocities.
 
     Args:
-        predicted: (F, J, 3) root-relative.
-        target: (F, J, 3) root-relative.
+        predicted: (F, J, 3) joint positions (camera coordinates).
+        target: (F, J, 3) joint positions (camera coordinates).
 
     Returns:
         Scalar SI-MPJVE.
@@ -339,8 +340,8 @@ def vw_si_mpjve(
     """Visibility-Weighted Scale-Independent MPJVE.
 
     Args:
-        predicted: (F, J, 3) root-relative.
-        target: (F, J, 3) root-relative.
+        predicted: (F, J, 3) joint positions (camera coordinates).
+        target: (F, J, 3) joint positions (camera coordinates).
         weights: (F, J) visibility weights.
 
     Returns:
@@ -382,6 +383,112 @@ def mpjve_per_joint(predicted: np.ndarray, target: np.ndarray) -> np.ndarray:
     return np.mean(np.linalg.norm(pred_vel - tgt_vel, axis=-1), axis=0)
 
 
+def vw_si_mpjpe_per_joint(
+    predicted: np.ndarray,
+    target: np.ndarray,
+    weights: np.ndarray,
+) -> np.ndarray:
+    """Per-joint VW-SI-MPJPE: visibility-weighted, scale-independent position error.
+
+    Finds the global optimal scale (weighted), then computes per-joint
+    weighted mean error.
+
+    Args:
+        predicted: (F, J, 3) joint positions in camera coordinates.
+        target: (F, J, 3) ground truth in camera coordinates.
+        weights: (F, J) per-joint per-frame visibility weights.
+
+    Returns:
+        (J,) VW-SI-MPJPE per joint.
+    """
+    s = _optimal_scale_weighted(predicted, target, weights)
+    scaled = s * predicted
+    errors = np.linalg.norm(scaled - target, axis=-1)  # (F, J)
+    n_joints = predicted.shape[1]
+    result = np.zeros(n_joints)
+    for j in range(n_joints):
+        w_sum = float(weights[:, j].sum())
+        if w_sum < 1e-12:
+            result[j] = float(np.mean(errors[:, j]))
+        else:
+            result[j] = float(np.sum(errors[:, j] * weights[:, j]) / w_sum)
+    return result
+
+
+def vw_si_mpjve_per_joint(
+    predicted: np.ndarray,
+    target: np.ndarray,
+    weights: np.ndarray,
+) -> np.ndarray:
+    """Per-joint VW-SI-MPJVE: visibility-weighted, scale-independent velocity error.
+
+    Finds the global optimal scale (weighted), then computes per-joint
+    weighted mean velocity error.
+
+    Args:
+        predicted: (F, J, 3) joint positions in camera coordinates.
+        target: (F, J, 3) ground truth in camera coordinates.
+        weights: (F, J) per-joint per-frame visibility weights.
+
+    Returns:
+        (J,) VW-SI-MPJVE per joint.
+    """
+    s = _optimal_scale_weighted(predicted, target, weights)
+    scaled = s * predicted
+    pred_vel = _velocities(scaled)
+    tgt_vel = _velocities(target)
+    errors = np.linalg.norm(pred_vel - tgt_vel, axis=-1)  # (F-1, J)
+    vel_weights = np.minimum(weights[:-1], weights[1:])  # (F-1, J)
+    n_joints = predicted.shape[1]
+    result = np.zeros(n_joints)
+    for j in range(n_joints):
+        w_sum = float(vel_weights[:, j].sum())
+        if w_sum < 1e-12:
+            result[j] = float(np.mean(errors[:, j]))
+        else:
+            result[j] = float(np.sum(errors[:, j] * vel_weights[:, j]) / w_sum)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 2D Reprojected MPJPE
+# ---------------------------------------------------------------------------
+
+def reprojected_mpjpe_2d(
+    predicted: np.ndarray,
+    target: np.ndarray,
+    camera: Camera,
+    visibility: np.ndarray | None = None,
+) -> float:
+    """2D Reprojected MPJPE: mean pixel distance between projected keypoints.
+
+    Projects both predicted and GT 3D trajectories to 2D image coordinates,
+    then computes mean Euclidean pixel distance across visible joints only.
+
+    Args:
+        predicted: (F, J, 3) predicted positions in camera space.
+        target: (F, J, 3) ground truth positions in camera space.
+        camera: Camera for projection and frame bounds.
+        visibility: (F, J) binary visibility weights. If None, computed from
+            GT projection frame-boundary check.
+
+    Returns:
+        Scalar mean pixel distance (in pixels) over visible joints.
+    """
+    pred_2d = camera.camera_to_image(predicted)  # (F, J, 2)
+    gt_2d = camera.camera_to_image(target)  # (F, J, 2)
+
+    if visibility is None:
+        visibility = camera.is_in_frame(gt_2d).astype(np.float64)  # (F, J)
+    assert visibility is not None
+
+    errors = np.linalg.norm(pred_2d - gt_2d, axis=-1)  # (F, J)
+    w_sum = float(visibility.sum())
+    if w_sum < 1e-12:
+        return float(np.mean(errors))
+    return float(np.sum(errors * visibility) / w_sum)
+
+
 # ---------------------------------------------------------------------------
 # Full evaluation
 # ---------------------------------------------------------------------------
@@ -392,10 +499,10 @@ def evaluate(
     camera: Camera,
     eval_joints: list[int] | None = None,
 ) -> dict[str, float]:
-    """Compute all 9 evaluation metrics.
+    """Compute all 10 evaluation metrics.
 
     Both predicted and ground_truth should be in camera space.
-    Internally slices to eval joints [3D:SKELETON_16_EVAL] (14 joints)
+    Internally slices to eval joints [3D:SKELETON_16_EVAL] (15 joints)
     before computing metrics.
 
     Args:
@@ -405,37 +512,43 @@ def evaluate(
         eval_joints: Joint indices to evaluate. Defaults to EVAL_JOINTS.
 
     Returns:
-        Dict with all 9 metrics (MPJPE, P-MPJPE, SI-MPJPE, VW-*, velocity).
+        Dict with all 10 metrics (MPJPE, P-MPJPE, SI-MPJPE, VW-*, velocity,
+        reprojected_mpjpe_2d).
     """
     if eval_joints is None:
         eval_joints = EVAL_JOINTS
 
-    # Root-relative, then slice to eval joints
-    pred_rr = root_relative(predicted)[:, eval_joints, :]  # [3D:SKELETON_16_EVAL]
-    gt_rr = root_relative(ground_truth)[:, eval_joints, :]  # [3D:SKELETON_16_EVAL]
+    # Slice to eval joints (evaluate in camera coordinates, not root-relative)
+    pred_eval = predicted[:, eval_joints, :]  # [3D:SKELETON_16_EVAL]
+    gt_eval = ground_truth[:, eval_joints, :]  # [3D:SKELETON_16_EVAL]
 
     # Visibility weights (on all joints, then slice)
-    vis = compute_visibility_weights(ground_truth, camera)[:, eval_joints]  # (F, 14)
+    vis = compute_visibility_weights(ground_truth, camera)[:, eval_joints]  # (F, 15)
 
     results: dict[str, float] = {}
 
     # Position metrics
-    results["mpjpe"] = mpjpe(pred_rr, gt_rr)
-    results["p_mpjpe"] = p_mpjpe(pred_rr, gt_rr)
-    results["si_mpjpe"] = si_mpjpe(pred_rr, gt_rr)
-    results["vw_mpjpe"] = vw_mpjpe(pred_rr, gt_rr, vis)
-    results["vw_si_mpjpe"] = vw_si_mpjpe(pred_rr, gt_rr, vis)
+    results["mpjpe"] = mpjpe(pred_eval, gt_eval)
+    results["p_mpjpe"] = p_mpjpe(pred_eval, gt_eval)
+    results["si_mpjpe"] = si_mpjpe(pred_eval, gt_eval)
+    results["vw_mpjpe"] = vw_mpjpe(pred_eval, gt_eval, vis)
+    results["vw_si_mpjpe"] = vw_si_mpjpe(pred_eval, gt_eval, vis)
 
     # Velocity metrics (need >= 2 frames)
     if predicted.shape[0] >= 2:
-        results["mpjve"] = mpjve(pred_rr, gt_rr)
-        results["si_mpjve"] = si_mpjve(pred_rr, gt_rr)
-        results["vw_mpjve"] = vw_mpjve(pred_rr, gt_rr, vis)
-        results["vw_si_mpjve"] = vw_si_mpjve(pred_rr, gt_rr, vis)
+        results["mpjve"] = mpjve(pred_eval, gt_eval)
+        results["si_mpjve"] = si_mpjve(pred_eval, gt_eval)
+        results["vw_mpjve"] = vw_mpjve(pred_eval, gt_eval, vis)
+        results["vw_si_mpjve"] = vw_si_mpjve(pred_eval, gt_eval, vis)
     else:
         results["mpjve"] = 0.0
         results["si_mpjve"] = 0.0
         results["vw_mpjve"] = 0.0
         results["vw_si_mpjve"] = 0.0
+
+    # 2D reprojected MPJPE (pixels)
+    results["reprojected_mpjpe_2d"] = reprojected_mpjpe_2d(
+        pred_eval, gt_eval, camera, visibility=vis,
+    )
 
     return results

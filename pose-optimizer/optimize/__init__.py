@@ -1,7 +1,6 @@
 """Pure-function optimizer: optimize(raw_3d, camera, ...) -> improved_3d.
 
-Based on MotionBert's batched optimizer with support for both real SH heatmaps
-(MotionBert) and synthetic Gaussian heatmaps (MediaPipe).
+Batched FK optimizer using real Stacked Hourglass heatmaps for scoring.
 """
 
 from __future__ import annotations
@@ -17,36 +16,28 @@ from config import OptimizationConfig
 from fk import forward_kinematics, forward_kinematics_batch, positions_to_fk_params
 from scoring import (
     compute_total_score_batch,
-    generate_synthetic_heatmaps,
     apply_blur,
 )
-from skeleton import NUM_JOINTS
+from skeleton import NUM_JOINTS, DEFAULT_BONE_LENGTHS
 
 
 def optimize(
     raw_3d: list[np.ndarray],
     camera: Camera,
     config: OptimizationConfig,
-    heatmaps: list[np.ndarray] | None = None,
-    affine: np.ndarray | None = None,
-    target_2d: list[np.ndarray] | None = None,
+    heatmaps: list[np.ndarray],
+    affine: np.ndarray,
     visibility: list[np.ndarray] | None = None,
     verbose: bool = True,
 ) -> tuple[list[np.ndarray], np.ndarray, list[float]]:
     """Run FK optimization to improve 3D pose estimates.
 
-    For MotionBERT: pass heatmaps + affine (real SH heatmaps).
-    For MediaPipe: pass target_2d (synthetic Gaussian heatmaps generated internally).
-
     Args:
         raw_3d: Per-frame (16, 3) camera-space positions. [3D:SKELETON_16]
         camera: Camera for 3D->2D projection.
         config: Optimization hyperparameters.
-        heatmaps: Per-frame (16, 64, 64) real SH heatmaps. [HEATMAP:MPII_16]
-            None for MediaPipe mode.
-        affine: (2, 3) affine from crop to pixel coords. Required with heatmaps.
-        target_2d: Per-frame (16, 2) 2D detections in pixels. [2D:SKELETON_16]
-            For MediaPipe mode.
+        heatmaps: Per-frame (16, 64, 64) SH heatmaps. [HEATMAP:MPII_16]
+        affine: (2, 3) affine from crop to pixel coords.
         visibility: Per-frame (16,) confidence scores. [VIS:SKELETON_16]
             Defaults to ones.
         verbose: Print progress.
@@ -58,32 +49,13 @@ def optimize(
             loss_history: List of loss values per step.
     """
     n_frames = len(raw_3d)
-    use_mpii_mapping = True  # Default: real SH heatmaps with MPII mapping
 
     # Default visibility to ones
     if visibility is None:
         visibility = [np.ones(NUM_JOINTS) for _ in range(n_frames)]
 
-    # Determine heatmap mode
-    if heatmaps is not None and affine is not None:
-        # MotionBert mode: real SH heatmaps
-        use_mpii_mapping = True
-        heatmaps_np = np.array(heatmaps)  # [HEATMAP:MPII_16]
-        affine_np = affine
-    elif target_2d is not None:
-        # MediaPipe mode: generate synthetic Gaussian heatmaps
-        use_mpii_mapping = False
-        target_2d_arr = np.array(target_2d)  # (F, 16, 2) [2D:SKELETON_16]
-        heatmaps_np, affine_np = generate_synthetic_heatmaps(  # [HEATMAP:SKELETON_16]
-            target_2d_arr,
-            image_size=camera.image_size,
-            heatmap_size=64,
-            sigma=config.heatmap_sigma,
-        )
-    else:
-        raise ValueError(
-            "Either (heatmaps + affine) or target_2d must be provided."
-        )
+    heatmaps_np = np.array(heatmaps)  # [HEATMAP:MPII_16]
+    affine_np = affine
 
     # --- Initialize FK parameters ---
     if verbose:
@@ -132,8 +104,24 @@ def optimize(
         np.array(all_local_rots), dtype=torch.float32, requires_grad=True,
     )
 
-    # Shared bone lengths: median across frames
-    median_bone_lengths = np.median(np.array(all_bone_lengths), axis=0)
+    # Shared bone lengths: median across frames, clamped to plausible range
+    raw_median = np.median(np.array(all_bone_lengths), axis=0)
+    median_bone_lengths = raw_median.copy()
+    # Clamp each bone to [0.5x, 1.5x] of default to prevent pathological init
+    # (e.g. MotionBERT's lower body bones can be 2-3x too long)
+    defaults = DEFAULT_BONE_LENGTHS.astype(np.float64)
+    lower = defaults * 0.5
+    upper = defaults * 1.5
+    # Only clamp non-root bones (root has length 0)
+    for j in range(1, NUM_JOINTS):
+        median_bone_lengths[j] = np.clip(median_bone_lengths[j], lower[j], upper[j])
+    if verbose:
+        n_clamped = sum(
+            1 for j in range(1, NUM_JOINTS)
+            if raw_median[j] != median_bone_lengths[j]
+        )
+        if n_clamped > 0:
+            logger.info("Clamped %d/%d bone lengths to plausible range", n_clamped, NUM_JOINTS - 1)
     param_bone_lengths = torch.tensor(
         median_bone_lengths, dtype=torch.float32, requires_grad=True,
     )
@@ -143,8 +131,13 @@ def optimize(
     heatmaps_t = torch.tensor(heatmaps_np, dtype=torch.float32)  # (F, C, H, W) [HEATMAP:MPII_16] or [HEATMAP:SKELETON_16]
     affine_t = torch.tensor(affine_np, dtype=torch.float32)  # (2, 3)
 
-    # Apply blur
-    if config.heatmap_blur_sigma > 0:
+    # Blur annealing: if start/end sigmas are set, blur per-step; otherwise pre-blur once
+    use_blur_annealing = (
+        config.heatmap_blur_sigma_start is not None
+        and config.heatmap_blur_sigma_end is not None
+    )
+    heatmaps_raw_t = heatmaps_t  # keep unblurred copy for annealing
+    if not use_blur_annealing and config.heatmap_blur_sigma > 0:
         heatmaps_t = apply_blur(heatmaps_t, config.heatmap_blur_sigma)
 
     # Rotation penalty weights
@@ -159,6 +152,15 @@ def optimize(
         {"params": [param_bone_lengths], "lr": config.bone_length_lr},
     ])
 
+    # Compute anchor positions (raw input positions) for anchor penalty
+    anchor_positions_t: torch.Tensor | None = None
+    if config.anchor_weight > 0:
+        anchor_positions_t = torch.tensor(
+            np.array(raw_3d), dtype=torch.float32,
+        )
+        if verbose:
+            logger.info("Anchor weight: %.1f", config.anchor_weight)
+
     loss_history: list[float] = []
     num_steps = config.num_steps
 
@@ -167,6 +169,19 @@ def optimize(
 
     for step in range(num_steps):
         optimizer.zero_grad()
+
+        # Compute per-step blurred heatmaps if annealing
+        if use_blur_annealing:
+            blur_start: float = config.heatmap_blur_sigma_start  # type: ignore[assignment]
+            blur_end: float = config.heatmap_blur_sigma_end  # type: ignore[assignment]
+            t = step / max(num_steps - 1, 1)
+            sigma = blur_start + (blur_end - blur_start) * t
+            if sigma > 0:
+                heatmaps_step = apply_blur(heatmaps_raw_t, sigma)
+            else:
+                heatmaps_step = heatmaps_raw_t
+        else:
+            heatmaps_step = heatmaps_t
 
         # Batched FK
         all_positions = forward_kinematics_batch(
@@ -183,10 +198,11 @@ def optimize(
             all_positions, all_projected_2d, param_local_rots,
             visibility_t,
             config.position_penalty_weight, rot_per_joint_weights,
-            heatmaps=heatmaps_t,
+            heatmaps=heatmaps_step,
             affine=affine_t,
             confidence_epsilon=config.confidence_epsilon,
-            use_mpii_mapping=use_mpii_mapping,
+            anchor_positions=anchor_positions_t,
+            anchor_weight=config.anchor_weight,
         )
 
         loss = -total_score
