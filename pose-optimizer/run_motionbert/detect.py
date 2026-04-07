@@ -579,26 +579,63 @@ def run_motionbert(
     )
 
     clip_len = 243
-    if n_frames > clip_len:
-        keypoints_norm = keypoints_norm[:clip_len]
-        n_frames = clip_len
 
-    input_tensor = torch.from_numpy(keypoints_norm).unsqueeze(0).to(device)
-    logger.info("Running MotionBERT on %d frames...", n_frames)
+    if n_frames <= clip_len:
+        # Single pass — fits in one window
+        input_tensor = torch.from_numpy(keypoints_norm).unsqueeze(0).to(device)
+        logger.info("Running MotionBERT on %d frames...", n_frames)
 
-    with torch.no_grad():
-        try:
-            output_3d = model(input_tensor)
-        except RuntimeError as e:
-            if device.type != "cpu":
-                logger.warning("%s failed (%s), falling back to CPU", device, e)
-                model = model.to("cpu")
-                input_tensor = input_tensor.to("cpu")
+        with torch.no_grad():
+            try:
                 output_3d = model(input_tensor)
-            else:
-                raise
+            except RuntimeError as e:
+                if device.type != "cpu":
+                    logger.warning("%s failed (%s), falling back to CPU", device, e)
+                    model = model.to("cpu")
+                    input_tensor = input_tensor.to("cpu")
+                    output_3d = model(input_tensor)
+                else:
+                    raise
 
-    positions_3d = output_3d.cpu().numpy()[0]  # (N, 17, 3) [3D:MOTIONBERT_17]
+        positions_3d = output_3d.cpu().numpy()[0]  # (N, 17, 3)
+    else:
+        # Sliding window — process clip_len frames at a time, stride clip_len
+        # (no overlap for simplicity; last window is right-aligned)
+        chunks: list[np.ndarray] = []
+        start = 0
+        while start < n_frames:
+            end = min(start + clip_len, n_frames)
+            # If the remaining chunk is smaller than clip_len, right-align the window
+            if end - start < clip_len:
+                window_start = max(0, end - clip_len)
+                window = keypoints_norm[window_start:end]
+                keep_from = start - window_start  # how many frames to discard from front
+            else:
+                window = keypoints_norm[start:end]
+                keep_from = 0
+
+            input_tensor = torch.from_numpy(window).unsqueeze(0).to(device)
+            with torch.no_grad():
+                try:
+                    chunk_3d = model(input_tensor)
+                except RuntimeError as e:
+                    if device.type != "cpu":
+                        logger.warning("%s failed (%s), falling back to CPU", device, e)
+                        model = model.to("cpu")
+                        input_tensor = input_tensor.to("cpu")
+                        chunk_3d = model(input_tensor)
+                    else:
+                        raise
+
+            chunk_np = chunk_3d.cpu().numpy()[0]  # (clip_len, 17, 3)
+            chunks.append(chunk_np[keep_from:])
+            start = end
+
+        n_windows = len(chunks)
+        logger.info("Running MotionBERT on %d frames (%d windows of %d)...",
+                     n_frames, n_windows, clip_len)
+        positions_3d = np.concatenate(chunks, axis=0)  # (n_frames, 17, 3)
+
     positions_3d[0, 0, 2] = 0
 
     logger.info("MotionBERT raw output: %s", positions_3d.shape)
