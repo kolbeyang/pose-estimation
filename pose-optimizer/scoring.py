@@ -236,26 +236,46 @@ def compute_total_score_batch(
 # ---------------------------------------------------------------------------
 
 
-# TODO: I would prefer to use OpenCV (cv2) here instead of scipi
 def apply_blur(
     heatmaps: torch.Tensor,
     sigma: float,
 ) -> torch.Tensor:
-    """Apply Gaussian blur to heatmaps.
+    """Apply Gaussian blur to heatmaps using separable torch conv2d.
 
     Args:
         heatmaps: (F, C, H, W) tensor.
         sigma: Gaussian sigma in heatmap pixel space.
 
     Returns:
-        (F, C, H, W) blurred heatmaps.
+        (F, C, H, W) blurred heatmaps (on same device as input).
     """
-    import scipy.ndimage
+    if sigma <= 0:
+        return heatmaps
 
-    result = torch.zeros_like(heatmaps)
-    for f in range(heatmaps.shape[0]):
-        for c in range(heatmaps.shape[1]):
-            hm_np = heatmaps[f, c].numpy()
-            blurred = scipy.ndimage.gaussian_filter(hm_np, sigma=sigma)
-            result[f, c] = torch.tensor(blurred, dtype=torch.float32)
-    return result
+    # Match scipy.ndimage.gaussian_filter default truncate=4.0,
+    # but cap kernel to image size for large sigma
+    radius = int(4.0 * sigma + 0.5)
+    H, W = heatmaps.shape[2], heatmaps.shape[3]
+    radius = min(radius, min(H, W) - 1)
+    ks = 2 * radius + 1
+    pad = radius
+
+    device = heatmaps.device
+    x = torch.arange(ks, dtype=torch.float32, device=device) - pad
+    kernel_1d = torch.exp(-0.5 * (x / sigma) ** 2)
+    kernel_1d = kernel_1d / kernel_1d.sum()
+
+    F_count, C, H, W = heatmaps.shape
+    flat = heatmaps.reshape(-1, 1, H, W)
+
+    # Horizontal pass
+    k_h = kernel_1d.reshape(1, 1, 1, ks)
+    flat = torch.nn.functional.pad(flat, (pad, pad, 0, 0), mode='reflect')
+    flat = torch.nn.functional.conv2d(flat, k_h)
+
+    # Vertical pass
+    k_v = kernel_1d.reshape(1, 1, ks, 1)
+    flat = torch.nn.functional.pad(flat, (0, 0, pad, pad), mode='reflect')
+    flat = torch.nn.functional.conv2d(flat, k_v)
+
+    return flat.reshape(F_count, C, H, W)
