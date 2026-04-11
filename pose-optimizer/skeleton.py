@@ -6,14 +6,17 @@ Three categories of joints in the optimizer's canonical 16-joint skeleton:
       Directly detected by all systems (MotionBERT, MediaPipe, CMU GT).
 
   Category 2 (2 Synthesized Eval joints): indices 0 (Pelvis), 8 (Neck).
+      Neck is at thorax/shoulder level (SH[7] Thorax for MPII/MB,
+      midpoint(shoulders) for MediaPipe, COCO[0] for GT).
       Direct in MotionBERT + CMU GT, synthesized as midpoints for MediaPipe.
 
   Category 3 (Synthesized Eval joint): index 9 (Nose).
-      MotionBERT: synthesized as 30% from Neck toward Head Top.
+      MotionBERT: synthesized as 30% from UpperNeck(SH[8]) toward HeadTop(SH[9]).
       MediaPipe: MP[0] (Nose) direct.
       CMU GT: COCO[1] (Nose) direct.
 
   FK-internal only: index 7 (Spine). Excluded from evaluation.
+      Synthesized as midpoint(Pelvis, Neck) for all sources.
 
 Skeleton 16-joint order [SKELETON_16]:
     Pelvis(0), RHip(1), RKnee(2), RAnkle(3), LHip(4), LKnee(5), LAnkle(6),
@@ -36,7 +39,7 @@ JOINT_NAMES: list[str] = [
     "LKnee",        # 5
     "LAnkle",       # 6
     "Spine",        # 7
-    "Neck",         # 8  (Base of Neck)
+    "Neck",         # 8  (Thorax / shoulder level)
     "Nose",         # 9  (Nose: synthesized for MB, direct for MP/GT)
     "LShoulder",    # 10
     "LElbow",       # 11
@@ -71,7 +74,7 @@ DEFAULT_BONE_LENGTHS: np.ndarray = np.array([
     0.40,   # 6: LKnee -> LAnkle
     0.22,   # 7: Pelvis -> Spine
     0.22,   # 8: Spine -> Neck
-    0.08,   # 9: Neck -> Nose
+    0.18,   # 9: Neck -> Nose (larger: Neck is now at thorax/shoulder level)
     0.18,   # 10: Neck -> LShoulder
     0.28,   # 11: LShoulder -> LElbow
     0.25,   # 12: LElbow -> LWrist
@@ -136,8 +139,10 @@ def mpii_to_skeleton(keypoints_mpii: np.ndarray) -> np.ndarray:
     intermediate layout. The extra joint at index 10 is a duplicate Head
     that must be removed by calling strip_head_joint() afterward.
 
-    Pelvis = MPII[6] direct. Spine = MPII[7] direct.
-    Head and Neck both map to MPII head (no separate joint).
+    Pelvis = MPII[6] direct.
+    Neck(8) = MPII[7] Thorax (shoulder level).
+    Spine(7) = midpoint(Pelvis, Neck) (FK-internal).
+    Nose synthesized from raw MPII[8] UpperNeck and MPII[9] HeadTop.
 
     Args:
         keypoints_mpii: (16, D) array of MPII keypoints. [2D:MPII_16]
@@ -149,8 +154,9 @@ def mpii_to_skeleton(keypoints_mpii: np.ndarray) -> np.ndarray:
     ndim: int = keypoints_mpii.shape[-1]
     skel: np.ndarray = np.zeros((17, ndim), dtype=keypoints_mpii.dtype)  # [2D:MPII_17]
 
-    skel[0] = keypoints_mpii[6]                       # Pelvis (direct)
-    skel[7] = keypoints_mpii[7]                        # Spine (direct)
+    skel[0] = keypoints_mpii[6]                        # Pelvis (direct)
+    skel[8] = keypoints_mpii[7]                        # Neck = MPII Thorax (shoulder level)
+    skel[7] = (skel[0] + skel[8]) / 2.0               # Spine = midpoint(Pelvis, Neck)
 
     skel[1] = keypoints_mpii[2]   # RHip
     skel[2] = keypoints_mpii[1]   # RKnee
@@ -158,9 +164,8 @@ def mpii_to_skeleton(keypoints_mpii: np.ndarray) -> np.ndarray:
     skel[4] = keypoints_mpii[3]   # LHip
     skel[5] = keypoints_mpii[4]   # LKnee
     skel[6] = keypoints_mpii[5]   # LAnkle
-    skel[8] = keypoints_mpii[8]   # Neck = MPII Upper Neck
-    # Nose synthesized as 30% of the way from base of neck to head top
-    skel[9] = skel[8] + 0.3 * (keypoints_mpii[9] - skel[8])  # Nose (synthesized)
+    # Nose synthesized as 30% from UpperNeck toward HeadTop (using raw MPII indices)
+    skel[9] = keypoints_mpii[8] + 0.3 * (keypoints_mpii[9] - keypoints_mpii[8])  # Nose
     skel[10] = keypoints_mpii[9]  # Head duplicate (removed by strip_head_joint)
     skel[11] = keypoints_mpii[13]  # LShoulder
     skel[12] = keypoints_mpii[14]  # LElbow

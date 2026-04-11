@@ -41,7 +41,7 @@ class OptimizationConfig(BaseModel):
         0.5,   # 5: LKnee
         0.2,   # 6: LAnkle
         1.0,   # 7: Spine
-        1.0,   # 8: Neck (Base of Neck)
+        1.0,   # 8: Neck (Thorax / shoulder level)
         0.5,   # 9: Nose
         0.5,   # 10: LShoulder
         0.3,   # 11: LElbow
