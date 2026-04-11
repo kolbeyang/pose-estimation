@@ -1,0 +1,23 @@
+{
+    "mediapipe": {
+        "is_generate_heatmap_videos": true,
+        "graphs": {
+            "all_examples_per_joint_mpjpe": true,
+            "per_example_per_joint_mpjpe": true
+        },
+        "optimization": {
+            "num_steps": 50,
+            "heatmap_blur_sigma": 4.0,
+            "learning_rate": 0.0005,
+            "anchor_weight": 0
+        }
+    },
+    "examples": [
+        {"sequence": "171204_pose1", "camera": "00_00", "start_frame": 360, "num_frames": 360, "person_idx": 0},
+        {"sequence": "161029_piano4", "camera": "00_00", "start_frame": 166, "num_frames": 360, "person_idx": 0}
+    ],
+    "data_root": "data/panoptic-toolbox",
+    "target_fps": 10.0,
+    "generate_graphs": true,
+    "generate_video": true
+}

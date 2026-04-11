@@ -95,7 +95,7 @@ REST_DIRECTIONS: np.ndarray = np.array([
     [0, 1, 0],       # 6: LKnee -> LAnkle
     [0, -1, 0],      # 7: Pelvis -> Spine
     [0, -1, 0],      # 8: Spine -> Neck
-    [0, -0.5, -0.866],  # 9: Neck -> Nose (forward and slightly up)
+    [0, -0.866, -0.5],  # 9: Neck -> Nose (mostly up, somewhat forward)
     [1, 0, 0],       # 10: Neck -> LShoulder
     [0, 1, 0],       # 11: LShoulder -> LElbow
     [0, 1, 0],       # 12: LElbow -> LWrist

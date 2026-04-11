@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime
 from typing import Any
 
@@ -190,6 +191,7 @@ def _save_results(
     num_frames: int,
     config: RunConfig,
     output_dir: str,
+    timings: dict[str, float] | None = None,
 ) -> None:
     """Save results.json to output directory."""
     _METRIC_KEYS = [
@@ -218,6 +220,8 @@ def _save_results(
         },
         "config": config.model_dump(),
     }
+    if timings:
+        results_data["timings"] = {k: round(v, 3) for k, v in timings.items()}
     results_path = os.path.join(output_dir, "results.json")
     with open(results_path, "w") as f:
         json.dump(results_data, f, indent=2, default=str)
@@ -389,8 +393,11 @@ def main(config_path: str) -> None:
             seq_dir = get_sequence_dir(data_root, seq_name)
             video_path = get_video_path(data_root, seq_name, camera_name)
 
+            timings: dict[str, float] = {}
+
             # --- 1. Load camera calibration ---
             logger.info("[1/7] Loading camera calibration...")
+            _t0 = time.perf_counter()
             cameras = load_calibration(seq_dir)
             cam_calib = _find_camera_calibration(cameras, camera_name)
 
@@ -403,9 +410,11 @@ def main(config_path: str) -> None:
             logger.info("    fx=%.1f fy=%.1f cx=%.1f cy=%.1f res=%s", fx, fy, cx, cy, resolution)
 
             camera = Camera.from_panoptic_calibration(K, R, t, resolution)
+            timings["camera_calibration"] = time.perf_counter() - _t0
 
             # --- 2. Extract video frames ---
             logger.info("[2/7] Extracting video frames...")
+            _t0 = time.perf_counter()
             video_fps = 30.0
             frame_step = max(1, int(round(video_fps / config.target_fps)))
             frame_indices = list(range(start_frame, start_frame + num_frames, frame_step))
@@ -418,9 +427,11 @@ def main(config_path: str) -> None:
             if len(frames_rgb) < 2:
                 logger.error("Need at least 2 frames. Skipping.")
                 continue
+            timings["extract_frames"] = time.perf_counter() - _t0
 
             # --- 3. Shared YOLO + SH heatmaps ---
             logger.info("[3/7] Running YOLO + Stacked Hourglass on %d frames...", len(frames_rgb))
+            _t0 = time.perf_counter()
             (
                 kp_2d,        # list of [2D:SKELETON_16] (16, 2)
                 visibility,   # list of [VIS:SKELETON_16] (16,)
@@ -432,9 +443,11 @@ def main(config_path: str) -> None:
                 yolo_sh_models,
                 sh_batch_size=config.sh_batch_size,
             )
+            timings["yolo_sh"] = time.perf_counter() - _t0
 
             # --- Ground truth ---
             logger.info("    Loading ground truth...")
+            _t0 = time.perf_counter()
             gt_world = load_ground_truth_sequence(seq_dir, frame_indices, person_idx)
             gt_cam: list[np.ndarray | None] = []
             for gt in gt_world:
@@ -445,6 +458,7 @@ def main(config_path: str) -> None:
                     gt_cam.append(None)
             n_gt = sum(1 for g in gt_cam if g is not None)
             logger.info("    Ground truth available for %d/%d frames", n_gt, len(frame_indices))
+            timings["ground_truth"] = time.perf_counter() - _t0
 
             example_dir = os.path.join(run_dir, name)
             os.makedirs(example_dir, exist_ok=True)
@@ -453,6 +467,7 @@ def main(config_path: str) -> None:
             if run_motionbert:
                 logger.info("[4/7] Running MotionBERT pipeline...")
                 # 3D lifting
+                _t0 = time.perf_counter()
                 positions_3d_norm = run_mb_3d(
                     mpii_kp_2d,
                     model=mb_model,
@@ -467,9 +482,11 @@ def main(config_path: str) -> None:
                         positions_3d_norm[i], kp_2d[i], fx, fy, cx, cy,
                     )
                     det_cam_positions_mb.append(pos_cam)
+                timings["motionbert_detect"] = time.perf_counter() - _t0
 
                 # Optimize
                 logger.info("    Running FK optimization (MotionBERT)...")
+                _t0 = time.perf_counter()
                 mb_opt_config = config.optimization_for_pipeline("motionbert")
                 opt_mb, bl_mb, loss_mb = optimize(
                     raw_3d=det_cam_positions_mb,
@@ -480,12 +497,15 @@ def main(config_path: str) -> None:
                     visibility=visibility,
                     verbose=False,
                 )
+                timings["motionbert_optimize"] = time.perf_counter() - _t0
 
                 # Evaluate
                 logger.info("    Evaluating MotionBERT...")
+                _t0 = time.perf_counter()
                 mb_metrics = _evaluate_and_collect_metrics(
                     det_cam_positions_mb, opt_mb, gt_cam, camera, name,
                 )
+                timings["motionbert_evaluate"] = time.perf_counter() - _t0
 
                 det_vw = mb_metrics.get("det_vw_si_mpjpe")
                 opt_vw = mb_metrics.get("opt_vw_si_mpjpe")
@@ -496,16 +516,19 @@ def main(config_path: str) -> None:
                 # Save results
                 mb_output_dir = os.path.join(example_dir, "motionbert")
                 os.makedirs(mb_output_dir, exist_ok=True)
-                _save_results(mb_metrics, "motionbert", name, len(frames_rgb), config, mb_output_dir)
+                _save_results(mb_metrics, "motionbert", name, len(frames_rgb), config, mb_output_dir, timings)
                 _save_trajectories(gt_cam, det_cam_positions_mb, opt_mb, camera, mb_output_dir)
 
+                _t0 = time.perf_counter()
                 if config.generate_graphs:
                     _generate_graphs(
                         det_cam_positions_mb, opt_mb, gt_cam,
                         loss_mb, mb_metrics, bl_mb, mb_output_dir, name,
                     )
+                timings["motionbert_graphs"] = time.perf_counter() - _t0
 
                 # Overlay video
+                _t0 = time.perf_counter()
                 is_gen_video = config.generate_video
                 if config.motionbert is not None and not config.motionbert.is_generate_heatmap_videos:
                     is_gen_video = False
@@ -528,6 +551,7 @@ def main(config_path: str) -> None:
                         visibility=visibility,
                         pipeline_name="MotionBERT",
                     )
+                timings["motionbert_video"] = time.perf_counter() - _t0
 
                 all_mb_metrics.append(mb_metrics)
 
@@ -535,6 +559,7 @@ def main(config_path: str) -> None:
             if run_mediapipe:
                 assert mp_detect_poses is not None and mediapipe_3d_to_camera is not None
                 logger.info("[5/7] Running MediaPipe pipeline...")
+                _t0 = time.perf_counter()
                 mp_kp_2d, mp_kp_3d, mp_visibility = mp_detect_poses(frames_rgb, landmarker=mp_landmarker)
                 n_detected = sum(1 for v in mp_visibility if v.mean() > 0.3)
                 logger.info("    Detected poses in %d/%d frames", n_detected, len(frames_rgb))
@@ -546,9 +571,11 @@ def main(config_path: str) -> None:
                         mp_kp_3d[i], mp_kp_2d[i], fx, fy, cx, cy,
                     )
                     det_cam_positions_mp.append(pos_cam)
+                timings["mediapipe_detect"] = time.perf_counter() - _t0
 
                 # Optimize using SH heatmaps (same as MotionBERT!)
                 logger.info("    Running FK optimization (MediaPipe)...")
+                _t0 = time.perf_counter()
                 mp_opt_config = config.optimization_for_pipeline("mediapipe")
                 opt_mp, bl_mp, loss_mp = optimize(
                     raw_3d=det_cam_positions_mp,
@@ -559,12 +586,15 @@ def main(config_path: str) -> None:
                     visibility=visibility,
                     verbose=False,
                 )
+                timings["mediapipe_optimize"] = time.perf_counter() - _t0
 
                 # Evaluate
                 logger.info("    Evaluating MediaPipe...")
+                _t0 = time.perf_counter()
                 mp_metrics = _evaluate_and_collect_metrics(
                     det_cam_positions_mp, opt_mp, gt_cam, camera, name,
                 )
+                timings["mediapipe_evaluate"] = time.perf_counter() - _t0
 
                 det_vw = mp_metrics.get("det_vw_si_mpjpe")
                 opt_vw = mp_metrics.get("opt_vw_si_mpjpe")
@@ -575,16 +605,19 @@ def main(config_path: str) -> None:
                 # Save results
                 mp_output_dir = os.path.join(example_dir, "mediapipe")
                 os.makedirs(mp_output_dir, exist_ok=True)
-                _save_results(mp_metrics, "mediapipe", name, len(frames_rgb), config, mp_output_dir)
+                _save_results(mp_metrics, "mediapipe", name, len(frames_rgb), config, mp_output_dir, timings)
                 _save_trajectories(gt_cam, det_cam_positions_mp, opt_mp, camera, mp_output_dir)
 
+                _t0 = time.perf_counter()
                 if config.generate_graphs:
                     _generate_graphs(
                         det_cam_positions_mp, opt_mp, gt_cam,
                         loss_mp, mp_metrics, bl_mp, mp_output_dir, name,
                     )
+                timings["mediapipe_graphs"] = time.perf_counter() - _t0
 
                 # Overlay video (with SH heatmaps)
+                _t0 = time.perf_counter()
                 is_gen_video = config.generate_video
                 if config.mediapipe is not None and not config.mediapipe.is_generate_heatmap_videos:
                     is_gen_video = False
@@ -615,6 +648,7 @@ def main(config_path: str) -> None:
                         visibility=visibility,
                         pipeline_name="MediaPipe",
                     )
+                timings["mediapipe_video"] = time.perf_counter() - _t0
 
                 all_mp_metrics.append(mp_metrics)
 

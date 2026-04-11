@@ -21,10 +21,10 @@
             "per_example_per_joint_mpjpe": false
         },
         "optimization": {
-            "num_steps": 50,
+            "num_steps": 100,
             "heatmap_blur_sigma": 4.0,
             "learning_rate": 0.0005,
-            "anchor_weight": 200.0
+            "anchor_weight": 50.0
         }
     },
     "examples": [],
