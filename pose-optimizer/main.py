@@ -306,15 +306,18 @@ def _generate_graphs(
 
 def main(config_path: str) -> None:
     """Run the unified pose estimation pipeline."""
+    import shutil
+
     config = load_config(config_path)
 
-    # Determine output directory
-    if config.output_dir:
-        run_dir = config.output_dir
-    else:
-        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M")
-        run_dir = os.path.join("output", f"run_{timestamp}")
+    # Determine output directory: output_dir is the PARENT, runs go in timestamped subdirs
+    parent_dir = config.output_dir or "output"
+    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M")
+    run_dir = os.path.join(parent_dir, f"run_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
+
+    # Copy config file into the run directory for reproducibility
+    shutil.copy2(config_path, os.path.join(run_dir, "config.json"))
 
     # Auto-discover examples if none specified
     examples = config.examples
