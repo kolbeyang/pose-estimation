@@ -440,11 +440,12 @@ def main(config_path: str) -> None:
                 visibility,   # list of [VIS:SKELETON_16] (16,)
                 heatmaps,     # list of [HEATMAP:MPII_16] (16, 64, 64)
                 mpii_kp_2d,   # list of [2D:MPII_16] (16, 3)
-                affine,       # (2, 3)
+                affine,       # (2, 3) or list of (2, 3)
             ) = detect_2d_poses(
                 frames_rgb,
                 yolo_sh_models,
                 sh_batch_size=config.sh_batch_size,
+                per_frame_bbox=config.per_frame_bbox,
             )
             timings["yolo_sh"] = time.perf_counter() - _t0
 

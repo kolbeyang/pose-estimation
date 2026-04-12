@@ -26,7 +26,7 @@ def optimize(
     camera: Camera,
     config: OptimizationConfig,
     heatmaps: list[np.ndarray],
-    affine: np.ndarray,
+    affine: np.ndarray | list[np.ndarray],
     visibility: list[np.ndarray] | None = None,
     verbose: bool = True,
 ) -> tuple[list[np.ndarray], np.ndarray, list[float]]:
@@ -37,7 +37,8 @@ def optimize(
         camera: Camera for 3D->2D projection.
         config: Optimization hyperparameters.
         heatmaps: Per-frame (16, 64, 64) SH heatmaps. [HEATMAP:MPII_16]
-        affine: (2, 3) affine from crop to pixel coords.
+        affine: (2, 3) shared affine from crop to pixel coords, or a list
+            of (2, 3) per-frame affines.
         visibility: Per-frame (16,) confidence scores. [VIS:SKELETON_16]
             Defaults to ones.
         verbose: Print progress.
@@ -55,7 +56,11 @@ def optimize(
         visibility = [np.ones(NUM_JOINTS) for _ in range(n_frames)]
 
     heatmaps_np = np.array(heatmaps)  # [HEATMAP:MPII_16]
-    affine_np = affine
+    # Support both shared (2, 3) and per-frame list of (2, 3) affines
+    if isinstance(affine, list):
+        affine_np = np.stack(affine)  # (F, 2, 3)
+    else:
+        affine_np = affine  # (2, 3)
 
     # --- Initialize FK parameters ---
     if verbose:
@@ -129,7 +134,7 @@ def optimize(
     # --- Non-learnable tensors ---
     visibility_t = torch.tensor(np.array(visibility), dtype=torch.float32)  # (F, 16) [VIS:SKELETON_16]
     heatmaps_t = torch.tensor(heatmaps_np, dtype=torch.float32)  # (F, C, H, W) [HEATMAP:MPII_16] or [HEATMAP:SKELETON_16]
-    affine_t = torch.tensor(affine_np, dtype=torch.float32)  # (2, 3)
+    affine_t = torch.tensor(affine_np, dtype=torch.float32)  # (2, 3) or (F, 2, 3)
 
     # Blur annealing: if start/end sigmas are set, blur per-step; otherwise pre-blur once
     use_blur_annealing = (

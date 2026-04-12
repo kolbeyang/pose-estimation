@@ -163,7 +163,7 @@ def generate_overlay_video(
     camera_fy: float,
     camera_cx: float,
     camera_cy: float,
-    affine: np.ndarray,
+    affine: np.ndarray | list[np.ndarray],
     frame_indices: list[int] | None = None,
     gt_3d: list[np.ndarray | None] | None = None,
     visibility: list[np.ndarray] | None = None,
@@ -185,7 +185,8 @@ def generate_overlay_video(
         optimized_3d: List of (16, 3) optimized 3D positions in camera space.
             [3D:SKELETON_16]
         camera_fx, camera_fy, camera_cx, camera_cy: Camera intrinsics.
-        affine: (2, 3) affine from crop/heatmap coords to original pixel coords.
+        affine: (2, 3) shared affine from crop/heatmap coords to original pixel
+            coords, or a list of (2, 3) per-frame affines.
         frame_indices: Optional frame indices for labeling.
         gt_3d: Optional list of (16, 3) ground truth 3D or None.
             [3D:SKELETON_16]
@@ -211,7 +212,8 @@ def generate_overlay_video(
         # 1. Heatmap overlay
         if i < len(heatmaps):
             hm_combined = np.clip(heatmaps[i], 0, None).sum(axis=0)
-            hm_full = _resize_heatmap_to_frame(hm_combined, affine, h, w)
+            frame_affine = affine[i] if isinstance(affine, list) else affine
+            hm_full = _resize_heatmap_to_frame(hm_combined, frame_affine, h, w)
             frame_bgr = _blend_heatmap_additive(frame_bgr, hm_full, intensity)
 
         # Visibility mask

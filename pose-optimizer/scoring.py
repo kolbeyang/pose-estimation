@@ -57,7 +57,7 @@ def heatmap_score_batch(
         projected_2d_batch: (F, 16, 2) projected positions in pixel coords.
             [2D:SKELETON_16]
         heatmaps_batch: (F, C, H, W) SH heatmaps per frame. [HEATMAP:MPII_16]
-        affine: (2, 3) affine transform from heatmap-crop to original pixels.
+        affine: (2, 3) shared affine, or (F, 2, 3) per-frame affines.
         visibility_batch: (F, 16) confidence scores. [VIS:SKELETON_16]
         confidence_epsilon: Floor for low-confidence joints.
         eps: Floor to avoid log(0).
@@ -69,10 +69,19 @@ def heatmap_score_batch(
     hm_h = heatmaps_batch.shape[2]
     hm_w = heatmaps_batch.shape[3]
 
-    sx = affine[0, 0]
-    sy = affine[1, 1]
-    tx = affine[0, 2]
-    ty = affine[1, 2]
+    # Handle both shared (2, 3) and per-frame (F, 2, 3) affines
+    if affine.dim() == 3:
+        # Per-frame affines: (F, 2, 3)
+        sx = affine[:, 0, 0].unsqueeze(1)  # (F, 1)
+        sy = affine[:, 1, 1].unsqueeze(1)  # (F, 1)
+        tx = affine[:, 0, 2].unsqueeze(1)  # (F, 1)
+        ty = affine[:, 1, 2].unsqueeze(1)  # (F, 1)
+    else:
+        # Shared affine: (2, 3)
+        sx = affine[0, 0]
+        sy = affine[1, 1]
+        tx = affine[0, 2]
+        ty = affine[1, 2]
 
     # Map skeleton joints to MPII heatmap channels
     hm_proj = projected_2d_batch[:, _HM_SKEL_INDICES, :]  # (F, 16, 2)

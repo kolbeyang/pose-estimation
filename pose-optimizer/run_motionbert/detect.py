@@ -220,6 +220,50 @@ def detect_person_bbox(
     return union_bbox
 
 
+def detect_person_bboxes_per_frame(
+    frames_rgb: list[np.ndarray],
+    yolo: Any = None,
+) -> list[np.ndarray]:
+    """Detect persons with YOLOv8, return per-frame bounding boxes.
+
+    Runs YOLOv8 person detection on each frame, selects the largest detection,
+    and returns individual bounding boxes (one per frame). If no detection is
+    found for a frame, falls back to the full frame.
+
+    Args:
+        frames_rgb: List of (H, W, 3) uint8 RGB frames.
+        yolo: Pre-loaded YOLO model.
+
+    Returns:
+        List of (4,) float32 arrays [x1, y1, x2, y2] in pixel coordinates,
+        one per frame.
+    """
+    h, w = frames_rgb[0].shape[:2]
+    bboxes: list[np.ndarray] = []
+
+    logger.info("Detecting per-frame bboxes in %d frames (%dx%d)...", len(frames_rgb), w, h)
+    for frame in frames_rgb:
+        results = yolo(frame, classes=[0], verbose=False)
+        detections = results[0].boxes
+        if len(detections) > 0:
+            areas = (detections.xyxy[:, 2] - detections.xyxy[:, 0]) * (
+                detections.xyxy[:, 3] - detections.xyxy[:, 1]
+            )
+            best_idx = areas.argmax().item()
+            bbox = detections.xyxy[best_idx].cpu().numpy().astype(np.float32)
+            bboxes.append(bbox)
+        else:
+            bboxes.append(np.array([0, 0, w, h], dtype=np.float32))
+
+    # Log bbox size statistics
+    areas = [(b[2] - b[0]) * (b[3] - b[1]) for b in bboxes]
+    logger.info(
+        "Per-frame bboxes: min_area=%.0f, max_area=%.0f, median_area=%.0f",
+        min(areas), max(areas), float(np.median(areas)),
+    )
+    return bboxes
+
+
 # ---------------------------------------------------------------------------
 # Crop and Resize
 # ---------------------------------------------------------------------------
@@ -322,16 +366,17 @@ def _parse_heatmaps(heatmaps: np.ndarray) -> np.ndarray:
 
 def run_hourglass(
     frames_rgb: list[np.ndarray],
-    bbox: np.ndarray,
+    bbox: np.ndarray | list[np.ndarray],
     model: torch.nn.Module,
     device: torch.device,
     batch_size: int = 32,
-) -> tuple[list[np.ndarray], list[np.ndarray], np.ndarray]:
+) -> tuple[list[np.ndarray], list[np.ndarray], np.ndarray | list[np.ndarray]]:
     """Run Stacked Hourglass (HG8) on cropped frames with flip augmentation.
 
     Args:
         frames_rgb: List of (H, W, 3) uint8 RGB frames.
-        bbox: (4,) float32 union bounding box [x1, y1, x2, y2].
+        bbox: Either a single (4,) float32 union bounding box [x1, y1, x2, y2]
+            (shared across all frames), or a list of (4,) per-frame bboxes.
         model: Pre-loaded Stacked Hourglass model.
         device: Torch device for inference.
         batch_size: Inference batch size.
@@ -341,23 +386,24 @@ def run_hourglass(
             all_keypoints_2d: List of (16, 3) per-frame. [2D:MPII_16]
                 (x, y in original pixel coords, confidence).
             all_heatmaps: List of (16, 64, 64) per-frame. [HEATMAP:MPII_16]
-            affine: (2, 3) shared affine mapping crop coords to pixel coords.
+            affine: If bbox was a single array, returns (2, 3) shared affine.
+                If bbox was a list, returns list of (2, 3) per-frame affines.
     """
+    per_frame = isinstance(bbox, list)
 
     # Preprocess all frames
     preprocessed: list[np.ndarray] = []
     preprocessed_flip: list[np.ndarray] = []
-    shared_affine = None
+    all_affines: list[np.ndarray] = []
 
-    for frame in frames_rgb:
-        cropped, affine = crop_and_resize(frame, bbox, target_size=256)
-        if shared_affine is None:
-            shared_affine = affine
+    for i, frame in enumerate(frames_rgb):
+        frame_bbox = bbox[i] if per_frame else bbox
+        cropped, affine = crop_and_resize(frame, frame_bbox, target_size=256)
+        all_affines.append(affine)
         preprocessed.append(_normalize_for_sh(cropped))
         cropped_flip = cropped[:, ::-1].copy()
         preprocessed_flip.append(_normalize_for_sh(cropped_flip))
 
-    assert shared_affine is not None
     n_frames = len(frames_rgb)
 
     # Batched inference
@@ -397,20 +443,25 @@ def run_hourglass(
                 hm_avg = (heatmaps_batch[i] + hm_flip) / 2.0
                 all_heatmaps.append(hm_avg)
 
-    # Parse keypoints
+    # Parse keypoints — each frame uses its own affine
     all_keypoints_2d: list[np.ndarray] = []
-    for heatmaps in all_heatmaps:
+    for frame_idx, heatmaps in enumerate(all_heatmaps):
         keypoints_64 = _parse_heatmaps(heatmaps)
         keypoints_orig = keypoints_64.copy()
         keypoints_orig[:, :2] *= 4  # 64 -> 256
+        frame_affine = all_affines[frame_idx]
         for j in range(16):
             x_256 = keypoints_orig[j, 0]
             y_256 = keypoints_orig[j, 1]
-            keypoints_orig[j, 0] = shared_affine[0, 0] * x_256 + shared_affine[0, 2]
-            keypoints_orig[j, 1] = shared_affine[1, 1] * y_256 + shared_affine[1, 2]
+            keypoints_orig[j, 0] = frame_affine[0, 0] * x_256 + frame_affine[0, 2]
+            keypoints_orig[j, 1] = frame_affine[1, 1] * y_256 + frame_affine[1, 2]
         all_keypoints_2d.append(keypoints_orig)
 
-    return all_keypoints_2d, all_heatmaps, shared_affine
+    # Return format matches input: single affine for single bbox, list for per-frame
+    if per_frame:
+        return all_keypoints_2d, all_heatmaps, all_affines
+    else:
+        return all_keypoints_2d, all_heatmaps, all_affines[0]
 
 
 # ---------------------------------------------------------------------------
@@ -772,12 +823,13 @@ def detect_2d_poses(
     frames_rgb: list[np.ndarray],
     models: Detection2DModels,
     sh_batch_size: int = 32,
+    per_frame_bbox: bool = False,
 ) -> tuple[
-    list[np.ndarray],  # kp_2d (16, 2) pixel coords [2D:SKELETON_16]
-    list[np.ndarray],  # visibility (16,) [VIS:SKELETON_16]
-    list[np.ndarray],  # heatmaps (16, 64, 64) [HEATMAP:MPII_16]
-    list[np.ndarray],  # mpii_kp_2d (16, 3) raw MPII [2D:MPII_16]
-    np.ndarray,        # affine (2, 3)
+    list[np.ndarray],                # kp_2d (16, 2) pixel coords [2D:SKELETON_16]
+    list[np.ndarray],                # visibility (16,) [VIS:SKELETON_16]
+    list[np.ndarray],                # heatmaps (16, 64, 64) [HEATMAP:MPII_16]
+    list[np.ndarray],                # mpii_kp_2d (16, 3) raw MPII [2D:MPII_16]
+    np.ndarray | list[np.ndarray],   # affine: (2,3) or list of (2,3)
 ]:
     """Run YOLO + Stacked Hourglass for 2D heatmap generation.
 
@@ -787,6 +839,9 @@ def detect_2d_poses(
         frames_rgb: List of (H, W, 3) uint8 RGB frames.
         models: Pre-loaded Detection2DModels from load_yolo_sh_models().
         sh_batch_size: Batch size for Stacked Hourglass inference.
+        per_frame_bbox: If True, use per-frame bounding boxes instead of a
+            single union bbox. This gives better SH resolution when the person
+            moves significantly across frames.
 
     Returns:
         Tuple of:
@@ -794,14 +849,18 @@ def detect_2d_poses(
             visibility: List of (16,) confidence scores. [VIS:SKELETON_16]
             heatmaps: List of (16, 64, 64) SH heatmaps. [HEATMAP:MPII_16]
             mpii_kp_2d: List of (16, 3) MPII 2D keypoints with confidence. [2D:MPII_16]
-            affine: (2, 3) affine transform from crop to pixel coords.
+            affine: (2, 3) shared affine when per_frame_bbox=False,
+                or list of (2, 3) per-frame affines when per_frame_bbox=True.
     """
     # 1. YOLO person detection
-    union_bbox = detect_person_bbox(frames_rgb, yolo=models.yolo)
+    if per_frame_bbox:
+        bboxes = detect_person_bboxes_per_frame(frames_rgb, yolo=models.yolo)
+    else:
+        bboxes = detect_person_bbox(frames_rgb, yolo=models.yolo)
 
     # 2. Stacked Hourglass
     all_keypoints_2d, all_heatmaps, affine = run_hourglass(
-        frames_rgb, union_bbox,
+        frames_rgb, bboxes,
         model=models.hourglass,
         device=models.device,
         batch_size=sh_batch_size,

@@ -102,6 +102,7 @@ class RunConfig(BaseModel):
     # Pipeline-specific
     sh_batch_size: int = 32
     motionbert_conf_threshold: float = 0.0
+    per_frame_bbox: bool = False
 
     # Output control
     generate_graphs: bool = True
