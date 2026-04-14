@@ -171,22 +171,8 @@
         {
             "sequence": "171026_pose1",
             "camera": "00_00",
-            "start_frame": 7625,
-            "num_frames": 20,
-            "person_idx": 0
-        },
-        {
-            "sequence": "171026_pose1",
-            "camera": "00_00",
             "start_frame": 7789,
             "num_frames": 7195,
-            "person_idx": 0
-        },
-        {
-            "sequence": "171026_pose1",
-            "camera": "00_00",
-            "start_frame": 15216,
-            "num_frames": 64,
             "person_idx": 0
         },
         {
@@ -199,22 +185,8 @@
         {
             "sequence": "171026_pose2",
             "camera": "00_00",
-            "start_frame": 209,
-            "num_frames": 76,
-            "person_idx": 0
-        },
-        {
-            "sequence": "171026_pose2",
-            "camera": "00_00",
             "start_frame": 504,
             "num_frames": 7019,
-            "person_idx": 0
-        },
-        {
-            "sequence": "171026_pose2",
-            "camera": "00_00",
-            "start_frame": 7612,
-            "num_frames": 13,
             "person_idx": 0
         },
         {
@@ -278,13 +250,6 @@
             "camera": "00_00",
             "start_frame": 23171,
             "num_frames": 4390,
-            "person_idx": 0
-        },
-        {
-            "sequence": "171204_pose2",
-            "camera": "00_00",
-            "start_frame": 141,
-            "num_frames": 83,
             "person_idx": 0
         },
         {
@@ -432,13 +397,6 @@
             "camera": "00_00",
             "start_frame": 9348,
             "num_frames": 4189,
-            "person_idx": 0
-        },
-        {
-            "sequence": "171204_pose5",
-            "camera": "00_00",
-            "start_frame": 13901,
-            "num_frames": 72,
             "person_idx": 0
         },
         {
