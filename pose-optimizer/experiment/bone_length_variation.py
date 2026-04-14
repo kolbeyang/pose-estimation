@@ -62,6 +62,7 @@ def main() -> None:
     parser.add_argument("--fps", type=float, default=10.0, help="Frames per second (default: 10)")
     parser.add_argument("--output", default=None, help="Output directory (default: output/)")
     parser.add_argument("--side", default="R", choices=["L", "R"], help="Which arm (default: R)")
+    parser.add_argument("--sample-name", default=None, help="Sample name to include in title")
     args = parser.parse_args()
 
     mb_data = load_trajectories(args.mb_trajectories)
@@ -100,13 +101,17 @@ def main() -> None:
 
     ax.set_xlabel("Time (seconds)", fontsize=11)
     ax.set_ylabel("Bone Length (cm)", fontsize=11)
-    ax.set_title(f"Bone Length Variation: {bone_label}", fontsize=13)
+    title = f"Bone Length Variation: {bone_label}"
+    if args.sample_name:
+        title = f"{title} — {args.sample_name}"
+    ax.set_title(title, fontsize=13)
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
     output_dir = args.output or "output"
     os.makedirs(output_dir, exist_ok=True)
-    out_path = os.path.join(output_dir, f"bone_length_variation_{side}_forearm.png")
+    suffix = f"_{args.sample_name}" if args.sample_name else ""
+    out_path = os.path.join(output_dir, f"bone_length_{side}_forearm{suffix}.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved: {out_path}")
