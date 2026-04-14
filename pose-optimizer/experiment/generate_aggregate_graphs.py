@@ -131,7 +131,7 @@ def generate_per_example_comparison(
     ax.set_xticks(x)
     ax.set_xticklabels(names, rotation=45, ha="right", fontsize=7)
     ax.set_ylabel("VW-SI-MPJPE (cm)")
-    ax.set_title("Per-Example VW-SI-MPJPE: All Pipelines (error bars = per-frame std within video)")
+    ax.set_title("Per-Example VW-SI-MPJPE: All Pipelines")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3, axis="y")
     _save(fig, os.path.join(output_dir, "per_example_comparison.png"))
