@@ -176,6 +176,76 @@ def generate_per_example_comparison(
     _save(fig, os.path.join(output_dir, "per_example_comparison.png"))
 
 
+def generate_raw_vs_optimized_scatter(
+    metrics: list[dict],
+    det_key: str,
+    opt_key: str,
+    output_dir: str,
+    filename: str,
+    title: str,
+    unit: str,
+    color: str,
+) -> None:
+    """Scatter plot: raw (x) vs optimized (y) with y=x reference line."""
+    os.makedirs(output_dir, exist_ok=True)
+
+    det_vals = [m.get(det_key, 0) * 100 for m in metrics]
+    opt_vals = [m.get(opt_key, 0) * 100 for m in metrics]
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+    lo = 0
+    hi = max(max(det_vals), max(opt_vals)) * 1.1
+    ax.plot([lo, hi], [lo, hi], "k--", linewidth=1, alpha=0.5, label="y = x (no change)")
+    ax.scatter(det_vals, opt_vals, c=color, alpha=0.7, edgecolors="black", linewidths=0.5, s=40)
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
+    ax.set_xlabel(f"Raw {unit}")
+    ax.set_ylabel(f"Optimized {unit}")
+    ax.set_title(title)
+    ax.set_aspect("equal")
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    n_improved = sum(1 for d, o in zip(det_vals, opt_vals) if o < d)
+    ax.text(0.02, 0.98, f"{n_improved}/{len(det_vals)} improved",
+            transform=ax.transAxes, fontsize=9, va="top",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+    _save(fig, os.path.join(output_dir, filename))
+
+
+def generate_improvement_histogram(
+    metrics: list[dict],
+    det_key: str,
+    opt_key: str,
+    output_dir: str,
+    filename: str,
+    title: str,
+    unit: str,
+    color: str,
+) -> None:
+    """Histogram of (optimized - raw) metric values with x=0 reference line."""
+    os.makedirs(output_dir, exist_ok=True)
+
+    deltas = [(m.get(opt_key, 0) - m.get(det_key, 0)) * 100 for m in metrics]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.hist(deltas, bins=20, color=color, alpha=0.7, edgecolor="black", linewidth=0.5)
+    ax.axvline(x=0, color="black", linewidth=1.5, linestyle="--", label="No change")
+    ax.set_xlabel(f"Improvement ({unit}, negative = better)")
+    ax.set_ylabel("Count")
+    ax.set_title(title)
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3, axis="y")
+
+    mean_delta = np.mean(deltas)
+    n_improved = sum(1 for d in deltas if d < 0)
+    ax.text(0.02, 0.98,
+            f"Mean: {mean_delta:+.2f} {unit}\n{n_improved}/{len(deltas)} improved",
+            transform=ax.transAxes, fontsize=9, va="top",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+    _save(fig, os.path.join(output_dir, filename))
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: uv run python experiment/generate_aggregate_graphs.py <results.json> [output_dir]")
@@ -254,6 +324,36 @@ def main():
 
     print("Generating per-example comparison...")
     generate_per_example_comparison(mb_metrics, mp_metrics, output_dir)
+
+    # --- Raw vs Optimized scatter plots ---
+    print("Generating raw vs optimized scatter plots...")
+    generate_raw_vs_optimized_scatter(
+        mb_metrics, "det_vw_si_mpjpe", "opt_vw_si_mpjpe", output_dir,
+        "scatter_mb_position.png", "MotionBERT Position Improvement", "VW-SI-MPJPE (cm)", COLOR_MB_OPT)
+    generate_raw_vs_optimized_scatter(
+        mp_metrics, "det_vw_si_mpjpe", "opt_vw_si_mpjpe", output_dir,
+        "scatter_mp_position.png", "MediaPipe Position Improvement", "VW-SI-MPJPE (cm)", COLOR_MP_OPT)
+    generate_raw_vs_optimized_scatter(
+        mb_metrics, "det_vw_si_mpjve", "opt_vw_si_mpjve", output_dir,
+        "scatter_mb_velocity.png", "MotionBERT Velocity Improvement", "VW-SI-MPJVE (cm/f)", COLOR_MB_OPT)
+    generate_raw_vs_optimized_scatter(
+        mp_metrics, "det_vw_si_mpjve", "opt_vw_si_mpjve", output_dir,
+        "scatter_mp_velocity.png", "MediaPipe Velocity Improvement", "VW-SI-MPJVE (cm/f)", COLOR_MP_OPT)
+
+    # --- Improvement distribution histograms ---
+    print("Generating improvement distribution histograms...")
+    generate_improvement_histogram(
+        mb_metrics, "det_vw_si_mpjpe", "opt_vw_si_mpjpe", output_dir,
+        "hist_mb_position.png", "MotionBERT Position Improvement Distribution", "cm", COLOR_MB_OPT)
+    generate_improvement_histogram(
+        mp_metrics, "det_vw_si_mpjpe", "opt_vw_si_mpjpe", output_dir,
+        "hist_mp_position.png", "MediaPipe Position Improvement Distribution", "cm", COLOR_MP_OPT)
+    generate_improvement_histogram(
+        mb_metrics, "det_vw_si_mpjve", "opt_vw_si_mpjve", output_dir,
+        "hist_mb_velocity.png", "MotionBERT Velocity Improvement Distribution", "cm/f", COLOR_MB_OPT)
+    generate_improvement_histogram(
+        mp_metrics, "det_vw_si_mpjve", "opt_vw_si_mpjve", output_dir,
+        "hist_mp_velocity.png", "MediaPipe Velocity Improvement Distribution", "cm/f", COLOR_MP_OPT)
 
     graphs = [f for f in os.listdir(output_dir) if f.endswith(".png")]
     print(f"\nGenerated {len(graphs)} graphs in {output_dir}:")
