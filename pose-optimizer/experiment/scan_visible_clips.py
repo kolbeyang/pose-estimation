@@ -26,7 +26,7 @@ from cmu_data import get_sequence_dir, load_calibration, load_ground_truth_frame
 SOURCE_CONFIG = "configs/server-single-person-gt-2026-04-11.json"
 OUTPUT_CONFIG = "configs/server-visible-clips-2026-04-14.json"
 MIN_KEYPOINTS_IN_FRAME = 5
-MIN_CLIP_LENGTH = 10
+MIN_CLIP_LENGTH = 100
 
 
 def count_visible_keypoints(
