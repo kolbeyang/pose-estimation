@@ -29,7 +29,6 @@ from graphs import (
     generate_cross_pipeline_per_joint_position,
     generate_cross_pipeline_per_joint_velocity,
     generate_cross_pipeline_metrics_comparison,
-    generate_aggregate_summary,
     _save,
     COLOR_MB_RAW, COLOR_MB_OPT, COLOR_MP_RAW, COLOR_MP_OPT,
 )
@@ -98,44 +97,6 @@ def _compute_per_frame_stds(traj_path: str) -> dict[str, float]:
         "opt_si_mpjpe_frame_std": opt_pos_std,
     }
 
-
-def generate_improvement_waterfall(
-    mb_metrics: list[dict],
-    mp_metrics: list[dict],
-    output_dir: str,
-) -> None:
-    """Bar chart showing per-example delta (opt - det) VW-SI-MPJPE."""
-    os.makedirs(output_dir, exist_ok=True)
-
-    names = [m["name"] for m in mb_metrics]
-    mb_delta = [(m.get("opt_vw_si_mpjpe", 0) - m.get("det_vw_si_mpjpe", 0)) * 100 for m in mb_metrics]
-    mp_delta = [(m.get("opt_vw_si_mpjpe", 0) - m.get("det_vw_si_mpjpe", 0)) * 100 for m in mp_metrics]
-
-    # Error bars for delta: std of (opt - det) per frame. We don't have
-    # per-frame delta readily, so use the larger of the two per-frame stds
-    # as a conservative proxy.
-    def _delta_err(m):
-        a = m.get("opt_vw_si_mpjpe_frame_std", 0) or 0
-        b = m.get("det_vw_si_mpjpe_frame_std", 0) or 0
-        return max(a, b) * 100
-    mb_err = [_delta_err(m) for m in mb_metrics]
-    mp_err = [_delta_err(m) for m in mp_metrics]
-
-    x = np.arange(len(names))
-    width = 0.35
-    ekw = dict(ecolor="black", capsize=2, elinewidth=0.8)
-
-    fig, ax = plt.subplots(figsize=(max(14, len(names) * 0.9), 6))
-    ax.bar(x - width / 2, mb_delta, width, yerr=mb_err, error_kw=ekw, color=COLOR_MB_OPT, alpha=0.8, label="MotionBERT")
-    ax.bar(x + width / 2, mp_delta, width, yerr=mp_err, error_kw=ekw, color=COLOR_MP_OPT, alpha=0.8, label="MediaPipe")
-    ax.axhline(y=0, color="black", linewidth=0.8)
-    ax.set_xticks(x)
-    ax.set_xticklabels(names, rotation=45, ha="right", fontsize=7)
-    ax.set_ylabel("VW-SI-MPJPE Change (cm)")
-    ax.set_title("Optimization Effect Per Example (error bars = per-frame std within video)")
-    ax.legend(fontsize=9)
-    ax.grid(True, alpha=0.3, axis="y")
-    _save(fig, os.path.join(output_dir, "improvement_waterfall.png"))
 
 
 def generate_per_example_comparison(
@@ -237,12 +198,6 @@ def generate_improvement_histogram(
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3, axis="y")
 
-    mean_delta = np.mean(deltas)
-    n_improved = sum(1 for d in deltas if d > 0)
-    ax.text(0.02, 0.98,
-            f"Mean: {mean_delta:+.2f} {unit}\n{n_improved}/{len(deltas)} improved",
-            transform=ax.transAxes, fontsize=9, va="top",
-            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
     _save(fig, os.path.join(output_dir, filename))
 
 
@@ -312,15 +267,6 @@ def main():
 
     print("Generating cross-pipeline metrics comparison...")
     generate_cross_pipeline_metrics_comparison(mb_metrics, mp_metrics, output_dir)
-
-    print("Generating MotionBERT aggregate summary...")
-    generate_aggregate_summary(mb_metrics, output_dir, prefix="motionbert")
-
-    print("Generating MediaPipe aggregate summary...")
-    generate_aggregate_summary(mp_metrics, output_dir, prefix="mediapipe")
-
-    print("Generating improvement waterfall...")
-    generate_improvement_waterfall(mb_metrics, mp_metrics, output_dir)
 
     print("Generating per-example comparison...")
     generate_per_example_comparison(mb_metrics, mp_metrics, output_dir)
