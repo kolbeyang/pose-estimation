@@ -226,19 +226,19 @@ def generate_improvement_histogram(
     """Histogram of (optimized - raw) metric values with x=0 reference line."""
     os.makedirs(output_dir, exist_ok=True)
 
-    deltas = [(m.get(opt_key, 0) - m.get(det_key, 0)) * 100 for m in metrics]
+    deltas = [(m.get(det_key, 0) - m.get(opt_key, 0)) * 100 for m in metrics]
 
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.hist(deltas, bins=20, color=color, alpha=0.7, edgecolor="black", linewidth=0.5)
     ax.axvline(x=0, color="black", linewidth=1.5, linestyle="--", label="No change")
-    ax.set_xlabel(f"Improvement ({unit}, negative = better)")
+    ax.set_xlabel(f"Improvement ({unit}, positive = better)")
     ax.set_ylabel("Count")
     ax.set_title(title)
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3, axis="y")
 
     mean_delta = np.mean(deltas)
-    n_improved = sum(1 for d in deltas if d < 0)
+    n_improved = sum(1 for d in deltas if d > 0)
     ax.text(0.02, 0.98,
             f"Mean: {mean_delta:+.2f} {unit}\n{n_improved}/{len(deltas)} improved",
             transform=ax.transAxes, fontsize=9, va="top",
