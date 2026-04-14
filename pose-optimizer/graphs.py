@@ -387,19 +387,26 @@ def generate_cross_pipeline_per_joint_position(
     mp_det = np.mean(mp_det_all, axis=0) * 100
     mp_opt = np.mean(mp_opt_all, axis=0) * 100
 
+    # SEM across videos: std / sqrt(N) per joint (to cm)
+    mb_det_err = np.std(mb_det_all, axis=0, ddof=1) / np.sqrt(len(mb_det_all)) * 100 if len(mb_det_all) > 1 else np.zeros_like(mb_det)
+    mb_opt_err = np.std(mb_opt_all, axis=0, ddof=1) / np.sqrt(len(mb_opt_all)) * 100 if len(mb_opt_all) > 1 else np.zeros_like(mb_opt)
+    mp_det_err = np.std(mp_det_all, axis=0, ddof=1) / np.sqrt(len(mp_det_all)) * 100 if len(mp_det_all) > 1 else np.zeros_like(mp_det)
+    mp_opt_err = np.std(mp_opt_all, axis=0, ddof=1) / np.sqrt(len(mp_opt_all)) * 100 if len(mp_opt_all) > 1 else np.zeros_like(mp_opt)
+
     x = np.arange(NUM_EVAL_JOINTS)
     width = 0.2
+    ekw = dict(ecolor="black", capsize=2, elinewidth=0.8)
 
     fig, ax = plt.subplots(figsize=(16, 6))
-    ax.bar(x - 1.5 * width, mb_det, width, color=COLOR_MB_RAW, label="MotionBERT Raw")
-    ax.bar(x - 0.5 * width, mb_opt, width, color=COLOR_MB_OPT, label="MotionBERT Optimized")
-    ax.bar(x + 0.5 * width, mp_det, width, color=COLOR_MP_RAW, label="MediaPipe Raw")
-    ax.bar(x + 1.5 * width, mp_opt, width, color=COLOR_MP_OPT, label="MediaPipe Optimized")
+    ax.bar(x - 1.5 * width, mb_det, width, yerr=mb_det_err, error_kw=ekw, color=COLOR_MB_RAW, label="MotionBERT Raw")
+    ax.bar(x - 0.5 * width, mb_opt, width, yerr=mb_opt_err, error_kw=ekw, color=COLOR_MB_OPT, label="MotionBERT Optimized")
+    ax.bar(x + 0.5 * width, mp_det, width, yerr=mp_det_err, error_kw=ekw, color=COLOR_MP_RAW, label="MediaPipe Raw")
+    ax.bar(x + 1.5 * width, mp_opt, width, yerr=mp_opt_err, error_kw=ekw, color=COLOR_MP_OPT, label="MediaPipe Optimized")
 
     ax.set_xticks(x)
     ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=45, ha="right", fontsize=8)
     ax.set_ylabel("VW-SI-MPJPE (cm)")
-    ax.set_title("Position Error Per-Joint: MotionBERT vs MediaPipe")
+    ax.set_title(f"Position Error Per-Joint: MotionBERT vs MediaPipe (±SEM, N={len(mb_det_all)})")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3, axis="y")
     _save(fig, os.path.join(output_dir, "cross_pipeline_per_joint_position.png"))
@@ -432,19 +439,25 @@ def generate_cross_pipeline_per_joint_velocity(
     mp_det = np.mean(mp_det_all, axis=0) * 100
     mp_opt = np.mean(mp_opt_all, axis=0) * 100
 
+    mb_det_err = np.std(mb_det_all, axis=0, ddof=1) / np.sqrt(len(mb_det_all)) * 100 if len(mb_det_all) > 1 else np.zeros_like(mb_det)
+    mb_opt_err = np.std(mb_opt_all, axis=0, ddof=1) / np.sqrt(len(mb_opt_all)) * 100 if len(mb_opt_all) > 1 else np.zeros_like(mb_opt)
+    mp_det_err = np.std(mp_det_all, axis=0, ddof=1) / np.sqrt(len(mp_det_all)) * 100 if len(mp_det_all) > 1 else np.zeros_like(mp_det)
+    mp_opt_err = np.std(mp_opt_all, axis=0, ddof=1) / np.sqrt(len(mp_opt_all)) * 100 if len(mp_opt_all) > 1 else np.zeros_like(mp_opt)
+
     x = np.arange(NUM_EVAL_JOINTS)
     width = 0.2
+    ekw = dict(ecolor="black", capsize=2, elinewidth=0.8)
 
     fig, ax = plt.subplots(figsize=(16, 6))
-    ax.bar(x - 1.5 * width, mb_det, width, color=COLOR_MB_RAW, label="MotionBERT Raw")
-    ax.bar(x - 0.5 * width, mb_opt, width, color=COLOR_MB_OPT, label="MotionBERT Optimized")
-    ax.bar(x + 0.5 * width, mp_det, width, color=COLOR_MP_RAW, label="MediaPipe Raw")
-    ax.bar(x + 1.5 * width, mp_opt, width, color=COLOR_MP_OPT, label="MediaPipe Optimized")
+    ax.bar(x - 1.5 * width, mb_det, width, yerr=mb_det_err, error_kw=ekw, color=COLOR_MB_RAW, label="MotionBERT Raw")
+    ax.bar(x - 0.5 * width, mb_opt, width, yerr=mb_opt_err, error_kw=ekw, color=COLOR_MB_OPT, label="MotionBERT Optimized")
+    ax.bar(x + 0.5 * width, mp_det, width, yerr=mp_det_err, error_kw=ekw, color=COLOR_MP_RAW, label="MediaPipe Raw")
+    ax.bar(x + 1.5 * width, mp_opt, width, yerr=mp_opt_err, error_kw=ekw, color=COLOR_MP_OPT, label="MediaPipe Optimized")
 
     ax.set_xticks(x)
     ax.set_xticklabels(EVAL_JOINT_NAMES, rotation=45, ha="right", fontsize=8)
     ax.set_ylabel("VW-SI-MPJVE (cm/frame)")
-    ax.set_title("Velocity Error Per-Joint: MotionBERT vs MediaPipe")
+    ax.set_title(f"Velocity Error Per-Joint: MotionBERT vs MediaPipe (±SEM, N={len(mb_det_all)})")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3, axis="y")
     _save(fig, os.path.join(output_dir, "cross_pipeline_per_joint_velocity.png"))
@@ -466,52 +479,63 @@ def generate_cross_pipeline_metrics_comparison(
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    def _avg(metrics_list: list[dict], key: str) -> float | None:
-        vals = [m[key] for m in metrics_list if key in m]
-        return float(np.mean(vals)) if vals else None
+    def _avg_sem(metrics_list: list[dict], key: str) -> tuple[float, float, int] | None:
+        """Return (mean, SEM, N) of values for key, or None if empty.
 
-    metric_groups = []
+        SEM = std / sqrt(N): standard error of the mean across videos.
+        """
+        vals = [m[key] for m in metrics_list if key in m]
+        if not vals:
+            return None
+        arr = np.asarray(vals, dtype=float)
+        mean = float(arr.mean())
+        sem = float(arr.std(ddof=1) / np.sqrt(len(arr))) if len(arr) > 1 else 0.0
+        return mean, sem, len(arr)
+
+    metric_groups = []  # list of (4 means * 100, 4 sems * 100)
     labels = []
 
-    # VW-SI-MPJPE
-    mb_det_pos = _avg(all_mb_metrics, "det_vw_si_mpjpe")
-    mb_opt_pos = _avg(all_mb_metrics, "opt_vw_si_mpjpe")
-    mp_det_pos = _avg(all_mp_metrics, "det_vw_si_mpjpe")
-    mp_opt_pos = _avg(all_mp_metrics, "opt_vw_si_mpjpe")
-    if mb_det_pos is not None and mb_opt_pos is not None and mp_det_pos is not None and mp_opt_pos is not None:
-        metric_groups.append((mb_det_pos * 100, mb_opt_pos * 100, mp_det_pos * 100, mp_opt_pos * 100))
-        labels.append("VW-SI-MPJPE (cm)")
+    def _add_group(mb_det_key, mb_opt_key, mp_det_key, mp_opt_key, label):
+        mb_d = _avg_sem(all_mb_metrics, mb_det_key)
+        mb_o = _avg_sem(all_mb_metrics, mb_opt_key)
+        mp_d = _avg_sem(all_mp_metrics, mp_det_key)
+        mp_o = _avg_sem(all_mp_metrics, mp_opt_key)
+        if mb_d is None or mb_o is None or mp_d is None or mp_o is None:
+            return
+        means = (mb_d[0] * 100, mb_o[0] * 100, mp_d[0] * 100, mp_o[0] * 100)
+        sems = (mb_d[1] * 100, mb_o[1] * 100, mp_d[1] * 100, mp_o[1] * 100)
+        metric_groups.append((means, sems))
+        labels.append(label)
 
-    # VW-SI-MPJVE
-    mb_det_vel = _avg(all_mb_metrics, "det_vw_si_mpjve")
-    mb_opt_vel = _avg(all_mb_metrics, "opt_vw_si_mpjve")
-    mp_det_vel = _avg(all_mp_metrics, "det_vw_si_mpjve")
-    mp_opt_vel = _avg(all_mp_metrics, "opt_vw_si_mpjve")
-    if mb_det_vel is not None and mb_opt_vel is not None and mp_det_vel is not None and mp_opt_vel is not None:
-        metric_groups.append((mb_det_vel * 100, mb_opt_vel * 100, mp_det_vel * 100, mp_opt_vel * 100))
-        labels.append("VW-SI-MPJVE (cm/f)")
+    _add_group("det_vw_si_mpjpe", "opt_vw_si_mpjpe", "det_vw_si_mpjpe", "opt_vw_si_mpjpe", "VW-SI-MPJPE (cm)")
+    _add_group("det_vw_si_mpjve", "opt_vw_si_mpjve", "det_vw_si_mpjve", "opt_vw_si_mpjve", "VW-SI-MPJVE (cm/f)")
 
     if not metric_groups:
         return
 
+    n_mb = len(all_mb_metrics)
+    n_mp = len(all_mp_metrics)
     x = np.arange(len(metric_groups))
     width = 0.18
+    ekw = dict(ecolor="black", capsize=3, elinewidth=1.0)
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    for i, (mb_d, mb_o, mp_d, mp_o) in enumerate(metric_groups):
-        ax.bar(x[i] - 1.5 * width, mb_d, width, color=COLOR_MB_RAW,
+    for i, (means, sems) in enumerate(metric_groups):
+        mb_d, mb_o, mp_d, mp_o = means
+        mb_d_e, mb_o_e, mp_d_e, mp_o_e = sems
+        ax.bar(x[i] - 1.5 * width, mb_d, width, yerr=mb_d_e, error_kw=ekw, color=COLOR_MB_RAW,
                label="MotionBERT Raw" if i == 0 else "")
-        ax.bar(x[i] - 0.5 * width, mb_o, width, color=COLOR_MB_OPT,
+        ax.bar(x[i] - 0.5 * width, mb_o, width, yerr=mb_o_e, error_kw=ekw, color=COLOR_MB_OPT,
                label="MotionBERT Optimized" if i == 0 else "")
-        ax.bar(x[i] + 0.5 * width, mp_d, width, color=COLOR_MP_RAW,
+        ax.bar(x[i] + 0.5 * width, mp_d, width, yerr=mp_d_e, error_kw=ekw, color=COLOR_MP_RAW,
                label="MediaPipe Raw" if i == 0 else "")
-        ax.bar(x[i] + 1.5 * width, mp_o, width, color=COLOR_MP_OPT,
+        ax.bar(x[i] + 1.5 * width, mp_o, width, yerr=mp_o_e, error_kw=ekw, color=COLOR_MP_OPT,
                label="MediaPipe Optimized" if i == 0 else "")
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=10)
     ax.set_ylabel("Error (see x-axis for units)")
-    ax.set_title("Metrics Comparison: MotionBERT vs MediaPipe (avg across examples)")
+    ax.set_title(f"Metrics Comparison: MotionBERT vs MediaPipe (±SEM, N_MB={n_mb}, N_MP={n_mp})")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3, axis="y")
     _save(fig, os.path.join(output_dir, "cross_pipeline_metrics_comparison.png"))
@@ -560,15 +584,22 @@ def generate_aggregate_summary(
     if bar_keys:
         width = 0.8 / len(bar_keys)
         colors = ["steelblue", "forestgreen", "orange", "red", "purple", "teal"]
+        ekw = dict(ecolor="black", capsize=2, elinewidth=0.8)
         for idx, (key, label) in enumerate(bar_keys):
             vals = [v * 100 if v is not None else 0 for v in available[key]]
+            std_key = f"{key}_frame_std"
+            errs = [
+                (m[std_key] * 100 if std_key in m and m[std_key] is not None else 0)
+                for m in all_metrics
+            ]
             offset = (idx - len(bar_keys) / 2 + 0.5) * width
-            ax.bar(x + offset, vals, width, label=label, color=colors[idx % len(colors)], alpha=0.7)
+            ax.bar(x + offset, vals, width, yerr=errs, error_kw=ekw,
+                   label=label, color=colors[idx % len(colors)], alpha=0.7)
 
         ax.set_xticks(x)
         ax.set_xticklabels(names, rotation=45, ha="right", fontsize=7)
         ax.set_ylabel("Error (cm)")
-        ax.set_title("Aggregate Results")
+        ax.set_title("Aggregate Results (error bars = per-frame std within video)")
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3, axis="y")
 

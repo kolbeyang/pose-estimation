@@ -351,6 +351,48 @@ def vw_si_mpjve(
     return vw_mpjve(s * predicted, target, weights)
 
 
+def vw_si_mpjpe_per_frame(
+    predicted: np.ndarray,
+    target: np.ndarray,
+    weights: np.ndarray,
+) -> np.ndarray:
+    """Per-frame VW-SI-MPJPE (single global scale).
+
+    Returns (F,) array: for each frame, visibility-weighted mean joint error
+    after applying the sequence-wide optimal scale. Frames with zero weight
+    return 0.
+    """
+    s = _optimal_scale_weighted(predicted, target, weights)
+    errors = np.linalg.norm(s * predicted - target, axis=-1)  # (F, J)
+    w_sum = weights.sum(axis=1)  # (F,)
+    safe = np.where(w_sum < 1e-12, 1.0, w_sum)
+    per_frame = (errors * weights).sum(axis=1) / safe
+    per_frame[w_sum < 1e-12] = 0.0
+    return per_frame
+
+
+def vw_si_mpjve_per_frame(
+    predicted: np.ndarray,
+    target: np.ndarray,
+    weights: np.ndarray,
+) -> np.ndarray:
+    """Per-frame VW-SI-MPJVE (single global scale).
+
+    Returns (F-1,) array: visibility-weighted mean velocity error per frame
+    pair after applying the sequence-wide optimal scale.
+    """
+    s = _optimal_scale_weighted(predicted, target, weights)
+    pred_vel = _velocities(s * predicted)
+    tgt_vel = _velocities(target)
+    errors = np.linalg.norm(pred_vel - tgt_vel, axis=-1)  # (F-1, J)
+    vel_weights = np.minimum(weights[:-1], weights[1:])
+    w_sum = vel_weights.sum(axis=1)
+    safe = np.where(w_sum < 1e-12, 1.0, w_sum)
+    per_frame = (errors * vel_weights).sum(axis=1) / safe
+    per_frame[w_sum < 1e-12] = 0.0
+    return per_frame
+
+
 # ---------------------------------------------------------------------------
 # Per-joint helpers
 # ---------------------------------------------------------------------------
