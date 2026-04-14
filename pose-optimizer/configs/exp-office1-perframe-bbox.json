@@ -1,0 +1,39 @@
+{
+    "motionbert": {
+        "is_generate_heatmap_videos": false,
+        "graphs": {
+            "all_examples_per_joint_mpjpe": false,
+            "per_example_per_joint_mpjpe": false
+        },
+        "optimization": {
+            "num_steps": 100,
+            "learning_rate": 0.001,
+            "bone_length_lr": 0.005,
+            "heatmap_blur_sigma_start": 16.0,
+            "heatmap_blur_sigma_end": 4.0,
+            "anchor_weight": 0.0
+        }
+    },
+    "mediapipe": {
+        "is_generate_heatmap_videos": false,
+        "graphs": {
+            "all_examples_per_joint_mpjpe": false,
+            "per_example_per_joint_mpjpe": false
+        },
+        "optimization": {
+            "num_steps": 100,
+            "heatmap_blur_sigma": 4.0,
+            "learning_rate": 0.0005,
+            "anchor_weight": 50.0
+        }
+    },
+    "examples": [
+        {"sequence": "170915_office1", "camera": "00_00", "start_frame": 180, "num_frames": 5198, "person_idx": 0}
+    ],
+    "data_root": "/data/datasets/cmu-panoptic",
+    "output_dir": "/home/kky2806/pose-estimation-output/exp-office1-perframe",
+    "target_fps": 10.0,
+    "per_frame_bbox": true,
+    "generate_graphs": false,
+    "generate_video": false
+}
