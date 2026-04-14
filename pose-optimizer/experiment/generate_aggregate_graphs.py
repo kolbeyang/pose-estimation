@@ -51,9 +51,24 @@ def _compute_per_frame_stds(traj_path: str) -> dict[str, float]:
     """
     with open(traj_path) as f:
         traj = json.load(f)
-    gt = np.asarray(traj["ground_truth"], dtype=np.float64)
-    det = np.asarray(traj["raw_prediction"], dtype=np.float64)
-    opt = np.asarray(traj["optimized_prediction"], dtype=np.float64)
+
+    # Ground truth may contain None for frames without GT annotation.
+    # Filter to only frames where all three arrays exist.
+    gt_raw = traj["ground_truth"]
+    det_raw = traj["raw_prediction"]
+    opt_raw = traj["optimized_prediction"]
+    valid = [i for i in range(len(gt_raw)) if gt_raw[i] is not None]
+    if len(valid) < 2:
+        return {k: 0.0 for k in [
+            "det_vw_si_mpjpe_frame_std", "opt_vw_si_mpjpe_frame_std",
+            "det_vw_si_mpjve_frame_std", "opt_vw_si_mpjve_frame_std",
+            "det_mpjpe_frame_std", "opt_mpjpe_frame_std",
+            "det_si_mpjpe_frame_std", "opt_si_mpjpe_frame_std",
+        ]}
+
+    gt = np.asarray([gt_raw[i] for i in valid], dtype=np.float64)
+    det = np.asarray([det_raw[i] for i in valid], dtype=np.float64)
+    opt = np.asarray([opt_raw[i] for i in valid], dtype=np.float64)
     cam = Camera.from_dict(traj["camera"])
 
     vis = compute_visibility_weights(gt, cam)[:, EVAL_JOINTS]
