@@ -234,6 +234,8 @@ def _save_trajectories(
     optimized_3d: list[np.ndarray],
     camera: Camera,
     output_dir: str,
+    frame_indices: list[int] | None = None,
+    sequence_name: str | None = None,
 ) -> None:
     """Save trajectories.json to output directory."""
     traj_data = {
@@ -243,6 +245,10 @@ def _save_trajectories(
         "optimized_prediction": [o.tolist() for o in optimized_3d],
         "camera": camera.to_dict(),
     }
+    if frame_indices is not None:
+        traj_data["frame_indices"] = frame_indices
+    if sequence_name is not None:
+        traj_data["sequence_name"] = sequence_name
     traj_path = os.path.join(output_dir, "trajectories.json")
     with open(traj_path, "w") as f:
         json.dump(traj_data, f, indent=2)
@@ -521,7 +527,7 @@ def main(config_path: str) -> None:
                 mb_output_dir = os.path.join(example_dir, "motionbert")
                 os.makedirs(mb_output_dir, exist_ok=True)
                 _save_results(mb_metrics, "motionbert", name, len(frames_rgb), config, mb_output_dir, timings)
-                _save_trajectories(gt_cam, det_cam_positions_mb, opt_mb, camera, mb_output_dir)
+                _save_trajectories(gt_cam, det_cam_positions_mb, opt_mb, camera, mb_output_dir, frame_indices[:len(frames_rgb)], seq_name)
 
                 _t0 = time.perf_counter()
                 if config.generate_graphs:
@@ -610,7 +616,7 @@ def main(config_path: str) -> None:
                 mp_output_dir = os.path.join(example_dir, "mediapipe")
                 os.makedirs(mp_output_dir, exist_ok=True)
                 _save_results(mp_metrics, "mediapipe", name, len(frames_rgb), config, mp_output_dir, timings)
-                _save_trajectories(gt_cam, det_cam_positions_mp, opt_mp, camera, mp_output_dir)
+                _save_trajectories(gt_cam, det_cam_positions_mp, opt_mp, camera, mp_output_dir, frame_indices[:len(frames_rgb)], seq_name)
 
                 _t0 = time.perf_counter()
                 if config.generate_graphs:
