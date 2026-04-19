@@ -25,8 +25,6 @@ class OptimizationConfig(BaseModel):
     position_penalty_weight: float = 500.0
     rotation_penalty_scalar: float = 10.0
     heatmap_blur_sigma: float = 4.0
-    heatmap_blur_sigma_start: float | None = None
-    heatmap_blur_sigma_end: float | None = None
     confidence_epsilon: float = 1e-4
     anchor_weight: float = 0.0
 

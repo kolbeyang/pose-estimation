@@ -136,13 +136,7 @@ def optimize(
     heatmaps_t = torch.tensor(heatmaps_np, dtype=torch.float32)  # (F, C, H, W) [HEATMAP:MPII_16] or [HEATMAP:SKELETON_16]
     affine_t = torch.tensor(affine_np, dtype=torch.float32)  # (2, 3) or (F, 2, 3)
 
-    # Blur annealing: if start/end sigmas are set, blur per-step; otherwise pre-blur once
-    use_blur_annealing = (
-        config.heatmap_blur_sigma_start is not None
-        and config.heatmap_blur_sigma_end is not None
-    )
-    heatmaps_raw_t = heatmaps_t  # keep unblurred copy for annealing
-    if not use_blur_annealing and config.heatmap_blur_sigma > 0:
+    if config.heatmap_blur_sigma > 0:
         heatmaps_t = apply_blur(heatmaps_t, config.heatmap_blur_sigma)
 
     # Rotation penalty weights
@@ -175,18 +169,7 @@ def optimize(
     for step in range(num_steps):
         optimizer.zero_grad()
 
-        # Compute per-step blurred heatmaps if annealing
-        if use_blur_annealing:
-            blur_start: float = config.heatmap_blur_sigma_start  # type: ignore[assignment]
-            blur_end: float = config.heatmap_blur_sigma_end  # type: ignore[assignment]
-            t = step / max(num_steps - 1, 1)
-            sigma = blur_start + (blur_end - blur_start) * t
-            if sigma > 0:
-                heatmaps_step = apply_blur(heatmaps_raw_t, sigma)
-            else:
-                heatmaps_step = heatmaps_raw_t
-        else:
-            heatmaps_step = heatmaps_t
+        heatmaps_step = heatmaps_t
 
         # Batched FK
         all_positions = forward_kinematics_batch(

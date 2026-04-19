@@ -1,31 +1,30 @@
 {
-    "motionbert": {
-        "is_generate_heatmap_videos": false,
-        "graphs": {
-            "all_examples_per_joint_mpjpe": false,
-            "per_example_per_joint_mpjpe": false
-        },
-        "optimization": {
-            "num_steps": 10,
-            "learning_rate": 0.001,
-            "bone_length_lr": 0.005,
-            "heatmap_blur_sigma_start": 16.0,
-            "heatmap_blur_sigma_end": 4.0,
-            "anchor_weight": 0.0
-        }
+  "motionbert": {
+    "is_generate_heatmap_videos": false,
+    "graphs": {
+      "all_examples_per_joint_mpjpe": false,
+      "per_example_per_joint_mpjpe": false
     },
-    "examples": [
-        {
-            "sequence": "171204_pose3",
-            "camera": "00_00",
-            "start_frame": 0,
-            "num_frames": 1500,
-            "person_idx": 0
-        }
-    ],
-    "data_root": "/data/datasets/cmu-panoptic",
-    "output_dir": "/home/kky2806/pose-estimation-output-test",
-    "target_fps": 10.0,
-    "generate_graphs": false,
-    "generate_video": false
+    "optimization": {
+      "num_steps": 10,
+      "learning_rate": 0.001,
+      "bone_length_lr": 0.005,
+      "anchor_weight": 0.0,
+      "heatmap_blur_sigma": 4.0
+    }
+  },
+  "examples": [
+    {
+      "sequence": "171204_pose3",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 1500,
+      "person_idx": 0
+    }
+  ],
+  "data_root": "/data/datasets/cmu-panoptic",
+  "output_dir": "/home/kky2806/pose-estimation-output-test",
+  "target_fps": 10.0,
+  "generate_graphs": false,
+  "generate_video": false
 }
