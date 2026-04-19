@@ -24,7 +24,7 @@ _PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PARENT_DIR not in sys.path:
     sys.path.insert(0, _PARENT_DIR)
 
-from skeleton import mpii_to_skeleton, strip_head_joint, NUM_JOINTS
+from skeleton import mpii_to_skeleton, mpii_to_motionbert_17, strip_nose_joint, NUM_JOINTS
 
 SCRIPT_DIR: str = os.path.dirname(os.path.abspath(__file__))
 EXTERNAL_DIR: str = os.path.join(SCRIPT_DIR, "external")
@@ -604,10 +604,10 @@ def run_motionbert(
 
     n_frames = len(keypoints_2d_list)
 
-    # Convert MPII 16-joint to 17-joint skeleton
-    keypoints_17 = np.zeros((n_frames, 17, 3), dtype=np.float32)  # [2D:MPII_17]
+    # Convert MPII 16-joint to 17-joint MotionBERT input format
+    keypoints_17 = np.zeros((n_frames, 17, 3), dtype=np.float32)
     for i, kp_mpii in enumerate(keypoints_2d_list):
-        keypoints_17[i] = mpii_to_skeleton(kp_mpii)
+        keypoints_17[i] = mpii_to_motionbert_17(kp_mpii)
 
     # Zero out low-confidence joints
     n_zeroed = 0
@@ -695,8 +695,8 @@ def run_motionbert(
         positions_3d[:, 0, 2].min(), positions_3d[:, 0, 2].max(),
     )
 
-    # Strip Head joint -> 16 joints
-    positions_3d = strip_head_joint(positions_3d)  # [3D:SKELETON_16]
+    # Strip Nose joint (index 9) -> 16 joints, keeping HeadTop (index 10 becomes 9)
+    positions_3d = strip_nose_joint(positions_3d)  # [3D:SKELETON_16]
     return positions_3d
 
 
@@ -870,8 +870,7 @@ def detect_2d_poses(
     kp_2d_list: list[np.ndarray] = []  # list of [2D:SKELETON_16] (16, 2)
     visibility_list: list[np.ndarray] = []  # list of [VIS:SKELETON_16] (16,)
     for kp_mpii in all_keypoints_2d:
-        kp_17 = mpii_to_skeleton(kp_mpii)  # [2D:MPII_17]
-        kp_16 = strip_head_joint(kp_17)  # [2D:SKELETON_16]
+        kp_16 = mpii_to_skeleton(kp_mpii)  # [2D:SKELETON_16]
         kp_2d_list.append(kp_16[:, :2])
         visibility_list.append(kp_16[:, 2])
 

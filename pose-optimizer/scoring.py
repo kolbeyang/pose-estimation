@@ -22,7 +22,7 @@ SKELETON_TO_MPII_HEATMAP: list[int] = [
     5,  # 6: LAnkle
     7,  # 7: Spine -- MPII Thorax (mapped to Spine in our skeleton)
     7,  # 8: Neck (Thorax / shoulder level) -- MPII Thorax
-    9,  # 9: Nose -- MPII Head Top
+    9,  # 9: HeadTop -- MPII Head Top (direct match)
     13,  # 10: LShoulder
     14,  # 11: LElbow
     15,  # 12: LWrist

@@ -10,20 +10,21 @@ Three categories of joints in the optimizer's canonical 16-joint skeleton:
       midpoint(shoulders) for MediaPipe, COCO[0] for GT).
       Direct in MotionBERT + CMU GT, synthesized as midpoints for MediaPipe.
 
-  Category 3 (Synthesized Eval joint): index 9 (Nose).
-      MotionBERT: synthesized as 30% from UpperNeck(SH[8]) toward HeadTop(SH[9]).
-      MediaPipe: MP[0] (Nose) direct.
-      CMU GT: COCO[1] (Nose) direct.
+  Category 3 (Optimization-only joint): index 9 (HeadTop).
+      Used for heatmap scoring (SH[9] HeadTop) and FK, but excluded
+      from evaluation because no reliable ground truth exists.
+      MotionBERT: direct output (MB joint 10 in 17-joint format).
+      MediaPipe: synthesized from nose + eyes heuristic.
 
   FK-internal only: index 7 (Spine). Excluded from evaluation.
       Synthesized as midpoint(Pelvis, Neck) for all sources.
 
 Skeleton 16-joint order [SKELETON_16]:
     Pelvis(0), RHip(1), RKnee(2), RAnkle(3), LHip(4), LKnee(5), LAnkle(6),
-    Spine(7), Neck(8), Nose(9), LShoulder(10), LElbow(11), LWrist(12),
+    Spine(7), Neck(8), HeadTop(9), LShoulder(10), LElbow(11), LWrist(12),
     RShoulder(13), RElbow(14), RWrist(15).
 
-15 eval joints (all except Spine(7)).
+14 eval joints (all except Spine(7) and HeadTop(9)).
 """
 
 import numpy as np
@@ -40,7 +41,7 @@ JOINT_NAMES: list[str] = [
     "LAnkle",       # 6
     "Spine",        # 7
     "Neck",         # 8  (Thorax / shoulder level)
-    "Nose",         # 9  (Nose: synthesized for MB, direct for MP/GT)
+    "HeadTop",      # 9  (optimization-only, excluded from eval)
     "LShoulder",    # 10
     "LElbow",       # 11
     "LWrist",       # 12
@@ -49,9 +50,9 @@ JOINT_NAMES: list[str] = [
     "RWrist",       # 15
 ]
 
-# Eval joints: 15 joints (12 direct + Pelvis + Neck + Nose).  [SKELETON_16_EVAL] indices.
-# Excluded: Spine(7) = FK-internal only.
-EVAL_JOINTS: list[int] = [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
+# Eval joints: 14 joints (12 direct + Pelvis + Neck).  [SKELETON_16_EVAL] indices.
+# Excluded: Spine(7) = FK-internal only, HeadTop(9) = no reliable GT.
+EVAL_JOINTS: list[int] = [0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13, 14, 15]
 EVAL_JOINT_NAMES: list[str] = [JOINT_NAMES[j] for j in EVAL_JOINTS]
 NUM_EVAL_JOINTS: int = len(EVAL_JOINTS)
 
@@ -74,7 +75,7 @@ DEFAULT_BONE_LENGTHS: np.ndarray = np.array([
     0.40,   # 6: LKnee -> LAnkle
     0.22,   # 7: Pelvis -> Spine
     0.22,   # 8: Spine -> Neck
-    0.18,   # 9: Neck -> Nose (larger: Neck is now at thorax/shoulder level)
+    0.25,   # 9: Neck -> HeadTop
     0.18,   # 10: Neck -> LShoulder
     0.28,   # 11: LShoulder -> LElbow
     0.25,   # 12: LElbow -> LWrist
@@ -95,7 +96,7 @@ REST_DIRECTIONS: np.ndarray = np.array([
     [0, 1, 0],       # 6: LKnee -> LAnkle
     [0, -1, 0],      # 7: Pelvis -> Spine
     [0, -1, 0],      # 8: Spine -> Neck
-    [0, -0.866, -0.5],  # 9: Neck -> Nose (mostly up, somewhat forward)
+    [0, -1, 0],          # 9: Neck -> HeadTop (straight up)
     [1, 0, 0],       # 10: Neck -> LShoulder
     [0, 1, 0],       # 11: LShoulder -> LElbow
     [0, 1, 0],       # 12: LElbow -> LWrist
@@ -133,26 +134,21 @@ for _group_name, _joint_indices in BODY_GROUPS.items():
 # ---------------------------------------------------------------------------
 
 def mpii_to_skeleton(keypoints_mpii: np.ndarray) -> np.ndarray:
-    """Convert MPII 16-joint keypoints to 17-joint intermediate format.
-
-    Maps [2D:MPII_16] (or [HEATMAP-derived] with confidence) to a 17-joint
-    intermediate layout. The extra joint at index 10 is a duplicate Head
-    that must be removed by calling strip_head_joint() afterward.
+    """Convert MPII 16-joint keypoints to optimizer's 16-joint skeleton.
 
     Pelvis = MPII[6] direct.
     Neck(8) = MPII[7] Thorax (shoulder level).
     Spine(7) = midpoint(Pelvis, Neck) (FK-internal).
-    Nose synthesized from raw MPII[8] UpperNeck and MPII[9] HeadTop.
+    HeadTop(9) = MPII[9] direct.
 
     Args:
         keypoints_mpii: (16, D) array of MPII keypoints. [2D:MPII_16]
 
     Returns:
-        (17, D) array in 17-joint intermediate format. [2D:MPII_17]
-            Must call strip_head_joint() to produce [*:SKELETON_16].
+        (16, D) array in skeleton format. [*:SKELETON_16]
     """
     ndim: int = keypoints_mpii.shape[-1]
-    skel: np.ndarray = np.zeros((17, ndim), dtype=keypoints_mpii.dtype)  # [2D:MPII_17]
+    skel: np.ndarray = np.zeros((NUM_JOINTS, ndim), dtype=keypoints_mpii.dtype)
 
     skel[0] = keypoints_mpii[6]                        # Pelvis (direct)
     skel[8] = keypoints_mpii[7]                        # Neck = MPII Thorax (shoulder level)
@@ -164,9 +160,45 @@ def mpii_to_skeleton(keypoints_mpii: np.ndarray) -> np.ndarray:
     skel[4] = keypoints_mpii[3]   # LHip
     skel[5] = keypoints_mpii[4]   # LKnee
     skel[6] = keypoints_mpii[5]   # LAnkle
-    # Nose synthesized as 30% from UpperNeck toward HeadTop (using raw MPII indices)
+    skel[9] = keypoints_mpii[9]   # HeadTop (MPII HeadTop direct)
+    skel[10] = keypoints_mpii[13]  # LShoulder
+    skel[11] = keypoints_mpii[14]  # LElbow
+    skel[12] = keypoints_mpii[15]  # LWrist
+    skel[13] = keypoints_mpii[12]  # RShoulder
+    skel[14] = keypoints_mpii[11]  # RElbow
+    skel[15] = keypoints_mpii[10]  # RWrist
+
+    return skel
+
+
+def mpii_to_motionbert_17(keypoints_mpii: np.ndarray) -> np.ndarray:
+    """Convert MPII 16-joint keypoints to MotionBERT's 17-joint input format.
+
+    This is the format MotionBERT's neural network expects as input.
+    Joint 9 = synthesized "Nose" (30% from UpperNeck toward HeadTop).
+    Joint 10 = HeadTop (MPII[9] direct).
+
+    Args:
+        keypoints_mpii: (16, D) array of MPII keypoints. [2D:MPII_16]
+
+    Returns:
+        (17, D) array for MotionBERT input.
+    """
+    ndim: int = keypoints_mpii.shape[-1]
+    skel: np.ndarray = np.zeros((17, ndim), dtype=keypoints_mpii.dtype)
+
+    skel[0] = keypoints_mpii[6]                        # Pelvis
+    skel[8] = keypoints_mpii[7]                        # Neck = MPII Thorax
+    skel[7] = (skel[0] + skel[8]) / 2.0               # Spine
+
+    skel[1] = keypoints_mpii[2]   # RHip
+    skel[2] = keypoints_mpii[1]   # RKnee
+    skel[3] = keypoints_mpii[0]   # RAnkle
+    skel[4] = keypoints_mpii[3]   # LHip
+    skel[5] = keypoints_mpii[4]   # LKnee
+    skel[6] = keypoints_mpii[5]   # LAnkle
     skel[9] = keypoints_mpii[8] + 0.3 * (keypoints_mpii[9] - keypoints_mpii[8])  # Nose
-    skel[10] = keypoints_mpii[9]  # Head duplicate (removed by strip_head_joint)
+    skel[10] = keypoints_mpii[9]  # HeadTop
     skel[11] = keypoints_mpii[13]  # LShoulder
     skel[12] = keypoints_mpii[14]  # LElbow
     skel[13] = keypoints_mpii[15]  # LWrist
@@ -185,6 +217,12 @@ def coco19_to_skeleton(joints19: np.ndarray) -> np.ndarray:
     """Convert CMU Panoptic COCO19 ground truth to optimizer's 16-joint skeleton.
 
     Spine (index 7) is synthesized as the midpoint of Pelvis and Neck (FK-internal).
+    HeadTop (index 9) is synthesized from Nose + eyes heuristic (excluded from eval).
+
+    COCO19 indices: Neck(0), Nose(1), BodyCenter(2), LShoulder(3), LElbow(4),
+    LWrist(5), LHip(6), LKnee(7), LAnkle(8), RShoulder(9), RElbow(10),
+    RWrist(11), RHip(12), RKnee(13), RAnkle(14), LEye(15), LEar(16),
+    REye(17), REar(18).
 
     Args:
         joints19: (19, 3) xyz positions in world coordinates. [3D:COCO19]
@@ -203,7 +241,10 @@ def coco19_to_skeleton(joints19: np.ndarray) -> np.ndarray:
     skel[6] = joints19[8]                            # LAnkle
     skel[7] = (joints19[2] + joints19[0]) / 2.0     # Spine (midpoint, FK-internal)
     skel[8] = joints19[0]                            # Neck <- COCO Neck
-    skel[9] = joints19[1]                            # Nose <- COCO[1]
+    # HeadTop: synthesize from Nose + eyes (extend ray from nose through eye center)
+    nose = joints19[1]
+    eye_center = (joints19[15] + joints19[17]) / 2.0  # midpoint(LEye, REye)
+    skel[9] = nose + 4.0 * (eye_center - nose)      # HeadTop (excluded from eval)
     skel[10] = joints19[3]                           # LShoulder
     skel[11] = joints19[4]                           # LElbow
     skel[12] = joints19[5]                           # LWrist
@@ -214,19 +255,20 @@ def coco19_to_skeleton(joints19: np.ndarray) -> np.ndarray:
     return skel
 
 
-def strip_head_joint(arr: np.ndarray) -> np.ndarray:
-    """Remove duplicate Head joint (index 10) from 17-joint intermediate array.
+def strip_nose_joint(arr: np.ndarray) -> np.ndarray:
+    """Remove Nose joint (index 9) from MotionBERT 17-joint output.
 
-    Converts the [*:MPII_17] or [3D:MOTIONBERT_17] 17-joint intermediate
-    format to [*:SKELETON_16] by removing the extra head joint at index 10.
+    MotionBERT outputs 17 joints where index 9 is "Neck/Nose" (synthesized)
+    and index 10 is HeadTop. We keep HeadTop (becomes our index 9) and
+    discard the synthesized Nose.
 
     Args:
-        arr: (..., 17, D) array in 17-joint intermediate format.
+        arr: (..., 17, D) array in MotionBERT 17-joint format.
 
     Returns:
         (..., 16, D) array in optimizer's skeleton format. [*:SKELETON_16]
     """
-    return np.delete(arr, 10, axis=-2)
+    return np.delete(arr, 9, axis=-2)
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +280,10 @@ def mediapipe_to_skeleton(landmarks: np.ndarray) -> np.ndarray:
 
     Cat2 joints (Pelvis, Neck) are synthesized as midpoints of the
     corresponding left/right landmarks. Spine is midpoint of Pelvis and Neck.
+    HeadTop is synthesized from Nose + eyes heuristic.
+
+    MediaPipe landmarks: Nose(0), LEyeInner(1), LEye(2), LEyeOuter(3),
+    REyeInner(4), REye(5), REyeOuter(6), ...
 
     Args:
         landmarks: (33, D) where D >= 2. [2D:MEDIAPIPE_33] or [3D:MEDIAPIPE_33]
@@ -255,7 +301,6 @@ def mediapipe_to_skeleton(landmarks: np.ndarray) -> np.ndarray:
     skel[4] = landmarks[23]          # LHip
     skel[5] = landmarks[25]          # LKnee
     skel[6] = landmarks[27]          # LAnkle
-    skel[9] = landmarks[0]           # Nose (MP[0] direct)
     skel[10] = landmarks[11]         # LShoulder
     skel[11] = landmarks[13]         # LElbow
     skel[12] = landmarks[15]         # LWrist
@@ -263,10 +308,14 @@ def mediapipe_to_skeleton(landmarks: np.ndarray) -> np.ndarray:
     skel[14] = landmarks[14]         # RElbow
     skel[15] = landmarks[16]         # RWrist
 
-    # Synthesized joints (Cat2: midpoints for MediaPipe)
+    # Synthesized joints
     skel[0] = (landmarks[23] + landmarks[24]) / 2.0           # Pelvis
     skel[8] = (landmarks[11] + landmarks[12]) / 2.0           # Neck
     skel[7] = (skel[0] + skel[8]) / 2.0                       # Spine (FK-internal)
+    # HeadTop: extend ray from nose through eye center by 4x
+    nose = landmarks[0]
+    eye_center = (landmarks[2] + landmarks[5]) / 2.0  # midpoint(LEye, REye)
+    skel[9] = nose + 4.0 * (eye_center - nose)               # HeadTop
 
     return skel
 
@@ -294,7 +343,8 @@ def mediapipe_visibility_to_skeleton(visibility: np.ndarray) -> np.ndarray:
     skel_vis[7] = min(visibility[23], visibility[24],
                       visibility[11], visibility[12])    # Spine
     skel_vis[8] = min(visibility[11], visibility[12])    # Neck
-    skel_vis[9] = visibility[0]                          # Nose
+    skel_vis[9] = min(visibility[0], visibility[2],
+                      visibility[5])                     # HeadTop (nose + eyes)
     skel_vis[10] = visibility[11]                        # LShoulder
     skel_vis[11] = visibility[13]                        # LElbow
     skel_vis[12] = visibility[15]                        # LWrist
