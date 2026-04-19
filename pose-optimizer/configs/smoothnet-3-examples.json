@@ -1,0 +1,32 @@
+{
+  "motionbert": {
+    "is_generate_heatmap_videos": false,
+    "optimization": {
+      "num_steps": 100,
+      "learning_rate": 0.001,
+      "bone_length_lr": 0.005,
+      "heatmap_blur_sigma": 4.0
+    }
+  },
+  "mediapipe": {
+    "is_generate_heatmap_videos": false,
+    "optimization": {
+      "num_steps": 50,
+      "heatmap_blur_sigma": 4.0,
+      "learning_rate": 0.0005,
+      "anchor_weight": 200.0
+    }
+  },
+  "generate_video": false,
+  "generate_graphs": false,
+  "examples": [
+    {"sequence": "171204_pose1_sample", "camera": "00_00", "start_frame": 0,    "num_frames": 100, "person_idx": 0},
+    {"sequence": "171204_pose2",        "camera": "00_00", "start_frame": 200,  "num_frames": 150, "person_idx": 0},
+    {"sequence": "171204_pose2",        "camera": "00_00", "start_frame": 5000, "num_frames": 150, "person_idx": 0}
+  ],
+  "optimization": {
+    "num_steps": 50,
+    "heatmap_blur_sigma": 4.0,
+    "learning_rate": 0.0005
+  }
+}
