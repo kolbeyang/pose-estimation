@@ -16,6 +16,16 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+plt.rcParams.update({
+    "font.size": 20,
+    "axes.titlesize": 24,
+    "axes.labelsize": 22,
+    "xtick.labelsize": 20,
+    "ytick.labelsize": 20,
+    "legend.fontsize": 18,
+    "figure.titlesize": 28,
+})
+
 
 # Consistent color scheme
 COLOR_GT = "#5871CA"          # Blue
@@ -80,15 +90,18 @@ def main() -> None:
     print(f"Plotting bone: {bone_label}")
     print(f"  Elbow: index {elbow_idx}, Wrist: index {wrist_idx}")
 
-    n_frames = len(mb_data["raw_prediction"])
+    # Restrict to first 50 seconds
+    max_frames = int(round(50.0 * args.fps)) + 1  # inclusive of frame 500 at 10 fps
+    n_frames_full = len(mb_data["raw_prediction"])
+    n_frames = min(n_frames_full, max_frames)
     time_axis = np.arange(n_frames) / args.fps
 
-    # Compute bone lengths for each trajectory
-    gt_bl = compute_bone_lengths(mb_data["ground_truth"], elbow_idx, wrist_idx)
-    mb_raw_bl = compute_bone_lengths(mb_data["raw_prediction"], elbow_idx, wrist_idx)
-    mb_opt_bl = compute_bone_lengths(mb_data["optimized_prediction"], elbow_idx, wrist_idx)
-    mp_raw_bl = compute_bone_lengths(mp_data["raw_prediction"], elbow_idx, wrist_idx)
-    mp_opt_bl = compute_bone_lengths(mp_data["optimized_prediction"], elbow_idx, wrist_idx)
+    # Compute bone lengths for each trajectory (sliced to first 50s)
+    gt_bl = compute_bone_lengths(mb_data["ground_truth"][:n_frames], elbow_idx, wrist_idx)
+    mb_raw_bl = compute_bone_lengths(mb_data["raw_prediction"][:n_frames], elbow_idx, wrist_idx)
+    mb_opt_bl = compute_bone_lengths(mb_data["optimized_prediction"][:n_frames], elbow_idx, wrist_idx)
+    mp_raw_bl = compute_bone_lengths(mp_data["raw_prediction"][:n_frames], elbow_idx, wrist_idx)
+    mp_opt_bl = compute_bone_lengths(mp_data["optimized_prediction"][:n_frames], elbow_idx, wrist_idx)
 
     # Build figure
     fig, ax = plt.subplots(figsize=(14, 6))
@@ -99,14 +112,15 @@ def main() -> None:
     ax.plot(time_axis, mp_raw_bl, color=COLOR_MP_RAW, linewidth=1.5, label="MediaPipe Raw", alpha=0.85)
     ax.plot(time_axis, mp_opt_bl, color=COLOR_MP_OPT, linewidth=2, label="MediaPipe Optimized", alpha=0.9)
 
-    ax.set_xlabel("Time (seconds)", fontsize=11)
-    ax.set_ylabel("Bone Length (cm)", fontsize=11)
+    ax.set_xlabel("Time (seconds)", fontsize=22)
+    ax.set_ylabel("Bone Length (cm)", fontsize=22)
     title = f"Bone Length Variation: {bone_label}"
     if args.sample_name:
         title = f"{title} — {args.sample_name}"
-    ax.set_title(title, fontsize=13)
-    ax.legend(fontsize=9)
+    ax.set_title(title, fontsize=26)
+    ax.legend(fontsize=18)
     ax.grid(True, alpha=0.3)
+    ax.set_xlim(0, 50)
 
     output_dir = args.output or "output"
     os.makedirs(output_dir, exist_ok=True)
