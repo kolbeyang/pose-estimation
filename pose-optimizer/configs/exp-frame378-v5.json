@@ -1,0 +1,19 @@
+{
+  "mediapipe": {},
+  "examples": [
+    {
+      "sequence": "171204_pose1",
+      "camera": "00_00",
+      "start_frame": 360,
+      "num_frames": 30,
+      "person_idx": 0
+    }
+  ],
+  "optimization": {
+    "num_steps": 200,
+    "learning_rate": 0.004,
+    "position_penalty_weight": 50.0,
+    "heatmap_blur_sigma": 4.0
+  },
+  "output_dir": "output/frame378_v5"
+}

@@ -37,7 +37,7 @@ from cmu_data import (
 )
 from config import OptimizationConfig
 from optimize import optimize
-from skeleton import BONES, JOINT_NAMES, NUM_JOINTS, mpii_to_skeleton
+from skeleton import BONES, JOINT_NAMES, NUM_JOINTS, PARENTS, mpii_to_skeleton
 
 # ---------------------------------------------------------------------------
 # Config
@@ -164,20 +164,49 @@ def _c01(rgb):
 
 
 def draw_panel_16j(ax, frame_rgb, skel_2d, color_rgb, panel_name,
-                   extra_unmapped=None):
-    """Draw a 16-joint skeleton panel with synth/direct labels."""
+                   extra_unmapped=None, hide_synth=False):
+    """Draw a 16-joint skeleton panel with synth/direct labels.
+
+    Args:
+        hide_synth: If True, omit synthesized joints and any bones connecting
+            to them. Use this for the GT panel so we don't display fabricated
+            ground-truth points (e.g. Spine, which COCO19 does not annotate).
+    """
     ax.imshow(frame_rgb)
     c = _c01(color_rgb)
     uc = _c01(UNMAPPED_COLOR)
     synth = SYNTH_NOTES.get(panel_name, {})
+    skip = set(synth.keys()) if hide_synth else set()
 
-    for parent, child in BONES:
+    # When hiding synthesized joints, bridge the kinematic chain by
+    # connecting their parent directly to their children. Both endpoints
+    # of a bridged bone are real (non-skipped) joints.
+    bones_to_draw = list(BONES)
+    if skip:
+        for j in skip:
+            up = int(PARENTS[j])
+            # walk up if parent is also skipped
+            while up in skip and up != 0:
+                up = int(PARENTS[up])
+            if up in skip:
+                continue
+            for i in range(NUM_JOINTS):
+                if i in skip or i == j:
+                    continue
+                if int(PARENTS[i]) == j:
+                    bones_to_draw.append((up, i))
+
+    for parent, child in bones_to_draw:
+        if parent in skip or child in skip:
+            continue
         ax.plot(
             [skel_2d[parent, 0], skel_2d[child, 0]],
             [skel_2d[parent, 1], skel_2d[child, 1]],
             color=c, linewidth=1.5, alpha=0.9,
         )
     for j in range(NUM_JOINTS):
+        if j in skip:
+            continue
         x, y = skel_2d[j]
         note = synth.get(j, "direct")
         label = f"{j}:{JOINT_NAMES[j]} [{note}]"
@@ -592,7 +621,7 @@ def main():
                         f"COCO[{ci}]:{COCO19_NAMES[ci]} [unmapped]",
                     ))
         draw_panel_16j(axes[ax_idx], frame_rgb, gt_2d, COLORS["GT"], "GT",
-                       extra_unmapped=gt_unmapped)
+                       extra_unmapped=gt_unmapped, hide_synth=True)
         axes[ax_idx].set_xlim(x_min, x_max)
         axes[ax_idx].set_ylim(y_max, y_min)
         ax_idx += 1
