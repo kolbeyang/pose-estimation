@@ -145,13 +145,39 @@ def motion_penalty_position_batch(
     return (root_diff**2).sum()
 
 
+def _axis_angle_to_quaternion(aa: torch.Tensor) -> torch.Tensor:
+    """Convert axis-angle to unit quaternion (w, x, y, z).
+
+    Maps each rotation r in R^3 to its corresponding point on the unit
+    3-sphere S^3 in R^4.
+
+    Args:
+        aa: (..., 3) axis-angle vectors.
+
+    Returns:
+        (..., 4) unit quaternions.
+    """
+    angle = torch.norm(aa, dim=-1, keepdim=True)  # (..., 1)
+    safe_angle = torch.clamp(angle, min=1e-8)
+    half = 0.5 * angle
+    sin_half = torch.sin(half)
+    qw = torch.cos(half)                     # (..., 1)
+    qxyz = aa * (sin_half / safe_angle)      # (..., 3)
+    return torch.cat([qw, qxyz], dim=-1)     # (..., 4)
+
+
 def motion_penalty_rotation_batch(
     all_local_rots: torch.Tensor,
     per_joint_weights: torch.Tensor,
 ) -> torch.Tensor:
     """Penalize large rotation jumps between consecutive frames.
 
-    Uses chord distance.
+    Maps each axis-angle rotation to its unit quaternion on S^3 and uses
+    the squared Euclidean (chord) distance between consecutive quaternions.
+    Squared L2 distance corresponds to a Gaussian prior on rotation
+    increments. The double-cover of SO(3) by quaternions (q and -q
+    represent the same rotation) is handled by taking min over the two
+    sign choices.
 
     Args:
         all_local_rots: (F, 16, 3) axis-angle rotations. [FK_PARAMS]
@@ -163,9 +189,10 @@ def motion_penalty_rotation_batch(
     """
     if all_local_rots.shape[0] <= 1:
         return torch.tensor(0.0)
-    cos_diff_sq = (torch.cos(all_local_rots[1:]) - torch.cos(all_local_rots[:-1])) ** 2
-    sin_diff_sq = (torch.sin(all_local_rots[1:]) - torch.sin(all_local_rots[:-1])) ** 2
-    per_joint = (cos_diff_sq + sin_diff_sq).sum(dim=-1)  # (F-1, J)
+    q = _axis_angle_to_quaternion(all_local_rots)  # (F, 16, 4)
+    diff_pos = ((q[1:] - q[:-1]) ** 2).sum(dim=-1)  # (F-1, J)
+    diff_neg = ((q[1:] + q[:-1]) ** 2).sum(dim=-1)  # (F-1, J)
+    per_joint = torch.minimum(diff_pos, diff_neg)
     return (per_joint * per_joint_weights.unsqueeze(0)).sum()
 
 
