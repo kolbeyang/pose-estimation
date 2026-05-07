@@ -1,0 +1,79 @@
+[
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.256809596674772,
+    "improvement_pct": 2.60495890482552,
+    "elapsed_s": 3.3878047466278076,
+    "name": "anneal=8->1+anchor=500+steps=50"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.281106919348609,
+    "improvement_pct": 2.449851854080336,
+    "elapsed_s": 3.5711829662323,
+    "name": "anneal=8->2+anchor=500+steps=50"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.283686203739963,
+    "improvement_pct": 2.4333864516840964,
+    "elapsed_s": 0.20274686813354492,
+    "name": "sigma=4+anchor=200"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.290668398423557,
+    "improvement_pct": 2.3888141488160453,
+    "elapsed_s": 0.20469403266906738,
+    "name": "sigma=4+anchor=300"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.294750466674897,
+    "improvement_pct": 2.3627554107441524,
+    "elapsed_s": 5.7419047355651855,
+    "name": "steps=50+anneal=16->4+anchor=300"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.307290065349349,
+    "improvement_pct": 2.282706254957252,
+    "elapsed_s": 0.4266490936279297,
+    "name": "sigma=4+anchor=500+steps=75"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.309664523792673,
+    "improvement_pct": 2.267548401921142,
+    "elapsed_s": 0.3855891227722168,
+    "name": "sigma=4+anchor=500+steps=50+lr=0.001"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.313401995016966,
+    "improvement_pct": 2.2436894711810385,
+    "elapsed_s": 0.2688322067260742,
+    "name": "sigma=4+anchor=500"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.31437013713132,
+    "improvement_pct": 2.2375091331217587,
+    "elapsed_s": 0.3127889633178711,
+    "name": "sigma=4+anchor=500+steps=50"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.324691322903847,
+    "improvement_pct": 2.1716216809584092,
+    "elapsed_s": 1.7517409324645996,
+    "name": "anneal=8->2+anchor=500"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.327462783472656,
+    "improvement_pct": 2.1539294816632415,
+    "elapsed_s": 5.777716875076294,
+    "name": "steps=50+anneal=16->4+anchor=500+lr=0.001"
+  }
+]

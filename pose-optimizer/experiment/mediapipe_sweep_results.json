@@ -1,0 +1,170 @@
+[
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.344368048922972,
+    "improvement_pct": 2.046011177195631,
+    "elapsed_s": 5.731258869171143,
+    "name": "steps=50+anneal=16->4+anchor=500"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.352191743288984,
+    "improvement_pct": 1.996066984770244,
+    "elapsed_s": 7.905341863632202,
+    "name": "steps=75+anneal=16->2"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.353059233541213,
+    "improvement_pct": 1.990529178964241,
+    "elapsed_s": 5.310533046722412,
+    "name": "steps=50+anneal=16->2+lr=0.001"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.364887884590129,
+    "improvement_pct": 1.9150185063226486,
+    "elapsed_s": 0.24327898025512695,
+    "name": "sigma=4"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.366209292216931,
+    "improvement_pct": 1.906583023838555,
+    "elapsed_s": 0.363908052444458,
+    "name": "anchor=500"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.367432283103266,
+    "improvement_pct": 1.898775805240272,
+    "elapsed_s": 1.8083560466766357,
+    "name": "anneal=8->2"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.374595113998863,
+    "improvement_pct": 1.8530503732609351,
+    "elapsed_s": 5.355540037155151,
+    "name": "steps=50+anneal=16->2"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.382964136656424,
+    "improvement_pct": 1.7996249634139594,
+    "elapsed_s": 2.262829065322876,
+    "name": "anneal=12->2"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.388112737289713,
+    "improvement_pct": 1.7667577923921016,
+    "elapsed_s": 0.3624880313873291,
+    "name": "bone_lr=0.0005"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.390717040766114,
+    "improvement_pct": 1.7501326754237625,
+    "elapsed_s": 2.6860568523406982,
+    "name": "anneal=16->2"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.390804319023555,
+    "improvement_pct": 1.7495755163784,
+    "elapsed_s": 0.2775399684906006,
+    "name": "sigma=8"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.392055068399864,
+    "improvement_pct": 1.7415910956426288,
+    "elapsed_s": 2.9034512042999268,
+    "name": "anneal=16->4"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.397522479534508,
+    "improvement_pct": 1.7066887309792511,
+    "elapsed_s": 0.31627798080444336,
+    "name": "sigma=12"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.399808833837495,
+    "improvement_pct": 1.6920933091850343,
+    "elapsed_s": 0.36274003982543945,
+    "name": "baseline"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.408053519967469,
+    "improvement_pct": 1.6394616276163916,
+    "elapsed_s": 0.5315170288085938,
+    "name": "steps=75"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.408991472906314,
+    "improvement_pct": 1.633474008485061,
+    "elapsed_s": 0.35744309425354004,
+    "name": "bone_lr=0.005"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.412523218636236,
+    "improvement_pct": 1.6109283695476442,
+    "elapsed_s": 0.43938732147216797,
+    "name": "steps=50"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.422949885955154,
+    "improvement_pct": 1.5443675538294623,
+    "elapsed_s": 0.35977983474731445,
+    "name": "lr=0.001"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.424422423490244,
+    "improvement_pct": 1.534967301906837,
+    "elapsed_s": 0.6452958583831787,
+    "name": "steps=100"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.430955260153395,
+    "improvement_pct": 1.4932635701243844,
+    "elapsed_s": 0.3590662479400635,
+    "name": "anchor=2000"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.43509774020754,
+    "improvement_pct": 1.466819180650101,
+    "elapsed_s": 0.6401791572570801,
+    "name": "steps=75+anchor=2000"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.443780872482064,
+    "improvement_pct": 1.4113885862421878,
+    "elapsed_s": 0.3253300189971924,
+    "name": "lr=0.0003"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.457541462655374,
+    "improvement_pct": 1.3235449753659305,
+    "elapsed_s": 0.36209797859191895,
+    "name": "anchor=5000"
+  },
+  {
+    "raw_vw_si_mpjpe_cm": 15.664873103514388,
+    "opt_vw_si_mpjpe_cm": 15.659373232972316,
+    "improvement_pct": 0.03510957609250396,
+    "elapsed_s": 0.30057811737060547,
+    "name": "lr=0.0001"
+  }
+]

@@ -1,0 +1,155 @@
+{
+  "motionbert": {
+    "is_generate_heatmap_videos": false,
+    "graphs": {
+      "all_examples_per_joint_mpjpe": true,
+      "per_example_per_joint_mpjpe": true
+    },
+    "optimization": {
+      "num_steps": 100,
+      "learning_rate": 0.001,
+      "bone_length_lr": 0.005,
+      "anchor_weight": 0.0,
+      "heatmap_blur_sigma": 4.0
+    }
+  },
+  "mediapipe": {
+    "is_generate_heatmap_videos": false,
+    "graphs": {
+      "all_examples_per_joint_mpjpe": true,
+      "per_example_per_joint_mpjpe": true
+    },
+    "optimization": {
+      "num_steps": 50,
+      "heatmap_blur_sigma": 4.0,
+      "learning_rate": 0.0005,
+      "anchor_weight": 200.0
+    }
+  },
+  "examples": [
+    {
+      "sequence": "161029_flute1",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 16460,
+      "person_idx": 0
+    },
+    {
+      "sequence": "161029_piano2",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 1727,
+      "person_idx": 0
+    },
+    {
+      "sequence": "161029_piano3",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 4425,
+      "person_idx": 0
+    },
+    {
+      "sequence": "161029_piano4",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 5323,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170307_dance5",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 11617,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170407_office2",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 5216,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170915_office1",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 5378,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171026_cello3",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 1728,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171026_pose1",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 22466,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171026_pose2",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 14974,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171026_pose3",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 7181,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose1",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 27561,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose2",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 37751,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose3",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 8920,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose4",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 31397,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose5",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 26902,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose6",
+      "camera": "00_00",
+      "start_frame": 0,
+      "num_frames": 22886,
+      "person_idx": 0
+    }
+  ],
+  "data_root": "/data/datasets/cmu-panoptic",
+  "output_dir": "/home/kky2806/pose-estimation-output",
+  "target_fps": 10.0,
+  "generate_graphs": true,
+  "generate_video": false
+}

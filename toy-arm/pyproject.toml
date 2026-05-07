@@ -1,0 +1,12 @@
+[project]
+name = "toy-arm"
+version = "0.1.0"
+description = "Toy arm pose estimation and optimization"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+    "vpython",
+    "opencv-python",
+    "matplotlib>=3.10.8",
+    "torch",
+]

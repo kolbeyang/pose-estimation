@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+.claude/
+*.swp
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# Environment files
+.env
+.python-version
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+PLAN.md
+images/
+videos/
+
+training_runs/
+
+# BVH motion capture data
+test_cmu_visualization/*.bvh
+
+# Large data
+data/
+pose-optimizer/data/panoptic-toolbox/

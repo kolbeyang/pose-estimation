@@ -1,0 +1,22 @@
+{
+    "motionbert": {},
+    "mediapipe": {},
+    "graphs": {},
+    "examples": [
+        {
+            "sequence": "171204_pose1",
+            "camera": "00_00",
+            "start_frame": 1000,
+            "num_frames": 150,
+            "person_idx": 0
+        }
+    ],
+    "data_root": "/data/datasets/cmu-panoptic",
+    "optimization": {
+        "num_steps": 50,
+        "heatmap_blur_sigma": 16.0,
+        "learning_rate": 0.001
+    },
+    "generate_graphs": true,
+    "generate_video": true
+}

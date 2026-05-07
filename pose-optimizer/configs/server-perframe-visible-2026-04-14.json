@@ -1,0 +1,464 @@
+{
+  "motionbert": {
+    "is_generate_heatmap_videos": false,
+    "graphs": {
+      "all_examples_per_joint_mpjpe": false,
+      "per_example_per_joint_mpjpe": false
+    },
+    "optimization": {
+      "num_steps": 100,
+      "learning_rate": 0.001,
+      "bone_length_lr": 0.005,
+      "anchor_weight": 0.0,
+      "heatmap_blur_sigma": 4.0
+    }
+  },
+  "mediapipe": {
+    "is_generate_heatmap_videos": false,
+    "graphs": {
+      "all_examples_per_joint_mpjpe": false,
+      "per_example_per_joint_mpjpe": false
+    },
+    "optimization": {
+      "num_steps": 100,
+      "heatmap_blur_sigma": 4.0,
+      "learning_rate": 0.0005,
+      "anchor_weight": 50.0
+    }
+  },
+  "examples": [
+    {
+      "sequence": "161029_flute1",
+      "camera": "00_00",
+      "start_frame": 180,
+      "num_frames": 13401,
+      "person_idx": 0
+    },
+    {
+      "sequence": "161029_flute1",
+      "camera": "00_00",
+      "start_frame": 13582,
+      "num_frames": 2878,
+      "person_idx": 0
+    },
+    {
+      "sequence": "161029_piano2",
+      "camera": "00_00",
+      "start_frame": 131,
+      "num_frames": 1596,
+      "person_idx": 0
+    },
+    {
+      "sequence": "161029_piano3",
+      "camera": "00_00",
+      "start_frame": 54,
+      "num_frames": 4371,
+      "person_idx": 0
+    },
+    {
+      "sequence": "161029_piano4",
+      "camera": "00_00",
+      "start_frame": 166,
+      "num_frames": 5157,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170307_dance5",
+      "camera": "00_00",
+      "start_frame": 161,
+      "num_frames": 1641,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170307_dance5",
+      "camera": "00_00",
+      "start_frame": 1856,
+      "num_frames": 246,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170307_dance5",
+      "camera": "00_00",
+      "start_frame": 2115,
+      "num_frames": 257,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170307_dance5",
+      "camera": "00_00",
+      "start_frame": 2397,
+      "num_frames": 1005,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170307_dance5",
+      "camera": "00_00",
+      "start_frame": 3453,
+      "num_frames": 2087,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170307_dance5",
+      "camera": "00_00",
+      "start_frame": 5699,
+      "num_frames": 2854,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170307_dance5",
+      "camera": "00_00",
+      "start_frame": 8568,
+      "num_frames": 387,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170307_dance5",
+      "camera": "00_00",
+      "start_frame": 9030,
+      "num_frames": 467,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170307_dance5",
+      "camera": "00_00",
+      "start_frame": 9518,
+      "num_frames": 2065,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170407_office2",
+      "camera": "00_00",
+      "start_frame": 426,
+      "num_frames": 1437,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170407_office2",
+      "camera": "00_00",
+      "start_frame": 1875,
+      "num_frames": 2138,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170407_office2",
+      "camera": "00_00",
+      "start_frame": 4293,
+      "num_frames": 923,
+      "person_idx": 0
+    },
+    {
+      "sequence": "170915_office1",
+      "camera": "00_00",
+      "start_frame": 180,
+      "num_frames": 5198,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171026_cello3",
+      "camera": "00_00",
+      "start_frame": 248,
+      "num_frames": 1480,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171026_pose1",
+      "camera": "00_00",
+      "start_frame": 232,
+      "num_frames": 7218,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171026_pose1",
+      "camera": "00_00",
+      "start_frame": 7789,
+      "num_frames": 7195,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171026_pose1",
+      "camera": "00_00",
+      "start_frame": 15289,
+      "num_frames": 7171,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171026_pose2",
+      "camera": "00_00",
+      "start_frame": 504,
+      "num_frames": 7019,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171026_pose2",
+      "camera": "00_00",
+      "start_frame": 7779,
+      "num_frames": 7195,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171026_pose3",
+      "camera": "00_00",
+      "start_frame": 129,
+      "num_frames": 7052,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose1",
+      "camera": "00_00",
+      "start_frame": 118,
+      "num_frames": 4272,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose1",
+      "camera": "00_00",
+      "start_frame": 4670,
+      "num_frames": 4285,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose1",
+      "camera": "00_00",
+      "start_frame": 9209,
+      "num_frames": 134,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose1",
+      "camera": "00_00",
+      "start_frame": 9520,
+      "num_frames": 4187,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose1",
+      "camera": "00_00",
+      "start_frame": 13879,
+      "num_frames": 4326,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose1",
+      "camera": "00_00",
+      "start_frame": 18493,
+      "num_frames": 4468,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose1",
+      "camera": "00_00",
+      "start_frame": 23171,
+      "num_frames": 4390,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose2",
+      "camera": "00_00",
+      "start_frame": 270,
+      "num_frames": 1110,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose2",
+      "camera": "00_00",
+      "start_frame": 1381,
+      "num_frames": 3013,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose2",
+      "camera": "00_00",
+      "start_frame": 4662,
+      "num_frames": 4197,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose2",
+      "camera": "00_00",
+      "start_frame": 9427,
+      "num_frames": 4263,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose2",
+      "camera": "00_00",
+      "start_frame": 14017,
+      "num_frames": 4588,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose2",
+      "camera": "00_00",
+      "start_frame": 18929,
+      "num_frames": 4772,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose2",
+      "camera": "00_00",
+      "start_frame": 24015,
+      "num_frames": 4299,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose2",
+      "camera": "00_00",
+      "start_frame": 28655,
+      "num_frames": 4220,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose2",
+      "camera": "00_00",
+      "start_frame": 33230,
+      "num_frames": 4521,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose3",
+      "camera": "00_00",
+      "start_frame": 138,
+      "num_frames": 4344,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose3",
+      "camera": "00_00",
+      "start_frame": 4892,
+      "num_frames": 4028,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose4",
+      "camera": "00_00",
+      "start_frame": 128,
+      "num_frames": 4220,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose4",
+      "camera": "00_00",
+      "start_frame": 4645,
+      "num_frames": 4211,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose4",
+      "camera": "00_00",
+      "start_frame": 9191,
+      "num_frames": 4215,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose4",
+      "camera": "00_00",
+      "start_frame": 13760,
+      "num_frames": 4204,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose4",
+      "camera": "00_00",
+      "start_frame": 18409,
+      "num_frames": 4244,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose4",
+      "camera": "00_00",
+      "start_frame": 22902,
+      "num_frames": 4208,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose4",
+      "camera": "00_00",
+      "start_frame": 27687,
+      "num_frames": 3710,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose5",
+      "camera": "00_00",
+      "start_frame": 153,
+      "num_frames": 4247,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose5",
+      "camera": "00_00",
+      "start_frame": 4796,
+      "num_frames": 4208,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose5",
+      "camera": "00_00",
+      "start_frame": 9348,
+      "num_frames": 4189,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose5",
+      "camera": "00_00",
+      "start_frame": 14020,
+      "num_frames": 4151,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose5",
+      "camera": "00_00",
+      "start_frame": 18520,
+      "num_frames": 4201,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose5",
+      "camera": "00_00",
+      "start_frame": 23265,
+      "num_frames": 3637,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose6",
+      "camera": "00_00",
+      "start_frame": 136,
+      "num_frames": 4416,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose6",
+      "camera": "00_00",
+      "start_frame": 4979,
+      "num_frames": 4215,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose6",
+      "camera": "00_00",
+      "start_frame": 9625,
+      "num_frames": 4237,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose6",
+      "camera": "00_00",
+      "start_frame": 14149,
+      "num_frames": 4265,
+      "person_idx": 0
+    },
+    {
+      "sequence": "171204_pose6",
+      "camera": "00_00",
+      "start_frame": 18815,
+      "num_frames": 4071,
+      "person_idx": 0
+    }
+  ],
+  "data_root": "/data/datasets/cmu-panoptic",
+  "output_dir": "/home/kky2806/pose-estimation-output",
+  "target_fps": 10.0,
+  "generate_graphs": false,
+  "generate_video": false,
+  "per_frame_bbox": true
+}

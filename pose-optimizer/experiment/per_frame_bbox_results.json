@@ -1,0 +1,46 @@
+[
+  {
+    "example": "pose2 (moving person)",
+    "seq": "171026_pose2",
+    "mb_union": {
+      "det_vw_si_mpjpe_cm": 91.15568287594333,
+      "opt_vw_si_mpjpe_cm": 81.5509718947153
+    },
+    "mb_perframe": {
+      "det_vw_si_mpjpe_cm": 43.81781327736079,
+      "opt_vw_si_mpjpe_cm": 41.50151137562279
+    },
+    "mp_union": {
+      "det_vw_si_mpjpe_cm": 57.693809758518356,
+      "opt_vw_si_mpjpe_cm": 67.28240558241865,
+      "n_detected": 58
+    },
+    "mp_perframe": {
+      "det_vw_si_mpjpe_cm": 57.693809758518356,
+      "opt_vw_si_mpjpe_cm": 66.10874553462014,
+      "n_detected": 58
+    }
+  },
+  {
+    "example": "pose1 (control - stationary)",
+    "seq": "171204_pose1",
+    "mb_union": {
+      "det_vw_si_mpjpe_cm": 37.807662366200056,
+      "opt_vw_si_mpjpe_cm": 25.24709867899486
+    },
+    "mb_perframe": {
+      "det_vw_si_mpjpe_cm": 14.428289849997375,
+      "opt_vw_si_mpjpe_cm": 14.969147023011612
+    },
+    "mp_union": {
+      "det_vw_si_mpjpe_cm": 13.087182067247877,
+      "opt_vw_si_mpjpe_cm": 12.728867504809852,
+      "n_detected": 120
+    },
+    "mp_perframe": {
+      "det_vw_si_mpjpe_cm": 13.087182067247877,
+      "opt_vw_si_mpjpe_cm": 12.737305492050638,
+      "n_detected": 120
+    }
+  }
+]
